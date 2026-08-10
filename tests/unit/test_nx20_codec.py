@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from stepnx.codecs.nx20 import parse_bytes, serialize
 from stepnx.core.errors import ModelInvariantError, ParseError, UnsupportedFormatError
-from stepnx.core.model import EnvelopeKind, LightmapRow, MetadataEntry, NoteRow
+from stepnx.core.model import EnvelopeKind, LightmapRow, MetadataEntry, NoteRow, PackedNoteRow
 from stepnx.core.scalars import RawU32
 from tests.fixture_factory import make_implicit_lightmap, make_normal_nx20, make_nx10, u32
 
@@ -38,6 +38,35 @@ class NX20CodecTests(unittest.TestCase):
         self.assertIsInstance(rows[0], NoteRow)
         self.assertEqual(len(rows[0].cells), 5)
         self.assertEqual(rows[1].raw, bytes.fromhex("80123456"))
+
+    def test_compact_rows_materialize_cells_without_changing_identity(self) -> None:
+        source = make_normal_nx20(sized_trailer=False)
+        rich = parse_bytes(source, row_storage="rich")
+        compact = parse_bytes(source, row_storage="compact")
+        rich_row = rich.splits[0].blocks[0].rows[0]
+        compact_row = compact.splits[0].blocks[0].rows[0]
+
+        self.assertIsInstance(rich_row, NoteRow)
+        self.assertIsInstance(compact_row, PackedNoteRow)
+        self.assertEqual(compact_row.stable_id, rich_row.stable_id)
+        self.assertEqual(compact_row.cells, rich_row.cells)
+        self.assertEqual(compact.splits[0].blocks[0].stable_id, rich.splits[0].blocks[0].stable_id)
+        self.assertEqual(serialize(compact), source)
+
+    def test_compact_row_rejects_width_mismatch(self) -> None:
+        document = parse_bytes(make_normal_nx20(sized_trailer=False), row_storage="compact")
+        split = document.splits[0]
+        block = split.blocks[0]
+        row = block.rows[0]
+        bad_row = replace(row, raw_cells=row.raw_cells[:-4], span=None)
+        bad_block = replace(block, rows=(bad_row, *block.rows[1:]))
+        bad_split = replace(split, blocks=(bad_block,))
+        with self.assertRaises(ModelInvariantError):
+            serialize(replace(document, splits=(bad_split,)))
+
+    def test_unknown_row_storage_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_bytes(make_normal_nx20(), row_storage="wishful-thinking")
 
     def test_sized_trailer_is_classified_without_parsing_payload(self) -> None:
         source = make_normal_nx20()

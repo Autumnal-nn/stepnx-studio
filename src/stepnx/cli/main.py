@@ -71,7 +71,7 @@ def _candidate_files(paths: Sequence[str]) -> Iterable[Path]:
 
 
 def _inspect(args: argparse.Namespace) -> int:
-    document = load(args.path, profile=args.profile)
+    document = load(args.path, profile=args.profile, row_storage=args.row_storage)
     summary = _summary(document)
     if args.json:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -81,7 +81,7 @@ def _inspect(args: argparse.Namespace) -> int:
 
 
 def _roundtrip(args: argparse.Namespace) -> int:
-    document = load(args.path, profile=args.profile)
+    document = load(args.path, profile=args.profile, row_storage=args.row_storage)
     rebuilt = serialize(document)
     exact = rebuilt == document.source_bytes
     if args.output:
@@ -107,7 +107,7 @@ def _verify(args: argparse.Namespace) -> int:
     for path in _candidate_files(args.paths):
         totals["files"] += 1
         try:
-            document = load(path, profile=args.profile)
+            document = load(path, profile=args.profile, row_storage=args.row_storage)
             rebuilt = serialize(document)
             exact = rebuilt == document.source_bytes
             totals["exact" if exact else "errors"] += 1
@@ -174,6 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser = subparsers.add_parser("inspect", help="inspect an NX20/NFO document")
     inspect_parser.add_argument("path", type=Path)
     inspect_parser.add_argument("--profile", default="nxa-native")
+    inspect_parser.add_argument("--row-storage", choices=("rich", "compact"), default="rich")
     inspect_parser.add_argument("--json", action="store_true")
     inspect_parser.set_defaults(handler=_inspect)
 
@@ -181,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     roundtrip_parser.add_argument("path", type=Path)
     roundtrip_parser.add_argument("--output", "-o", type=Path)
     roundtrip_parser.add_argument("--profile", default="nxa-native")
+    roundtrip_parser.add_argument("--row-storage", choices=("rich", "compact"), default="rich")
     roundtrip_parser.add_argument("--force", action="store_true")
     roundtrip_parser.add_argument("--backup", action="store_true")
     roundtrip_parser.add_argument("--json", action="store_true")
@@ -189,6 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser = subparsers.add_parser("verify", help="verify byte-exact round-trip for files or folders")
     verify_parser.add_argument("paths", nargs="+")
     verify_parser.add_argument("--profile", default="nxa-native")
+    verify_parser.add_argument("--row-storage", choices=("rich", "compact"), default="rich")
     verify_parser.add_argument("--strict-formats", action="store_true")
     verify_parser.add_argument("--max-errors", type=int, default=20)
     verify_parser.add_argument("--json", action="store_true")
@@ -214,4 +217,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

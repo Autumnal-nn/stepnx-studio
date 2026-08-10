@@ -4,13 +4,16 @@ import os
 import shutil
 import struct
 import tempfile
+from array import array
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from stepnx.codecs.binary import BinaryReader, ParseLimits
 from stepnx.core.errors import ModelInvariantError, OutputExistsError, ParseError, UnsupportedFormatError
 from stepnx.core.model import (
     Block,
+    CompactRows,
     EmptyRow,
     Envelope,
     EnvelopeKind,
@@ -19,6 +22,7 @@ from stepnx.core.model import (
     NoteCell,
     NoteRow,
     NX20Document,
+    PackedNoteRow,
     Split,
 )
 from stepnx.core.scalars import RawF32, RawU8, RawU16, RawU32, SourceSpan
@@ -36,6 +40,13 @@ class _IdAllocator:
         value = self.next_value
         self.next_value += 1
         return value
+
+    def take_many(self, count: int) -> int:
+        if count < 0:
+            raise ValueError("cannot allocate a negative stable-ID range")
+        first = self.next_value
+        self.next_value += count
+        return first
 
 
 def _metadata(reader: BinaryReader, ids: _IdAllocator, label: str) -> MetadataEntry:
@@ -55,18 +66,65 @@ def _classify_envelope(data: bytes, body_end: int) -> Envelope:
     return Envelope(EnvelopeKind.OPAQUE_TAIL, raw, span)
 
 
+def _compact_rows(
+    reader: BinaryReader,
+    ids: _IdAllocator,
+    *,
+    row_count: int,
+    column_count: int,
+    effective_lightmap: bool,
+    label: str,
+) -> CompactRows:
+    offsets = array("Q")
+    row_ids = array("Q")
+    first_cell_ids = array("Q")
+    kinds = array("B")
+
+    for row_index in range(row_count):
+        offsets.append(reader.position)
+        row_prefix = f"{label} row {row_index}"
+        first_raw, _ = reader.read_exact(4, f"{row_prefix} first cell or marker")
+        if first_raw[0] & 0x80:
+            first_cell_ids.append(0)
+            row_ids.append(ids.take())
+            kinds.append(CompactRows.EMPTY)
+        elif effective_lightmap:
+            first_cell_ids.append(0)
+            row_ids.append(ids.take())
+            kinds.append(CompactRows.LIGHTMAP)
+        else:
+            reader.read_exact((column_count - 1) * 4, f"{row_prefix} remaining cells")
+            first_cell_ids.append(ids.take_many(column_count))
+            row_ids.append(ids.take())
+            kinds.append(CompactRows.NOTE)
+    offsets.append(reader.position)
+    return CompactRows(
+        source=reader.data,
+        offsets=offsets,
+        row_ids=row_ids,
+        first_cell_ids=first_cell_ids,
+        kinds=kinds,
+        columns=column_count,
+        effective_lightmap=effective_lightmap,
+    )
+
+
 def parse_bytes(
     data: bytes,
     *,
     source: str | None = None,
     profile: str = "nxa-native",
     limits: ParseLimits | None = None,
+    row_storage: Literal["rich", "compact"] = "rich",
 ) -> NX20Document:
     """Parse NX20 without normalizing any serializable field.
 
     The parser deliberately rejects NX10.  NX10 is an importer concern, not a
     second dialect to smuggle into the canonical NX20 codec.
     """
+
+    if row_storage not in {"rich", "compact"}:
+        raise ValueError(f"unsupported row storage mode: {row_storage!r}")
 
     active_limits = limits or ParseLimits()
     reader = BinaryReader(data, source)
@@ -126,21 +184,34 @@ def parse_bytes(
                 for index in range(int(division_count.value))
             )
             row_count = reader.count(f"{block_prefix} row count", active_limits, 4)
-            rows = []
-            for row_index in range(int(row_count.value)):
-                row_start = reader.position
-                row_prefix = f"{block_prefix} row {row_index}"
-                first_raw, first_span = reader.read_exact(4, f"{row_prefix} first cell or marker")
-                if first_raw[0] & 0x80:
-                    rows.append(EmptyRow(ids.take(), first_raw, first_span))
-                elif effective_lightmap:
-                    rows.append(LightmapRow(ids.take(), first_raw, first_span))
-                else:
-                    cells = [NoteCell(ids.take(), first_raw, first_span)]
-                    for column_index in range(1, column_count):
-                        raw, span = reader.read_exact(4, f"{row_prefix} column {column_index}")
-                        cells.append(NoteCell(ids.take(), raw, span))
-                    rows.append(NoteRow(ids.take(), tuple(cells), SourceSpan(row_start, reader.position)))
+            if row_storage == "compact":
+                rows = _compact_rows(
+                    reader,
+                    ids,
+                    row_count=int(row_count.value),
+                    column_count=column_count,
+                    effective_lightmap=effective_lightmap,
+                    label=block_prefix,
+                )
+            else:
+                rich_rows = []
+                for row_index in range(int(row_count.value)):
+                    row_start = reader.position
+                    row_prefix = f"{block_prefix} row {row_index}"
+                    first_raw, first_span = reader.read_exact(4, f"{row_prefix} first cell or marker")
+                    if first_raw[0] & 0x80:
+                        rich_rows.append(EmptyRow(ids.take(), first_raw, first_span))
+                    elif effective_lightmap:
+                        rich_rows.append(LightmapRow(ids.take(), first_raw, first_span))
+                    else:
+                        cells = [NoteCell(ids.take(), first_raw, first_span)]
+                        for column_index in range(1, column_count):
+                            raw, span = reader.read_exact(4, f"{row_prefix} column {column_index}")
+                            cells.append(NoteCell(ids.take(), raw, span))
+                        rich_rows.append(
+                            NoteRow(ids.take(), tuple(cells), SourceSpan(row_start, reader.position))
+                        )
+                rows = tuple(rich_rows)
 
             blocks.append(
                 Block(
@@ -157,7 +228,7 @@ def parse_bytes(
                     division_count=division_count,
                     divisions=divisions,
                     row_count=row_count,
-                    rows=tuple(rows),
+                    rows=rows,
                     span=SourceSpan(block_start, reader.position),
                 )
             )
@@ -266,6 +337,20 @@ def serialize(document: NX20Document) -> bytes:
             _write_metadata(output, block.divisions)
             _write_count(output, block.row_count, len(block.rows))
 
+            if isinstance(block.rows, CompactRows):
+                if block.rows.columns != columns:
+                    raise ModelInvariantError(
+                        f"split {split_index}, block {block_index}: compact rows use "
+                        f"{block.rows.columns} columns, document uses {columns}"
+                    )
+                if block.rows.effective_lightmap != effective_lightmap:
+                    raise ModelInvariantError(
+                        f"split {split_index}, block {block_index}: compact row kind no longer "
+                        "matches the document Lightmap state"
+                    )
+                output.extend(block.rows.raw_bytes)
+                continue
+
             for row_index, row in enumerate(block.rows):
                 location = f"split {split_index}, block {block_index}, row {row_index}"
                 if isinstance(row, EmptyRow):
@@ -278,6 +363,12 @@ def serialize(document: NX20Document) -> bytes:
                     if len(row.raw_channels) != 4:
                         raise ModelInvariantError(f"{location}: Lightmap row is not four bytes")
                     output.extend(row.raw_channels)
+                elif isinstance(row, PackedNoteRow):
+                    if row.cell_count != columns:
+                        raise ModelInvariantError(
+                            f"{location}: row has {row.cell_count} cells, expected {columns}"
+                        )
+                    output.extend(row.raw_cells)
                 else:
                     if not isinstance(row, NoteRow):
                         raise ModelInvariantError(f"{location}: normal chart requires NoteRow")
@@ -294,9 +385,19 @@ def serialize(document: NX20Document) -> bytes:
     return bytes(output)
 
 
-def load(path: str | os.PathLike[str], *, profile: str = "nxa-native") -> NX20Document:
+def load(
+    path: str | os.PathLike[str],
+    *,
+    profile: str = "nxa-native",
+    row_storage: Literal["rich", "compact"] = "rich",
+) -> NX20Document:
     source = Path(path)
-    return parse_bytes(source.read_bytes(), source=str(source), profile=profile)
+    return parse_bytes(
+        source.read_bytes(),
+        source=str(source),
+        profile=profile,
+        row_storage=row_storage,
+    )
 
 
 def save_atomic(

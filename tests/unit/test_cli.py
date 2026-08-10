@@ -21,6 +21,16 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertIn('"byte_exact_roundtrip": true', output.getvalue())
 
+    def test_inspect_accepts_compact_row_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "chart.NX"
+            path.write_bytes(make_normal_nx20())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(["inspect", str(path), "--row-storage", "compact", "--json"])
+            self.assertEqual(result, 0)
+            self.assertIn('"byte_exact_roundtrip": true', output.getvalue())
+
     def test_verify_skips_recognized_legacy_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -46,4 +56,3 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
