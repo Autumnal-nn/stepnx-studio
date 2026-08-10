@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+*.bak
+*.tmp
+
+# Official charts, executables and proprietary assets never enter this repo.
+corpus/private/
+vendor/private/
+tests/corpus/local-manifest.json

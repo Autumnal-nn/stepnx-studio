@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "generated_at": "2026-08-10T00:00:00+00:00",
+  "corpora": [
+    {
+      "label": "nxa",
+      "profile": "nxa-native",
+      "root": "<private-local-path>",
+      "files": [
+        {
+          "path": "STEP/EXAMPLE/NO.NX",
+          "size": 0,
+          "sha256": "<sha256>",
+          "magic": "NX20"
+        }
+      ]
+    }
+  ]
+}
+
