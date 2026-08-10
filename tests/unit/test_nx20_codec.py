@@ -18,7 +18,7 @@ class NX20CodecTests(unittest.TestCase):
         self.assertEqual(serialize(document), source)
 
     def test_raw_fields_and_duplicate_order_survive(self) -> None:
-        document = parse_bytes(make_normal_nx20())
+        document = parse_bytes(make_normal_nx20(), row_storage="rich")
         self.assertEqual([entry.meta_id.value for entry in document.header_metadata], [900, 900, 0x0001044F])
         self.assertEqual([entry.value.value for entry in document.header_metadata[:2]], [7, 9])
         split = document.splits[0]
@@ -33,7 +33,7 @@ class NX20CodecTests(unittest.TestCase):
         self.assertEqual(block.divisions[0].meta_id.value, 111)
 
     def test_rows_keep_exact_encoding(self) -> None:
-        document = parse_bytes(make_normal_nx20())
+        document = parse_bytes(make_normal_nx20(), row_storage="rich")
         rows = document.splits[0].blocks[0].rows
         self.assertIsInstance(rows[0], NoteRow)
         self.assertEqual(len(rows[0].cells), 5)
@@ -120,7 +120,7 @@ class NX20CodecTests(unittest.TestCase):
         self.assertEqual(reparsed.header_metadata[-1].meta_id.value, 1234)
 
     def test_row_width_mismatch_is_rejected(self) -> None:
-        document = parse_bytes(make_normal_nx20(sized_trailer=False))
+        document = parse_bytes(make_normal_nx20(sized_trailer=False), row_storage="rich")
         split = document.splits[0]
         block = split.blocks[0]
         row = block.rows[0]

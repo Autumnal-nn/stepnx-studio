@@ -22,6 +22,7 @@ from stepnx.core.model import (
     NoteCell,
     NoteRow,
     NX20Document,
+    OverlayRows,
     PackedNoteRow,
     Split,
 )
@@ -115,7 +116,7 @@ def parse_bytes(
     source: str | None = None,
     profile: str = "nxa-native",
     limits: ParseLimits | None = None,
-    row_storage: Literal["rich", "compact"] = "rich",
+    row_storage: Literal["rich", "compact"] = "compact",
 ) -> NX20Document:
     """Parse NX20 without normalizing any serializable field.
 
@@ -298,6 +299,43 @@ def _validate_scalar_types(document: NX20Document) -> None:
             )
 
 
+def _write_row(
+    output: bytearray,
+    row,
+    *,
+    columns: int,
+    effective_lightmap: bool,
+    location: str,
+) -> None:
+    if isinstance(row, EmptyRow):
+        if len(row.raw) != 4 or not (row.raw[0] & 0x80):
+            raise ModelInvariantError(f"{location}: invalid empty-row marker")
+        output.extend(row.raw)
+    elif effective_lightmap:
+        if not isinstance(row, LightmapRow):
+            raise ModelInvariantError(f"{location}: effective Lightmap requires LightmapRow")
+        if len(row.raw_channels) != 4:
+            raise ModelInvariantError(f"{location}: Lightmap row is not four bytes")
+        output.extend(row.raw_channels)
+    elif isinstance(row, PackedNoteRow):
+        if row.cell_count != columns:
+            raise ModelInvariantError(
+                f"{location}: row has {row.cell_count} cells, expected {columns}"
+            )
+        output.extend(row.raw_cells)
+    else:
+        if not isinstance(row, NoteRow):
+            raise ModelInvariantError(f"{location}: normal chart requires NoteRow")
+        if len(row.cells) != columns:
+            raise ModelInvariantError(
+                f"{location}: row has {len(row.cells)} cells, expected {columns}"
+            )
+        for cell in row.cells:
+            if len(cell.raw) != 4:
+                raise ModelInvariantError(f"{location}: note cell is not four bytes")
+            output.extend(cell.raw)
+
+
 def serialize(document: NX20Document) -> bytes:
     """Rebuild the complete file from the model, including any opaque tail."""
 
@@ -351,35 +389,36 @@ def serialize(document: NX20Document) -> bytes:
                 output.extend(block.rows.raw_bytes)
                 continue
 
+            if isinstance(block.rows, OverlayRows):
+                base = block.rows.base
+                if base.columns != columns or base.effective_lightmap != effective_lightmap:
+                    raise ModelInvariantError(
+                        f"split {split_index}, block {block_index}: overlay base no longer "
+                        "matches the document layout"
+                    )
+                cursor = 0
+                for row_index, row in block.rows.replacements:
+                    output.extend(base.raw_range(cursor, row_index))
+                    _write_row(
+                        output,
+                        row,
+                        columns=columns,
+                        effective_lightmap=effective_lightmap,
+                        location=f"split {split_index}, block {block_index}, row {row_index}",
+                    )
+                    cursor = row_index + 1
+                output.extend(base.raw_range(cursor, len(base)))
+                continue
+
             for row_index, row in enumerate(block.rows):
                 location = f"split {split_index}, block {block_index}, row {row_index}"
-                if isinstance(row, EmptyRow):
-                    if len(row.raw) != 4 or not (row.raw[0] & 0x80):
-                        raise ModelInvariantError(f"{location}: invalid empty-row marker")
-                    output.extend(row.raw)
-                elif effective_lightmap:
-                    if not isinstance(row, LightmapRow):
-                        raise ModelInvariantError(f"{location}: effective Lightmap requires LightmapRow")
-                    if len(row.raw_channels) != 4:
-                        raise ModelInvariantError(f"{location}: Lightmap row is not four bytes")
-                    output.extend(row.raw_channels)
-                elif isinstance(row, PackedNoteRow):
-                    if row.cell_count != columns:
-                        raise ModelInvariantError(
-                            f"{location}: row has {row.cell_count} cells, expected {columns}"
-                        )
-                    output.extend(row.raw_cells)
-                else:
-                    if not isinstance(row, NoteRow):
-                        raise ModelInvariantError(f"{location}: normal chart requires NoteRow")
-                    if len(row.cells) != columns:
-                        raise ModelInvariantError(
-                            f"{location}: row has {len(row.cells)} cells, expected {columns}"
-                        )
-                    for cell in row.cells:
-                        if len(cell.raw) != 4:
-                            raise ModelInvariantError(f"{location}: note cell is not four bytes")
-                        output.extend(cell.raw)
+                _write_row(
+                    output,
+                    row,
+                    columns=columns,
+                    effective_lightmap=effective_lightmap,
+                    location=location,
+                )
 
     output.extend(document.envelope.raw)
     return bytes(output)
@@ -389,7 +428,7 @@ def load(
     path: str | os.PathLike[str],
     *,
     profile: str = "nxa-native",
-    row_storage: Literal["rich", "compact"] = "rich",
+    row_storage: Literal["rich", "compact"] = "compact",
 ) -> NX20Document:
     source = Path(path)
     return parse_bytes(

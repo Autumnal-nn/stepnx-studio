@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from stepnx.codecs.nx20 import load, save_atomic, serialize
+from stepnx.core.diff import diff_documents
 from stepnx.core.errors import StepNXError, UnsupportedFormatError
+from stepnx.core.validation import validate
 
 
 SUPPORTED_SUFFIXES = {".NX", ".NFO"}
@@ -138,32 +140,79 @@ def _verify(args: argparse.Namespace) -> int:
     return 1 if totals["errors"] else 0
 
 
-def _diff(args: argparse.Namespace) -> int:
-    left = Path(args.left).read_bytes()
-    right = Path(args.right).read_bytes()
-    common = min(len(left), len(right))
-    mismatch = next((index for index in range(common) if left[index] != right[index]), None)
-    if mismatch is None and len(left) != len(right):
-        mismatch = common
-    identical = mismatch is None
+def _validate(args: argparse.Namespace) -> int:
+    document = load(args.path, profile=args.profile, row_storage=args.row_storage)
+    report = validate(document)
     result = {
-        "left": str(args.left),
-        "right": str(args.right),
-        "identical": identical,
-        "left_size": len(left),
-        "right_size": len(right),
-        "first_mismatch": mismatch,
+        "source": str(args.path),
+        "valid": report.is_valid,
+        "errors": len(report.errors),
+        "warnings": len(report.warnings),
+        "issues": [
+            {
+                "severity": issue.severity.value,
+                "code": issue.code,
+                "path": issue.path,
+                "message": issue.message,
+            }
+            for issue in report.issues
+        ],
     }
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-    elif identical:
-        print(f"IDENTICAL: {args.left} == {args.right} ({len(left)} bytes)")
+    else:
+        status = "VALID" if report.is_valid else "INVALID"
+        print(f"{status}: {args.path} ({len(report.errors)} error(s), {len(report.warnings)} warning(s))")
+        for item in result["issues"][: args.max_issues]:
+            print(
+                f"{item['severity'].upper()} {item['code']} at {item['path']}: "
+                f"{item['message']}"
+            )
+        if len(result["issues"]) > args.max_issues:
+            print(f"... {len(result['issues']) - args.max_issues} additional issue(s) omitted")
+    return 0 if report.is_valid else 1
+
+
+def _diff(args: argparse.Namespace) -> int:
+    left_bytes = Path(args.left).read_bytes()
+    right_bytes = Path(args.right).read_bytes()
+    common = min(len(left_bytes), len(right_bytes))
+    mismatch = next(
+        (index for index in range(common) if left_bytes[index] != right_bytes[index]), None
+    )
+    if mismatch is None and len(left_bytes) != len(right_bytes):
+        mismatch = common
+    binary_identical = mismatch is None
+
+    left = load(args.left, profile=args.profile, row_storage=args.row_storage)
+    right = load(args.right, profile=args.profile, row_storage=args.row_storage)
+    changes = diff_documents(left, right, max_changes=args.max_changes)
+    result = {
+        "left": str(args.left),
+        "right": str(args.right),
+        "identical": binary_identical,
+        "left_size": len(left_bytes),
+        "right_size": len(right_bytes),
+        "first_binary_mismatch": mismatch,
+        "structural_changes": [
+            {"path": change.path, "before": change.before, "after": change.after}
+            for change in changes
+        ],
+    }
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif binary_identical:
+        print(f"IDENTICAL: {args.left} == {args.right} ({len(left_bytes)} bytes)")
     else:
         print(
             f"DIFFERENT: first mismatch at 0x{mismatch:X}; "
-            f"sizes {len(left)} vs {len(right)}"
+            f"sizes {len(left_bytes)} vs {len(right_bytes)}"
         )
-    return 0 if identical else 1
+        for change in changes:
+            print(f"CHANGE {change.path}: {change.before!r} -> {change.after!r}")
+        if len(changes) == args.max_changes:
+            print(f"... structural output limited to {args.max_changes} change(s)")
+    return 0 if binary_identical else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -174,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser = subparsers.add_parser("inspect", help="inspect an NX20/NFO document")
     inspect_parser.add_argument("path", type=Path)
     inspect_parser.add_argument("--profile", default="nxa-native")
-    inspect_parser.add_argument("--row-storage", choices=("rich", "compact"), default="rich")
+    inspect_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
     inspect_parser.add_argument("--json", action="store_true")
     inspect_parser.set_defaults(handler=_inspect)
 
@@ -182,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     roundtrip_parser.add_argument("path", type=Path)
     roundtrip_parser.add_argument("--output", "-o", type=Path)
     roundtrip_parser.add_argument("--profile", default="nxa-native")
-    roundtrip_parser.add_argument("--row-storage", choices=("rich", "compact"), default="rich")
+    roundtrip_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
     roundtrip_parser.add_argument("--force", action="store_true")
     roundtrip_parser.add_argument("--backup", action="store_true")
     roundtrip_parser.add_argument("--json", action="store_true")
@@ -191,15 +240,28 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser = subparsers.add_parser("verify", help="verify byte-exact round-trip for files or folders")
     verify_parser.add_argument("paths", nargs="+")
     verify_parser.add_argument("--profile", default="nxa-native")
-    verify_parser.add_argument("--row-storage", choices=("rich", "compact"), default="rich")
+    verify_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
     verify_parser.add_argument("--strict-formats", action="store_true")
     verify_parser.add_argument("--max-errors", type=int, default=20)
     verify_parser.add_argument("--json", action="store_true")
     verify_parser.set_defaults(handler=_verify)
 
-    diff_parser = subparsers.add_parser("diff", help="report the first binary difference")
+    validate_parser = subparsers.add_parser(
+        "validate", help="validate the editable NX20/NFO model structure"
+    )
+    validate_parser.add_argument("path", type=Path)
+    validate_parser.add_argument("--profile", default="nxa-native")
+    validate_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    validate_parser.add_argument("--max-issues", type=int, default=50)
+    validate_parser.add_argument("--json", action="store_true")
+    validate_parser.set_defaults(handler=_validate)
+
+    diff_parser = subparsers.add_parser("diff", help="report binary and structural differences")
     diff_parser.add_argument("left", type=Path)
     diff_parser.add_argument("right", type=Path)
+    diff_parser.add_argument("--profile", default="nxa-native")
+    diff_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    diff_parser.add_argument("--max-changes", type=int, default=100)
     diff_parser.add_argument("--json", action="store_true")
     diff_parser.set_defaults(handler=_diff)
     return parser

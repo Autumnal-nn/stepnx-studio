@@ -53,6 +53,31 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(output_path.read_bytes(), source.read_bytes())
 
+    def test_validate_reports_a_clean_document(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "chart.NX"
+            path.write_bytes(make_normal_nx20())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(["validate", str(path), "--json"])
+            self.assertEqual(result, 0)
+            self.assertIn('"valid": true', output.getvalue())
+
+    def test_diff_reports_structural_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            left = root / "left.NX"
+            right = root / "right.NX"
+            source = bytearray(make_normal_nx20(sized_trailer=False))
+            left.write_bytes(source)
+            source[32:36] = (42).to_bytes(4, "little")
+            right.write_bytes(source)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(["diff", str(left), str(right), "--json"])
+            self.assertEqual(result, 1)
+            self.assertIn('"path": "header_metadata[1].value"', output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

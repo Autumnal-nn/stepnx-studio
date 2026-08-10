@@ -222,6 +222,128 @@ class CompactRows(Sequence[Row]):
         lightmaps = self._kinds.count(self.LIGHTMAP)
         return empty, notes, lightmaps, notes * self.columns
 
+    @property
+    def stable_id_bounds(self) -> tuple[int, int] | None:
+        """Return the half-open contiguous ID range owned by this row table."""
+
+        if not len(self):
+            return None
+        first = (
+            int(self._first_cell_ids[0])
+            if int(self._kinds[0]) == self.NOTE
+            else int(self._row_ids[0])
+        )
+        return first, int(self._row_ids[-1]) + 1
+
+    def has_contiguous_stable_ids(self) -> bool:
+        """Check the compact parser's cell-then-row allocation invariant."""
+
+        bounds = self.stable_id_bounds
+        if bounds is None:
+            return True
+        expected = bounds[0]
+        for index in range(len(self)):
+            kind = int(self._kinds[index])
+            row_id = int(self._row_ids[index])
+            first_cell_id = int(self._first_cell_ids[index])
+            if kind == self.NOTE:
+                if first_cell_id != expected or row_id != expected + self.columns:
+                    return False
+                expected = row_id + 1
+            elif kind in (self.EMPTY, self.LIGHTMAP):
+                if first_cell_id != 0 or row_id != expected:
+                    return False
+                expected += 1
+            else:
+                return False
+        return expected == bounds[1]
+
+    def with_row(self, index: int, row: Row) -> OverlayRows:
+        """Return a sparse editable view with one materialized replacement."""
+
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        return OverlayRows(self, ((index, row),))
+
+    def raw_range(self, start: int, end: int) -> bytes:
+        """Return source bytes for the half-open row range without materializing rows."""
+
+        if not 0 <= start <= end <= len(self):
+            raise IndexError((start, end))
+        return self._source[int(self._offsets[start]) : int(self._offsets[end])]
+
+
+class OverlayRows(Sequence[Row]):
+    """Sparse immutable edits layered over compact source-backed rows.
+
+    Only touched rows are retained as rich objects. Untouched rows remain in
+    :class:`CompactRows`, so a one-cell edit does not allocate an entire chart.
+    """
+
+    __slots__ = ("base", "replacements")
+
+    def __init__(self, base: CompactRows, replacements: tuple[tuple[int, Row], ...]) -> None:
+        normalized = tuple(sorted(replacements, key=lambda item: item[0]))
+        indexes = [index for index, _ in normalized]
+        if len(indexes) != len(set(indexes)):
+            raise ValueError("overlay row indexes must be unique")
+        if any(index < 0 or index >= len(base) for index in indexes):
+            raise IndexError("overlay row index is outside its compact base")
+        self.base = base
+        self.replacements = normalized
+
+    def __len__(self) -> int:
+        return len(self.base)
+
+    def __getitem__(self, index: int | slice) -> Row | tuple[Row, ...]:
+        if isinstance(index, slice):
+            return tuple(self[position] for position in range(*index.indices(len(self))))
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        for replacement_index, row in self.replacements:
+            if replacement_index == index:
+                return row
+            if replacement_index > index:
+                break
+        return self.base[index]
+
+    def __iter__(self) -> Iterator[Row]:
+        replacements = iter(self.replacements)
+        current = next(replacements, None)
+        for index in range(len(self)):
+            if current is not None and current[0] == index:
+                yield current[1]
+                current = next(replacements, None)
+            else:
+                yield self.base[index]
+
+    def with_row(self, index: int, row: Row) -> OverlayRows:
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        merged = dict(self.replacements)
+        merged[index] = row
+        return OverlayRows(self.base, tuple(merged.items()))
+
+    def statistics(self) -> tuple[int, int, int, int]:
+        empty, notes, lightmaps, cells = self.base.statistics()
+        for index, replacement in self.replacements:
+            original = self.base[index]
+            for row, delta in ((original, -1), (replacement, 1)):
+                if isinstance(row, EmptyRow):
+                    empty += delta
+                elif isinstance(row, (NoteRow, PackedNoteRow)):
+                    notes += delta
+                    cells += delta * row.cell_count
+                else:
+                    lightmaps += delta
+        return empty, notes, lightmaps, cells
+
 
 @dataclass(frozen=True, slots=True)
 class Block:
@@ -238,7 +360,7 @@ class Block:
     division_count: RawU32
     divisions: tuple[MetadataEntry, ...]
     row_count: RawU32
-    rows: tuple[Row, ...] | CompactRows
+    rows: tuple[Row, ...] | CompactRows | OverlayRows
     span: SourceSpan | None
 
 
@@ -319,7 +441,7 @@ class NX20Document:
             for block in split.blocks:
                 divisions += len(block.divisions)
                 rows += len(block.rows)
-                if isinstance(block.rows, CompactRows):
+                if isinstance(block.rows, (CompactRows, OverlayRows)):
                     compact_empty, compact_notes, compact_lightmaps, compact_cells = (
                         block.rows.statistics()
                     )
