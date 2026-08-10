@@ -23,6 +23,4 @@ Independent implementation from documented behavior remains permitted.
 - distributed forks are not required to publish their modifications;
 - accepted contributors provide Apache's express patent grant for their work;
 - dependency additions and upgrades require license and provenance review;
-- historical license grants for already published snapshots remain valid;
-- a history rewrite may simplify the visible documentation history, but does
-  not erase previously distributed commits, clones, forks, or grants.
+
