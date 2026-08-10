@@ -2,18 +2,6 @@
 
 Status: accepted, 2026-08-10.
 
-## Context
-
-StepNX Studio was initially published under GPL-3.0-or-later before external
-contributions were incorporated. The maintainer wants the core and future
-libraries to remain straightforward to reuse in permissively licensed and
-commercial software, with an explicit patent grant and without copyleft-only
-dependencies.
-
-Changing the repository history cannot revoke rights already granted for
-previously distributed snapshots. It can, however, make the current license and
-the provenance boundary unambiguous.
-
 ## Decision
 
 StepNX Studio is distributed under Apache License 2.0. Contributions use the
