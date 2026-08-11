@@ -31,7 +31,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertIn('"byte_exact_roundtrip": true', output.getvalue())
 
-    def test_verify_skips_recognized_legacy_by_default(self) -> None:
+    def test_verify_imports_recognized_nx10(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "chart.NX").write_bytes(make_normal_nx20())
@@ -40,7 +40,10 @@ class CliTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 result = main(["verify", str(root)])
             self.assertEqual(result, 0)
-            self.assertIn("verified=1 unsupported=1 errors=0 total=2", output.getvalue())
+            self.assertIn(
+                "verified=1 imported=1 import_attention=0 unsupported=0 errors=0 total=2",
+                output.getvalue(),
+            )
 
     def test_roundtrip_writes_copy_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -77,6 +80,38 @@ class CliTests(unittest.TestCase):
                 result = main(["diff", str(left), str(right), "--json"])
             self.assertEqual(result, 1)
             self.assertIn('"path": "header_metadata[1].value"', output.getvalue())
+
+    def test_import_nx10_writes_only_to_an_explicit_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "legacy.NX"
+            output_path = root / "native.NX"
+            source.write_bytes(make_nx10())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    ["import-nx10", str(source), "--output", str(output_path), "--json"]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(source.read_bytes(), make_nx10())
+            self.assertEqual(output_path.read_bytes()[:4], b"NX20")
+            self.assertIn('"semantically_lossless": true', output.getvalue())
+
+    def test_import_nx10_never_overwrites_its_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "legacy.NX"
+            payload = make_nx10()
+            source.write_bytes(payload)
+            error = io.StringIO()
+            with contextlib.redirect_stderr(error):
+                result = main(
+                    ["import-nx10", str(source), "--output", str(source), "--force"]
+                )
+
+            self.assertEqual(result, 1)
+            self.assertEqual(source.read_bytes(), payload)
+            self.assertIn("refusing to overwrite", error.getvalue())
 
 
 if __name__ == "__main__":

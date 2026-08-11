@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from stepnx.codecs.nx20 import load, save_atomic, serialize
+from stepnx.codecs.nx20 import load, parse_bytes, save_atomic, serialize
 from stepnx.core.diff import diff_documents
 from stepnx.core.errors import StepNXError, UnsupportedFormatError
 from stepnx.core.validation import validate
+from stepnx.importers.nx10 import load as load_nx10
 
 
 SUPPORTED_SUFFIXES = {".NX", ".NFO"}
@@ -104,11 +105,51 @@ def _roundtrip(args: argparse.Namespace) -> int:
 
 
 def _verify(args: argparse.Namespace) -> int:
-    totals = {"files": 0, "exact": 0, "unsupported": 0, "errors": 0}
+    totals = {
+        "files": 0,
+        "exact": 0,
+        "imported": 0,
+        "import_attention": 0,
+        "unsupported": 0,
+        "errors": 0,
+    }
     details = []
     for path in _candidate_files(args.paths):
         totals["files"] += 1
         try:
+            with path.open("rb") as handle:
+                magic = handle.read(4)
+            if magic == b"NX10":
+                imported = load_nx10(path)
+                native = serialize(imported.document)
+                reparsed = parse_bytes(native, source=f"{path} [imported NX20]")
+                structural = validate(imported.document)
+                clean = (
+                    imported.report.is_semantically_lossless
+                    and structural.is_valid
+                    and serialize(reparsed) == native
+                )
+                if clean:
+                    totals["imported"] += 1
+                else:
+                    totals["import_attention"] += 1
+                    totals["errors"] += 1
+                    details.append(
+                        {
+                            "path": str(path),
+                            "status": "nx10-import-attention",
+                            "diagnostics": [
+                                {
+                                    "kind": diagnostic.kind.value,
+                                    "code": diagnostic.code,
+                                    "message": diagnostic.message,
+                                }
+                                for diagnostic in imported.report.diagnostics
+                            ],
+                            "validation_errors": len(structural.errors),
+                        }
+                    )
+                continue
             document = load(path, profile=args.profile, row_storage=args.row_storage)
             rebuilt = serialize(document)
             exact = rebuilt == document.source_bytes
@@ -128,7 +169,8 @@ def _verify(args: argparse.Namespace) -> int:
         print(json.dumps({"totals": totals, "details": details}, ensure_ascii=False, indent=2))
     else:
         print(
-            f"verified={totals['exact']} unsupported={totals['unsupported']} "
+            f"verified={totals['exact']} imported={totals['imported']} "
+            f"import_attention={totals['import_attention']} unsupported={totals['unsupported']} "
             f"errors={totals['errors']} total={totals['files']}"
         )
         for detail in details[: args.max_errors]:
@@ -215,6 +257,58 @@ def _diff(args: argparse.Namespace) -> int:
     return 0 if binary_identical else 1
 
 
+def _import_nx10(args: argparse.Namespace) -> int:
+    imported = load_nx10(args.path, profile=args.profile)
+    document = imported.document
+    report = imported.report
+    native = serialize(document)
+    if args.output:
+        if args.output.resolve() == args.path.resolve():
+            raise StepNXError("refusing to overwrite the NX10 import source")
+        save_atomic(document, args.output, overwrite=args.force)
+
+    result = {
+        "source": str(args.path),
+        "output": str(args.output) if args.output else None,
+        "source_size": report.source_size,
+        "output_size": len(native),
+        "source_sha256": _sha256(imported.source_bytes),
+        "output_sha256": _sha256(native),
+        "semantically_lossless": report.is_semantically_lossless,
+        "splits": report.splits,
+        "blocks": report.blocks,
+        "rows": report.rows,
+        "note_cells": report.note_cells,
+        "diagnostics": [
+            {
+                "kind": diagnostic.kind.value,
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "offset": diagnostic.offset,
+                "path": diagnostic.path,
+            }
+            for diagnostic in report.diagnostics
+        ],
+    }
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        status = "LOSSLESS" if report.is_semantically_lossless else "ATTENTION"
+        suffix = f" -> {args.output}" if args.output else ""
+        print(
+            f"{status}: NX10 import {args.path}{suffix} "
+            f"({report.splits} split(s), {report.blocks} block(s), {report.rows} row(s))"
+        )
+        for diagnostic in report.diagnostics:
+            location = f" at 0x{diagnostic.offset:X}" if diagnostic.offset is not None else ""
+            path = f" [{diagnostic.path}]" if diagnostic.path else ""
+            print(
+                f"{diagnostic.kind.value.upper()} {diagnostic.code}{location}{path}: "
+                f"{diagnostic.message}"
+            )
+    return 0 if report.is_semantically_lossless else 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="stepnx", description="StepNX Studio lossless NX20 tools")
     parser.add_argument("--version", action="version", version="StepNX Studio core 0.1.0.dev0")
@@ -264,6 +358,17 @@ def build_parser() -> argparse.ArgumentParser:
     diff_parser.add_argument("--max-changes", type=int, default=100)
     diff_parser.add_argument("--json", action="store_true")
     diff_parser.set_defaults(handler=_diff)
+
+    import_parser = subparsers.add_parser(
+        "import-nx10",
+        help="project an NX2/NX10 chart into a native NX20 document with diagnostics",
+    )
+    import_parser.add_argument("path", type=Path)
+    import_parser.add_argument("--output", "-o", type=Path)
+    import_parser.add_argument("--profile", default="nxa-native")
+    import_parser.add_argument("--force", action="store_true")
+    import_parser.add_argument("--json", action="store_true")
+    import_parser.set_defaults(handler=_import_nx10)
     return parser
 
 

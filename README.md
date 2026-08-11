@@ -20,6 +20,8 @@ floating-point payloads, or its trailer.
 - effective Lightmap detection from either its flag or `columns == 3`;
 - no trailer, sized trailer, and opaque-tail envelopes;
 - one NX20 codec shared by `.NX` and `.NFO`;
+- isolated one-way NX10 importer with preserved source bytes and structured
+  conversion diagnostics;
 - compact/lazy row storage, now the default;
 - sparse row overlays: editing one cell promotes one row, not the entire block;
 - immutable commands for metadata, block fields, rows, and cells;
@@ -27,7 +29,8 @@ floating-point payloads, or its trailer.
 - in-memory undo/redo snapshots;
 - independent structural validation and structural diff;
 - atomic saving;
-- `inspect`, `roundtrip`, `verify`, `validate`, and `diff` CLI commands;
+- `inspect`, `roundtrip`, `verify`, `validate`, `diff`, and `import-nx10` CLI
+  commands;
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
   fixtures, and an external corpus gate.
 
@@ -37,7 +40,8 @@ floating-point payloads, or its trailer.
 - folder workspace, `Save All`, and blank `LM.NX` generation;
 - GUI/Qt timeline;
 - semantic engine profiles and authoring validation;
-- NX10, STF, NOT/NOT5, STX, and SEE importers.
+- STF, NOT/NOT5, STX, and SEE importers;
+- full-corpus validation of the NX10 importer against the official NX2 dump.
 
 Calling the current package a finished editor would be marketing sludge. It is
 the tested core on which an editor can safely be built.
@@ -54,6 +58,7 @@ python -m unittest discover -s tests -v
 python -m stepnx inspect C:\charts\NO.NX
 python -m stepnx validate C:\charts\NO.NX
 python -m stepnx diff C:\charts\before.NX C:\charts\after.NX
+python -m stepnx import-nx10 C:\charts\legacy.NX -o C:\charts\native.NX
 python -m stepnx verify C:\corpus\nxa C:\corpus\fiesta2
 ```
 
@@ -63,6 +68,7 @@ Bash:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 PYTHONPATH=src python3 -m stepnx inspect /path/to/NO.NX
 PYTHONPATH=src python3 -m stepnx roundtrip /path/to/NO.NX
+PYTHONPATH=src python3 -m stepnx import-nx10 /path/to/legacy.NX -o /path/to/native.NX
 PYTHONPATH=src python3 -m stepnx verify /path/to/corpus
 ```
 
@@ -75,18 +81,21 @@ nxroundtrip /path/to/NO.NX
 ```
 
 `roundtrip` writes nothing unless `--output` is provided. Existing files are
-protected unless `--force` is explicit.
+protected unless `--force` is explicit. `import-nx10` also writes nothing
+without an explicit output and never replaces its NX10 source implicitly.
 
 ## Corpus evidence
 
 Official charts and executables are not redistributed. The local gate walks NX
 and NFO files, reconstructs each file from the model, and compares the bytes.
-NX10 inputs are recognized and reported separately.
+NX10 inputs are routed through the dedicated importer and its projection
+report; they are never accepted by the native NX20 codec.
 
 Baseline recorded on 2026-08-10:
 
 - 12,909/12,909 NX20/NFO files rebuilt byte-exactly;
-- 12 NX10 files correctly classified as pending imports;
+- 12 NX10 files correctly classified outside the native NX20 codec;
+- 12/12 NXA-embedded NX10 files imported cleanly into stable native NX20;
 - zero byte differences;
 - zero structural errors.
 

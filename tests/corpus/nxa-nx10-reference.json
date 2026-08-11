@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "profile": "nxa-native",
+  "oracle": "NXConvert native C++ v4 independently produced byte-identical outputs",
+  "files": [
+    {
+      "path": "STEP/EF008/LM.NX",
+      "source_size": 2992,
+      "source_sha256": "813ae035151ed76041af85e305d7d2d1a27f467015d89ad9ba840945ba1407c3",
+      "nx20_size": 2996,
+      "nx20_sha256": "49934dcb9a4b9ab62ceadba45da64130fee43253d35d1ac8f6eb595790b09f72"
+    },
+    {
+      "path": "STEP/EF008/NO.NX",
+      "source_size": 2442,
+      "source_sha256": "ea7fc68e7acd53ac4999c9598d4ae933e29ce2ad01ab46f34a7937c7867a492e",
+      "nx20_size": 2932,
+      "nx20_sha256": "e3be1e51ef0a29bfdd22f95149ab0add87a879594bbe74b2b836b60d0dcc27a5"
+    },
+    {
+      "path": "STEP/EF085/LM.NX",
+      "source_size": 1664,
+      "source_sha256": "95498f8d71aea359074283f9a4f8793ca23a7bdbedb518fbc7c3eaed52ec5727",
+      "nx20_size": 1668,
+      "nx20_sha256": "65209550ca55fde15e6e5e7d0a159d2df25ee50810f59f2e90f463febfd835b3"
+    },
+    {
+      "path": "STEP/EF085/NM.NX",
+      "source_size": 20392,
+      "source_sha256": "d0d7bdbeea7478ca5b19ac301675fec6c45ea0be6089ef900bdd5cb438be0707",
+      "nx20_size": 31948,
+      "nx20_sha256": "a92c589e2f35ee19e35117a88bf07331cd5ce47866e2db67f8d9ee05a758f91b"
+    },
+    {
+      "path": "STEP/EF158/HD.NX",
+      "source_size": 4206,
+      "source_sha256": "ec5d8344a6492c604535ae83612f69bff74b3bfb1e7b660d029f32c9f0c8e630",
+      "nx20_size": 5664,
+      "nx20_sha256": "ef1b1c6deefb054810cc398f17030079cc96a6a2fd668dce8ca2ac4b26d5b3f8"
+    },
+    {
+      "path": "STEP/EF158/LM.NX",
+      "source_size": 2992,
+      "source_sha256": "813ae035151ed76041af85e305d7d2d1a27f467015d89ad9ba840945ba1407c3",
+      "nx20_size": 2996,
+      "nx20_sha256": "49934dcb9a4b9ab62ceadba45da64130fee43253d35d1ac8f6eb595790b09f72"
+    },
+    {
+      "path": "STEP/EF253/LM.NX",
+      "source_size": 2992,
+      "source_sha256": "94cc9078bc44e1f1bd34980f9e69aa7c3a49f4d93353fc7c2ff88f57cba420b8",
+      "nx20_size": 2996,
+      "nx20_sha256": "7d6069f19c02e8c75ec5aba73f39d7b8c2d9a00b4c2b21df280e44cb7d5c35ca"
+    },
+    {
+      "path": "STEP/EF253/NO.NX",
+      "source_size": 2742,
+      "source_sha256": "5ec736004e18a7faac65cc7bd0f4e7fb336ab962bda32cf7902e5b502fd7004f",
+      "nx20_size": 3408,
+      "nx20_sha256": "e8ac9ec3f2c3a0e793c00a2c3d83ce532ab3f60587b65a3e628282e31a912739"
+    },
+    {
+      "path": "STEP/EF256/HD.NX",
+      "source_size": 3622,
+      "source_sha256": "a4d0f53857c56918f9f9c84463f876c07e1a40c118e357bf9e3347d47f111c23",
+      "nx20_size": 4816,
+      "nx20_sha256": "31370d7ac381edc1383ef16d3a5c3f05cb302e76a7ce48733d1856fb9e1c22dd"
+    },
+    {
+      "path": "STEP/EF256/LM.NX",
+      "source_size": 2992,
+      "source_sha256": "94cc9078bc44e1f1bd34980f9e69aa7c3a49f4d93353fc7c2ff88f57cba420b8",
+      "nx20_size": 2996,
+      "nx20_sha256": "7d6069f19c02e8c75ec5aba73f39d7b8c2d9a00b4c2b21df280e44cb7d5c35ca"
+    },
+    {
+      "path": "STEP/EF309/CR.NX",
+      "source_size": 10876,
+      "source_sha256": "95e35eb9cc6de7bd49c876bfdd9e79c6f3c375060cdff8df0cd3948764b9b083",
+      "nx20_size": 14600,
+      "nx20_sha256": "8de371cf65dbd8c4e922802f249cb322d14e910d144d3dc987e78040cfc4e9f3"
+    },
+    {
+      "path": "STEP/EF309/LM.NX",
+      "source_size": 2992,
+      "source_sha256": "68cd2f0bb2676f2ac67e5000c455696050d8d3d24039f23b0e5745dfe071f74d",
+      "nx20_size": 2996,
+      "nx20_sha256": "6c2ce6208348a7484fab48c0a6c4559134cadc147fa8cd84ab18cfeeb9c4e9a2"
+    }
+  ]
+}
