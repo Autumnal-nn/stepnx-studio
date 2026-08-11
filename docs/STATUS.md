@@ -26,7 +26,18 @@ Version: 0.1.0.dev0
   Split-select exceptions;
 - explicit NX10 `BPM == 0` to NX20 smooth-warp conversion;
 - `import-nx10` CLI command with explicit-output-only writes;
-- 60 synthetic/unit tests;
+- immediate-folder discovery with independent per-file failures;
+- native NX20 entries and NX10 provenance whose editable model is always NX20;
+- exact-case structurally valid `LM.NX` gate for complete-folder publication;
+- StepEdit-compatible native NX20 blank Lightmap planning and explicit creation,
+  with valid-file reuse and invalid-file preservation;
+- individual and `Save All` planning with stale-target detection;
+- staged multi-file writes with best-effort rollback;
+- manifest-free audio discovery and session-only selection;
+- versioned recovery snapshots outside chart folders with SHA-256 verification;
+- explicit NX/NFO mirror comparison and export planning;
+- folder inspection, publication preflight, and mirror comparison CLI commands;
+- 87 synthetic/unit tests;
 - complete byte-exact gate over the known corpus.
 
 | Corpus metric | Value |
@@ -49,13 +60,12 @@ stable IDs, and source spans.
   compact row collection; point edits remain sparse;
 - the trailer remains raw and cannot safely relocate typed strings;
 - NX10 importer awaits validation against the complete official NX2 dump;
-- folder workflows and blank `LM.NX` generation are pending;
 - no timeline or GUI exists.
 
 ## Next gate
 
 1. validate the NX10 importer against the official NX2 corpus and NXA runtime;
-2. implement folder open/save and validate/generate `LM.NX`;
+2. execute the generated blank `LM.NX` in NXA as an independent runtime gate;
 3. add the `nxa-native` feature registry and authoring validation layer;
 4. produce the first read-only Qt authoring viewport.
 

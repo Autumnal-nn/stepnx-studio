@@ -77,17 +77,22 @@ Two minimal official NXA Lightmaps are 72-byte valid NX20 documents with:
 - an active Lightmap flag;
 - one split, one block, one row, and one `00 00 00 00` channel value.
 
-StepEdit 5.63 internally creates a generic NX10 block at 120 BPM, 4/4,
-BeatSplit 2, and 80 measures for a missing slot. That old default is not proof
-that an NX20 generator should blindly copy the same timeline.
+Two controlled StepEdit 5.63 regenerations produced 1,664-byte NX10 Lightmaps
+that differed in exactly one byte inside the inherited BPM float. The fixed
+layout is 4/4, BeatSplit 2, default scroll 0.5, and 400 zeroed Lightmap rows.
+Changing the source chart's scroll, BeatSplit, and row count did not propagate;
+only its BPM did. Their synthetic reconstructions match both samples byte for
+byte, and their imported NX20 projections match the native generator output.
 
 Folder contract:
 
 1. missing `LM.NX` does not block opening a folder for repair;
 2. `Save All` cannot complete without a valid `LM.NX`;
-3. `Generate Blank LM.NX` creates valid NX20 with no light events;
-4. an existing `LM.NX` is never silently replaced;
-5. the generated timeline must be approved in the NXA runtime before release.
+3. `Generate Blank LM.NX` creates the native NX20 equivalent of the observed
+   StepEdit layout with an explicit BPM;
+4. an existing valid `LM.NX` is reused unchanged;
+5. an existing invalid or case-colliding Lightmap requires explicit repair and
+   is never replaced with a blank file.
 
 ## NFO is an NX20 mission chart
 
@@ -230,7 +235,7 @@ Folder rules are frozen:
 - fully type trailer fields and string encodings by engine profile;
 - test length-changing trailer edits in real runtimes;
 - determine whether the missing Prime 2 `EF2166` NX copies are dump omissions;
-- approve a generated blank Lightmap timeline in NXA.
+- execute the generated blank Lightmap in NXA as an independent runtime gate.
 
 These gaps block semantic editing of every trailer field. They do not block the
 lossless raw codec, structural viewer, or raw-preserving writer.

@@ -29,15 +29,24 @@ floating-point payloads, or its trailer.
 - in-memory undo/redo snapshots;
 - independent structural validation and structural diff;
 - atomic saving;
-- `inspect`, `roundtrip`, `verify`, `validate`, `diff`, and `import-nx10` CLI
-  commands;
+- non-recursive folder workspaces with isolated per-file failures;
+- `Save All` preflight, external-change detection, staged writes, and rollback;
+- exact-case structurally valid `LM.NX` publication gate, with explicit
+  NX10-to-NX20 materialization required for imported Lightmaps;
+- StepEdit-compatible blank NX20 Lightmap generation with preview, explicit
+  write, valid-file reuse, and no replacement of existing Lightmaps;
+- manifest-free audio discovery and session-only audio selection;
+- application-state recovery snapshots with payload hash verification;
+- explicit NX/NFO mirror comparison and export primitives;
+- `inspect`, `roundtrip`, `verify`, `validate`, `diff`, `import-nx10`,
+  `folder-inspect`, `folder-save-plan`, `folder-generate-lightmap`, and
+  `mirror-compare` CLI commands;
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
   fixtures, and an external corpus gate.
 
 ## Not implemented yet
 
 - typed editing and relocation of trailer strings;
-- folder workspace, `Save All`, and blank `LM.NX` generation;
 - GUI/Qt timeline;
 - semantic engine profiles and authoring validation;
 - STF, NOT/NOT5, STX, and SEE importers;
@@ -59,6 +68,10 @@ python -m stepnx inspect C:\charts\NO.NX
 python -m stepnx validate C:\charts\NO.NX
 python -m stepnx diff C:\charts\before.NX C:\charts\after.NX
 python -m stepnx import-nx10 C:\charts\legacy.NX -o C:\charts\native.NX
+python -m stepnx folder-inspect C:\charts\song-folder
+python -m stepnx folder-save-plan C:\charts\song-folder
+python -m stepnx folder-generate-lightmap C:\charts\song-folder --bpm 150 --write
+python -m stepnx mirror-compare C:\charts\NM.NX C:\mission\NM.NFO
 python -m stepnx verify C:\corpus\nxa C:\corpus\fiesta2
 ```
 
@@ -69,6 +82,9 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 PYTHONPATH=src python3 -m stepnx inspect /path/to/NO.NX
 PYTHONPATH=src python3 -m stepnx roundtrip /path/to/NO.NX
 PYTHONPATH=src python3 -m stepnx import-nx10 /path/to/legacy.NX -o /path/to/native.NX
+PYTHONPATH=src python3 -m stepnx folder-inspect /path/to/song-folder
+PYTHONPATH=src python3 -m stepnx folder-save-plan /path/to/song-folder
+PYTHONPATH=src python3 -m stepnx folder-generate-lightmap /path/to/song-folder --bpm 150 --write
 PYTHONPATH=src python3 -m stepnx verify /path/to/corpus
 ```
 
@@ -83,6 +99,11 @@ nxroundtrip /path/to/NO.NX
 `roundtrip` writes nothing unless `--output` is provided. Existing files are
 protected unless `--force` is explicit. `import-nx10` also writes nothing
 without an explicit output and never replaces its NX10 source implicitly.
+`folder-save-plan` performs the complete publication preflight but never writes.
+`folder-generate-lightmap` is also a preview unless `--write` is explicit. It
+reuses a valid `LM.NX` and refuses to replace an invalid or case-colliding file.
+The future GUI will execute the resulting plan only after showing its targets
+and diagnostics.
 
 ## Corpus evidence
 

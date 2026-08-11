@@ -135,15 +135,16 @@ Remaining gates:
 Importer acceptance requires source preservation, a deterministic NX20 result,
 and an explicit list of approximations or unsupported concepts.
 
-### Phase 4 — Folder layer
+### Phase 4 — Folder layer (implemented)
 
-- open all immediate NX files and isolate per-file failures;
-- individual save and `Save All` transaction planning;
-- require a valid `LM.NX` for complete-folder publication;
-- generate a blank NX20 Lightmap only after NXA runtime approval;
-- discover/select audio without a project manifest;
-- recovery journal and crash restoration outside the chart folder;
-- NX/NFO mirror compare/export without automatic synchronization.
+- open all immediate NX files and isolate per-file failures (implemented);
+- individual save and `Save All` transaction planning (implemented);
+- require a valid `LM.NX` for complete-folder publication (implemented);
+- generate or reuse a StepEdit-compatible blank NX20 Lightmap through a
+  previewable, explicitly executed save plan (implemented);
+- discover/select audio without a project manifest (implemented);
+- recovery journal and crash restoration outside the chart folder (implemented);
+- NX/NFO mirror compare/export without automatic synchronization (implemented).
 
 ### Phase 5 — Read-only Qt viewport
 
@@ -243,8 +244,7 @@ may ship after the minimum visual editor.
 P0:
 
 1. validate the NX10 importer against the official NX2 corpus and runtime;
-2. folder layer and blank `LM.NX` runtime fixture;
-3. `nxa-native` registry and authoring validation.
+2. `nxa-native` registry and authoring validation.
 
 P1:
 

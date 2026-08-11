@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from stepnx.cli.main import main
-from tests.fixture_factory import make_normal_nx20, make_nx10
+from tests.fixture_factory import make_implicit_lightmap, make_normal_nx20, make_nx10
 
 
 class CliTests(unittest.TestCase):
@@ -112,6 +112,99 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result, 1)
             self.assertEqual(source.read_bytes(), payload)
             self.assertIn("refusing to overwrite", error.getvalue())
+
+    def test_folder_inspect_reports_documents_failures_and_publication_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "LM.NX").write_bytes(make_implicit_lightmap())
+            (root / "NM.NX").write_bytes(make_normal_nx20())
+            (root / "BAD.NX").write_bytes(b"NX20")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(["folder-inspect", str(root), "--json"])
+            self.assertEqual(result, 1)
+            report = output.getvalue()
+            self.assertIn('"name": "LM.NX"', report)
+            self.assertIn('"name": "NM.NX"', report)
+            self.assertIn('"publication_ready": false', report)
+            self.assertIn('"folder.unreadable-document"', report)
+
+    def test_folder_save_plan_is_a_write_free_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lightmap = root / "LM.NX"
+            chart = root / "NM.NX"
+            lightmap.write_bytes(make_implicit_lightmap())
+            chart.write_bytes(make_normal_nx20())
+            before = {path: path.read_bytes() for path in (lightmap, chart)}
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(["folder-save-plan", str(root), "--json"])
+            self.assertEqual(result, 0)
+            self.assertIn('"ready": true', output.getvalue())
+            self.assertIn('"operation_count": 0', output.getvalue())
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_folder_generate_lightmap_previews_then_explicitly_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "NM.NX").write_bytes(make_normal_nx20())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    ["folder-generate-lightmap", str(root), "--bpm", "150", "--json"]
+                )
+            self.assertEqual(result, 0)
+            self.assertIn('"written": false', output.getvalue())
+            self.assertIn('"size": 1668', output.getvalue())
+            self.assertFalse((root / "LM.NX").exists())
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "folder-generate-lightmap",
+                        str(root),
+                        "--bpm",
+                        "150",
+                        "--write",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(result, 0)
+            self.assertIn('"written": true', output.getvalue())
+            self.assertEqual((root / "LM.NX").read_bytes()[:4], b"NX20")
+
+            existing = (root / "LM.NX").read_bytes()
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "folder-generate-lightmap",
+                        str(root),
+                        "--bpm",
+                        "180",
+                        "--write",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(result, 0)
+            self.assertIn('"reused": true', output.getvalue())
+            self.assertIn('"written": false', output.getvalue())
+            self.assertEqual((root / "LM.NX").read_bytes(), existing)
+
+    def test_mirror_compare_uses_shared_nx20_codec(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "NM.NX"
+            mirror = root / "NM.NFO"
+            source.write_bytes(make_normal_nx20())
+            mirror.write_bytes(make_normal_nx20())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(["mirror-compare", str(source), str(mirror), "--json"])
+            self.assertEqual(result, 0)
+            self.assertIn('"binary_identical": true', output.getvalue())
 
 
 if __name__ == "__main__":
