@@ -68,3 +68,34 @@ def make_implicit_lightmap() -> bytes:
 def make_nx10() -> bytes:
     return b"NX10" + u32(0) + u32(5) + u32(0)
 
+
+def make_nx10_lightmap() -> bytes:
+    split_offset = 20
+    block_offset = 28
+    data = bytearray(b"NX10")
+    data += u32(10) + u32(3) + u32(1)
+    data += u32(split_offset)
+    data += u32(1) + u32(block_offset)
+    data += f32(0.0) + f32(120.0) + f32(0.5) + f32(0.0) + f32(1.0)
+    data += u32(0)
+    data += struct.pack("<HBBI", 2, 4, 1, 1)
+    data += b"\x01\x02\x03\x04"
+    return bytes(data)
+
+
+def make_stepedit_blank_nx10_lightmap(*, bpm: float = 120.0) -> bytes:
+    """Reproduce the blank LM.NX emitted by StepEdit 5.63."""
+
+    split_offset = 20
+    block_offset = 28
+    row_count = 400
+    data = bytearray(b"NX10")
+    data += u32(10) + u32(3) + u32(1)
+    data += u32(split_offset)
+    data += u32(1) + u32(block_offset)
+    data += f32(0.0) + f32(bpm) + f32(0.5) + f32(0.0) + f32(1.0)
+    data += u32(0)
+    data += struct.pack("<HBBI", 2, 4, 0, row_count)
+    data += b"\x00\x00\x00\x00" * row_count
+    data += b"\x00\x00\x00\x00"
+    return bytes(data)
