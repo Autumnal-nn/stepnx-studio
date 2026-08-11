@@ -112,16 +112,15 @@ Delivered:
 - CLI inspection and corpus verification;
 - structural validator;
 - immutable minimum command set;
+- collection insert/remove/move commands;
+- monotonic stable-ID allocation for new entities;
 - undo/redo snapshots;
 - structural diff.
+- deterministic generated command-sequence tests and parser mutation fuzzing.
 
 Remaining gates:
 
-- property-based tests for command sequences;
-- parser/writer fuzzing;
-- collection insert/remove/move commands;
-- explicit stable-ID allocation for newly created entities;
-- serializer/validator agreement tests over malformed in-memory models.
+- deeper malformed-model and writer fuzzing as an ongoing hardening gate.
 
 ### Phase 3 — Importers and profile semantics
 
@@ -242,10 +241,9 @@ may ship after the minimum visual editor.
 
 P0:
 
-1. collection commands and ID allocation;
-2. property tests/fuzzing;
-3. NX10 importer;
-4. folder layer and blank `LM.NX` runtime fixture.
+1. NX10 importer;
+2. folder layer and blank `LM.NX` runtime fixture;
+3. `nxa-native` registry and authoring validation.
 
 P1:
 

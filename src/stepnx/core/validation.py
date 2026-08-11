@@ -236,4 +236,14 @@ def validate(document: NX20Document) -> ValidationReport:
                 f"stable ID range {current[0]}..{current[1] - 1} overlaps {previous[2]}",
             )
 
+    highest_id = max((end - 1 for _, end, _ in id_ranges), default=0)
+    if document.next_stable_id <= highest_id:
+        issue(
+            Severity.ERROR,
+            "stable-id.watermark",
+            "next_stable_id",
+            f"next stable ID {document.next_stable_id} must be greater than "
+            f"existing ID {highest_id}",
+        )
+
     return ValidationReport(tuple(issues))

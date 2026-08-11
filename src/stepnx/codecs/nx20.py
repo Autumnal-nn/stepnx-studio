@@ -250,8 +250,9 @@ def parse_bytes(
 
     body_end = reader.position
     document_source = source
+    document_id = ids.take()
     return NX20Document(
-        stable_id=ids.take(),
+        stable_id=document_id,
         start_column=start_column,
         columns=columns,
         lightmap_flag=lightmap_flag,
@@ -265,6 +266,7 @@ def parse_bytes(
         role=NX20Document.infer_role(document_source),
         source_name=document_source,
         source_bytes=data,
+        next_stable_id=ids.next_value,
     )
 
 
