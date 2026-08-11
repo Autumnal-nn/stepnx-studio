@@ -114,7 +114,7 @@ class FolderWorkspaceTests(unittest.TestCase):
             self.assertTrue(plan.is_ready)
             self.assertEqual(len(plan.operations), 1)
             self.assertIsNone(plan.operations[0].source)
-            self.assertEqual(plan.operations[0].target, root / "LM.NX")
+            self.assertEqual(plan.operations[0].target, (root / "LM.NX").resolve())
             self.assertFalse((root / "LM.NX").exists())
 
             execute_save_plan(plan)
@@ -199,7 +199,10 @@ class FolderWorkspaceTests(unittest.TestCase):
 
             plan = plan_save_all(workspace)
             self.assertTrue(plan.is_ready)
-            self.assertEqual([operation.target for operation in plan.operations], [source])
+            self.assertEqual(
+                [operation.target for operation in plan.operations],
+                [source.resolve()],
+            )
             execute_save_plan(plan)
             self.assertEqual(source.read_bytes()[:4], b"NX20")
 
@@ -215,7 +218,7 @@ class FolderWorkspaceTests(unittest.TestCase):
             self.assertTrue(plan.is_ready)
             self.assertEqual([item.target.name for item in plan.operations], ["NM.NX"])
             saved = execute_save_plan(plan)
-            self.assertEqual(saved, (root / "NM.NX",))
+            self.assertEqual(saved, ((root / "NM.NX").resolve(),))
             self.assertEqual((root / "NM.NX").read_bytes(), chart.current_bytes)
 
     def test_save_plan_refuses_external_target_change(self) -> None:
@@ -373,14 +376,14 @@ class RecoveryAndMirrorTests(unittest.TestCase):
             snapshot = store.load(snapshot_path)
             self.assertEqual(len(snapshot.documents), 1)
             self.assertEqual(serialize(snapshot.documents[0].document), edited.current_bytes)
-            self.assertEqual(snapshot.selected_audio, audio)
+            self.assertEqual(snapshot.selected_audio, audio.resolve())
             reopened = open_folder(charts)
             restored = store.restore(reopened, snapshot_path)
             self.assertEqual(
                 restored.document_for(charts / "NM.NX").current_bytes,
                 edited.current_bytes,
             )
-            self.assertEqual(restored.selected_audio, audio)
+            self.assertEqual(restored.selected_audio, audio.resolve())
 
             (charts / "NM.NX").write_bytes(make_normal_nx20() + b"external-tail")
             changed = open_folder(charts)

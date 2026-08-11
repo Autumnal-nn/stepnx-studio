@@ -12,7 +12,6 @@ license = "Apache-2.0"
 authors = [{ name = "Autumnal" }]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
-  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -21,9 +20,14 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+gui = ["PySide6>=6.7,<7"]
+
 [project.scripts]
 stepnx = "stepnx.cli.main:main"
 nxroundtrip = "stepnx.cli.roundtrip:main"
+stepnx-studio = "stepnx.gui.app:main"
+stepnx-viewport-benchmark = "stepnx.authoring.benchmark:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

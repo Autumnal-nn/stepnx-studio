@@ -4,10 +4,10 @@ StepNX Studio is a lossless NX20 chart core and the foundation of a future
 visual editor for Pump It Up. It is created and maintained by Autumnal
 ([`Autumnal-nn`](https://github.com/Autumnal-nn)).
 
-Status: pre-alpha, with no graphical interface yet. The current release proves
-the project's most important contract: an unedited NX20 or NFO document can be
-rebuilt byte for byte without normalizing metadata, flags, padding, note cells,
-floating-point payloads, or its trailer.
+Status: pre-alpha, with an initial read-only graphical viewport. The current
+release proves the project's most important contract: an unedited NX20 or NFO
+document can be rebuilt byte for byte without normalizing metadata, flags,
+padding, note cells, floating-point payloads, or its trailer.
 
 ## Implemented
 
@@ -41,13 +41,16 @@ floating-point payloads, or its trailer.
 - `inspect`, `roundtrip`, `verify`, `validate`, `diff`, `import-nx10`,
   `folder-inspect`, `folder-save-plan`, `folder-generate-lightmap`, and
   `mirror-compare` CLI commands;
+- immutable authoring snapshots and Qt-independent timeline culling;
+- optional PySide6 read-only shell with tabs, document tree, diagnostics,
+  metadata inspection, branch switching, and original vector glyphs;
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
   fixtures, and an external corpus gate.
 
 ## Not implemented yet
 
 - typed editing and relocation of trailer strings;
-- GUI/Qt timeline;
+- visual chart editing and save actions in the Qt timeline;
 - semantic engine profiles and authoring validation;
 - STF, NOT/NOT5, STX, and SEE importers;
 - full-corpus validation of the NX10 importer against the official NX2 dump.
@@ -57,7 +60,8 @@ the tested core on which an editor can safely be built.
 
 ## Running from a checkout
 
-Python 3.11 or newer is required. There are no runtime dependencies.
+Python 3.11 or newer is required. Headless core and CLI workflows have no
+runtime dependencies; the desktop application uses the optional `gui` extra.
 
 Windows Command Prompt:
 
@@ -96,14 +100,32 @@ stepnx --help
 nxroundtrip /path/to/NO.NX
 ```
 
+Read-only desktop viewport:
+
+```bash
+python -m pip install -e '.[gui]'
+stepnx-studio /path/to/chart/folder
+```
+
+Double-click a split header to cycle through its blocks without mutating the
+document. Hold Ctrl while using the mouse wheel to zoom. Local PNG/SVG visual
+packs are documented in [`docs/VISUAL_PACKS.md`](docs/VISUAL_PACKS.md); no
+proprietary sprites ship with the project.
+
+Run the culling benchmark against a large chart with:
+
+```bash
+stepnx-viewport-benchmark /path/to/chart.NX
+```
+
 `roundtrip` writes nothing unless `--output` is provided. Existing files are
 protected unless `--force` is explicit. `import-nx10` also writes nothing
 without an explicit output and never replaces its NX10 source implicitly.
 `folder-save-plan` performs the complete publication preflight but never writes.
 `folder-generate-lightmap` is also a preview unless `--write` is explicit. It
 reuses a valid `LM.NX` and refuses to replace an invalid or case-colliding file.
-The future GUI will execute the resulting plan only after showing its targets
-and diagnostics.
+The current read-only GUI does not expose save operations. Phase 6 will execute
+the resulting plan only after showing its targets and diagnostics.
 
 ## Corpus evidence
 

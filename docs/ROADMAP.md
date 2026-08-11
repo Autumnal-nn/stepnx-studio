@@ -146,7 +146,7 @@ and an explicit list of approximations or unsupported concepts.
 - recovery journal and crash restoration outside the chart folder (implemented);
 - NX/NFO mirror compare/export without automatic synchronization (implemented).
 
-### Phase 5 — Read-only Qt viewport
+### Phase 5 — Read-only Qt viewport (complete)
 
 - desktop shell, tabs, document tree, and diagnostics panel;
 - vertical timeline inspired by StepEdit/STEPEdit-pixi;
@@ -154,6 +154,22 @@ and an explicit list of approximations or unsupported concepts.
 - measure ruler, block headers, metadata/Division inspection;
 - branch switching without mutation;
 - custom redistributable glyphs and user-supplied local visual packs.
+
+Delivered:
+
+- immutable `AuthoringSnapshot` with contextual metadata and compact row
+  preservation;
+- Qt-independent geometry, hit testing, zoom, measure markers, active-block
+  selection, and viewport culling;
+- optional PySide6 shell with folder tree, tabs, diagnostics, inspection, and
+  read-only timeline;
+- original vector glyphs plus validated user-selected local PNG/SVG packs;
+- synthetic 267,264-row culling benchmark and conditional offscreen Qt smoke
+  test;
+- full Windows 10 test-suite validation: 95 tests discovered, 94 passed, one
+  expected case-insensitive-filesystem skip, and exit code 0;
+- packaged Qt paint/scroll/zoom validation at 175.3 fps over 300 frames on
+  Windows 10, passing both the 30 fps requirement and 60 fps target.
 
 Performance gate: target 60 fps and require at least 30 fps during scroll/zoom on
 the stress fixture without abandoning compact storage.
@@ -248,10 +264,9 @@ P0:
 
 P1:
 
-1. read-only Qt viewport;
-2. audio transport and timing projection;
-3. practical note/timing editing;
-4. authoring validator.
+1. audio transport and timing projection;
+2. practical note/timing editing;
+3. authoring validator.
 
 P2:
 

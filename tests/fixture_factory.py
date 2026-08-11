@@ -99,3 +99,21 @@ def make_stepedit_blank_nx10_lightmap(*, bpm: float = 120.0) -> bytes:
     data += b"\x00\x00\x00\x00" * row_count
     data += b"\x00\x00\x00\x00"
     return bytes(data)
+
+
+def make_large_lightmap(*, rows: int = 267_264) -> bytes:
+    """Compact-storage stress fixture without redistributing a corpus chart."""
+
+    data = bytearray(b"NX20")
+    data += u32(0) + u32(3) + u32(1)
+    data += metadata()
+    data += u32(1)
+    data += b"\x00\x00\x00\x00"
+    data += metadata()
+    data += u32(1)
+    data += f32(0.0) + f32(120.0) + f32(0.5) + f32(0.0) + f32(1.0)
+    data += bytes((2, 4, 0, 0))
+    data += metadata()
+    data += u32(rows)
+    data += b"\x01\x00\x00\x00" * rows
+    return bytes(data)

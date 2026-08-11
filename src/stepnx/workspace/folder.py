@@ -559,11 +559,12 @@ def plan_save_all(workspace: FolderWorkspace) -> SavePlan:
     operations: list[SaveOperation] = []
     targets: dict[str, Path] = {}
     existing_names = {
-        entry.path.name.casefold(): entry.path.resolve() for entry in workspace.documents
+        entry.path.name.casefold(): entry.path for entry in workspace.documents
     }
     if publication.is_ready:
         for entry in workspace.documents:
-            target = (entry.output_path or entry.path).resolve()
+            requested_target = entry.output_path or entry.path
+            target = requested_target.resolve()
             if target.parent != workspace.root:
                 issues.append(
                     WorkspaceDiagnostic(
@@ -584,9 +585,9 @@ def plan_save_all(workspace: FolderWorkspace) -> SavePlan:
                     )
                 )
                 continue
-            target_key = target.name.casefold()
+            target_key = requested_target.name.casefold()
             existing = existing_names.get(target_key)
-            if existing is not None and existing != target:
+            if existing is not None and existing.name != requested_target.name:
                 issues.append(
                     WorkspaceDiagnostic(
                         Severity.ERROR,
