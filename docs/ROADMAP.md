@@ -1,6 +1,6 @@
 # StepNX Studio technical roadmap
 
-Revision: 2026-08-10
+Revision: 2026-08-11
 
 Target: a lossless native NX20 desktop editor, not another converter wrapped in
 a brittle GUI
@@ -122,9 +122,10 @@ Remaining gates:
 
 - deeper malformed-model and writer fuzzing as an ongoing hardening gate.
 
-### Phase 3 — Importers and profile semantics
+### Phase 3 — Importers and profile semantics (current)
 
-1. NX10 importer with a conversion report.
+1. NX10 importer with a conversion report (implemented; official NX2 corpus
+   validation pending).
 2. `nxa-native` metadata/flag registry.
 3. Patched NXA extension registry without collisions.
 4. Structural versus authoring validation levels.
@@ -241,7 +242,7 @@ may ship after the minimum visual editor.
 
 P0:
 
-1. NX10 importer;
+1. validate the NX10 importer against the official NX2 corpus and runtime;
 2. folder layer and blank `LM.NX` runtime fixture;
 3. `nxa-native` registry and authoring validation.
 

@@ -180,6 +180,14 @@ Twelve official NXA files use `NX10` magic:
 Extension and game profile do not determine the codec. Detection starts with
 the magic; NX10 is an import concern and is never tolerated by the NX20 parser.
 
+The isolated importer was run over all twelve files on 2026-08-11. Every file
+produced a semantically lossless report, a structurally valid canonical
+document, and a native NX20 byte stream that reparsed and rebuilt exactly. The
+twelve byte streams were also byte-identical to NXConvert v4 output. The v61a
+reference differed only in its Lightmap start-column projection and some NM
+note rows; those differences are not adopted because the importer and v4 agree
+on the NXA-native representation.
+
 ### Implicit Prime 2 Lightmaps
 
 Eight Prime 2 `LM.NX` files use `columns = 3` and `is_lightmap = 0` while their
