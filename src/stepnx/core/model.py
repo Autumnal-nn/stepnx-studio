@@ -412,6 +412,8 @@ class NX20Document:
     role: DeploymentRole = DeploymentRole.CHART
     source_name: str | None = None
     source_bytes: bytes = field(default=b"", repr=False, compare=False)
+    # Editor-only allocation watermark; it is never serialized into NX20.
+    next_stable_id: StableId = field(default=1, repr=False)
 
     @property
     def effective_lightmap(self) -> bool:

@@ -59,6 +59,12 @@ class ValidationTests(unittest.TestCase):
             any(issue.code == "stable-id.replaced-cell" for issue in report.issues)
         )
 
+    def test_allocator_watermark_must_exceed_every_existing_id(self) -> None:
+        document = parse_bytes(make_normal_nx20())
+        report = validate(replace(document, next_stable_id=document.stable_id))
+        self.assertFalse(report.is_valid)
+        self.assertTrue(any(issue.code == "stable-id.watermark" for issue in report.errors))
+
 
 if __name__ == "__main__":
     unittest.main()

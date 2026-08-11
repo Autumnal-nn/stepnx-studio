@@ -23,15 +23,16 @@ floating-point payloads, or its trailer.
 - compact/lazy row storage, now the default;
 - sparse row overlays: editing one cell promotes one row, not the entire block;
 - immutable commands for metadata, block fields, rows, and cells;
+- stable-ID collection commands for metadata, splits, blocks, and rows;
 - in-memory undo/redo snapshots;
 - independent structural validation and structural diff;
 - atomic saving;
 - `inspect`, `roundtrip`, `verify`, `validate`, and `diff` CLI commands;
-- synthetic fixtures and an external corpus gate.
+- deterministic generated command sequences, parser mutation fuzzing, synthetic
+  fixtures, and an external corpus gate.
 
 ## Not implemented yet
 
-- public collection-editing commands for inserting/removing splits and blocks;
 - typed editing and relocation of trailer strings;
 - folder workspace, `Save All`, and blank `LM.NX` generation;
 - GUI/Qt timeline;
