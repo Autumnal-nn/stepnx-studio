@@ -9,6 +9,7 @@ from pathlib import Path
 
 from stepnx.codecs.nx20 import parse_bytes, serialize
 from stepnx.core.scalars import RawU32
+from stepnx.importers.nx10 import import_bytes as import_nx10_bytes
 from stepnx.workspace import (
     RecoveryError,
     RecoveryStore,
@@ -30,7 +31,6 @@ from tests.fixture_factory import (
     make_nx10_lightmap,
     make_stepedit_blank_nx10_lightmap,
 )
-from stepnx.importers.nx10 import import_bytes as import_nx10_bytes
 
 
 def _edit_first_metadata(entry):
@@ -62,12 +62,16 @@ class FolderWorkspaceTests(unittest.TestCase):
             nested.mkdir()
             (nested / "IGNORED.NX").write_bytes(make_normal_nx20())
             (root / "song.mp3").write_bytes(b"audio-placeholder")
+            (root / "encrypted.AUD").write_bytes(b"ENC2-placeholder")
 
             workspace = open_folder(root)
 
             self.assertEqual([entry.path.name for entry in workspace.documents], ["LM.NX", "NM.NX"])
             self.assertEqual([failure.path.name for failure in workspace.failures], ["BROKEN.NX"])
-            self.assertEqual([item.path.name for item in workspace.audio_candidates], ["song.mp3"])
+            self.assertEqual(
+                [item.path.name for item in workspace.audio_candidates],
+                ["song.mp3", "encrypted.AUD"],
+            )
             self.assertFalse(workspace.publication_report().is_ready)
 
     def test_complete_folder_requires_exact_valid_lightmap(self) -> None:

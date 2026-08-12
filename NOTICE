@@ -2,3 +2,7 @@ StepNX Studio
 Copyright 2026 Autumnal and StepNX Studio contributors
 
 This product includes software developed by the StepNX Studio contributors.
+
+The bundled noteskin atlases are original StepNX Studio project artwork.
+The bundled BEAT.WAV is a third-party royalty-free sample distributed with
+StepEdit 5.63; see src/stepnx/assets/ASSETS.md for the available provenance.

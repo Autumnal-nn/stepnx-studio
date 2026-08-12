@@ -40,8 +40,8 @@ Version: 0.1.0.dev0
 - immutable authoring snapshots that preserve compact source-backed rows;
 - Qt-independent timeline geometry, hit testing, branch projection, measure
   markers, zoom, and visible-row culling;
-- optional PySide6 read-only shell with tabs, document tree, diagnostics, and
-  contextual metadata/Division inspection;
+- optional PySide6 shell with tabs, document tree, diagnostics, contextual
+  metadata/Division inspection, and the first visual note-editing tools;
 - original vector note glyphs and validated user-selected local visual packs;
 - synthetic 267,264-row viewport benchmark and conditional offscreen Qt smoke
   coverage;
@@ -50,6 +50,51 @@ Version: 0.1.0.dev0
 - packaged Qt paint/scroll/zoom runtime gate at 175.3 fps over 300 frames,
   comfortably above the required 30 fps floor;
 - complete byte-exact gate over the known corpus.
+- stable-row note placement, deletion, empty-row promotion/recompaction, and
+  atomic bulk-note commands;
+- typed Qt tools for taps, hold parts, items, Divisions, and erasure;
+- click/drag painting with command coalescing and undo/redo;
+- validation and structural-diff preview before guarded Qt `Save All`;
+- bundled royalty-free static noteskin atlases plus validated local overrides,
+  with no proprietary artwork
+  copied into the repository, workspace, recovery data, or release;
+- square, row-height-independent note rendering at dense beat splits;
+- half-beat-relative mouse-wheel scrolling and atlas-faithful noteskin hold
+  rendering with per-direction body offsets and complete tail cells;
+- empty Split/Block insertion, guarded removal, stable reordering, and undo/redo;
+- atomic editing of all nine native Block scalar fields and chart-wide Start
+  Time shifts;
+- deterministic row/beat/millisecond timing projection using explicit Block
+  Start Times;
+- rectangular stable-ID selection with musical snapping, copy/paste, erase,
+  mirror, filtered replace, and typed bulk placement;
+- Qt audio transport with automatic/manual selection, play-start seeking from
+  the active selection or viewport beat, play/pause, synchronized
+  playhead/viewport following, explicit session offset, and PCM WAV waveform;
+- private WAV metronome playback through `QSoundEffect`, with no operating
+  system beep fallback, selectable per beat or per tap/hold-head row;
+- StepEdit-compatible `H`, `G`, `X`, `▵`, and `▿` note flag editing across all
+  odd-nibble note variants, with one indexed bulk command and no rewriting of
+  orthogonal raw bytes;
+- visible musical snap guides and a follow-playhead anchor at 7% viewport
+  height;
+- Beat Split-independent beat geometry, playback-only `scroll` scaling, zero-scroll collapse,
+  smooth-warp skipping, and side-gutter Block labels;
+- register-aware per-arrow metronome events: Hidden/Invisible may tick, Ghost
+  does not;
+- validated ENC2 AUD-to-MP3 support for the self-contained `ENCDecrypt.exe`
+  profile, with explicit rejection of unsupported machine/HASP profiles;
+- `nxa-native` and `nxa-step5-patched` registries with contextual Header, Split,
+  and Division metadata definitions and evidence levels;
+- profile-aware authoring diagnostics that never turn unknown data into a
+  structural error;
+- atomic ordered metadata collection editing with safe typed values, duplicates,
+  unknown fields, and stable-ID preservation;
+- Brain Shower field projection/editing and conditional-route visualization;
+- mission-condition parsing validated against all supplied NX2/NXA mission
+  conditions, including profile-gated patched variables;
+- safe fixed-byte-length UTF-8 trailer-string editing for proven offset fields;
+- previewed folder batches and explicit Qt NX/NFO mirror deployment workflow;
 
 | Corpus metric | Value |
 | --- | ---: |
@@ -81,18 +126,26 @@ without abandoning compact row storage.
 
 ## Current limitations
 
-- validation is structural, not yet engine-profile authoring validation;
 - structural row insertion/removal/move currently materializes the affected
   compact row collection; point edits remain sparse;
-- the trailer remains raw and cannot safely relocate typed strings;
+- trailer string relocation remains disabled; only proven offsets containing
+  valid UTF-8 may be edited, and only at the same encoded byte length;
 - NX10 importer awaits validation against the complete official NX2 dump;
-- the Phase 5 viewport is read-only and has no authoring commands.
+- the accumulated Phase 6/7 branch still needs its Windows/PySide6 validation
+  gate before publication;
+- waveform extraction is intentionally limited to PCM WAV; Qt transport still
+  plays supported compressed formats without fabricating waveform data;
+- ENC2 AUD support currently accepts the profile proven by `732.AUD`; the
+  distinct profiles in `D91.AUD` and `508.AUD` remain unsupported;
+- cross-Split Block moves remain outside the current structural UI;
+- noteskin press overlays, receptor bars, and STEPFX are intentionally deferred
+  to the separate gameplay-preview phase.
 
 ## Next gate
 
 1. validate the NX10 importer against the official NX2 corpus and NXA runtime;
 2. execute the generated blank `LM.NX` in NXA as an independent runtime gate;
-3. add the `nxa-native` feature registry and authoring validation layer.
+3. execute the Phase 7 native Windows/manual validation gate.
 
 The viewer audit accepts STEPEdit-pixi as a conditional layout reference and
 WebPrime as a possible basis for a separate gameplay preview. Neither external

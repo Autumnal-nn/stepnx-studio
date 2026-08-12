@@ -31,3 +31,6 @@ stepnx-viewport-benchmark = "stepnx.authoring.benchmark:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+stepnx = ["assets/BEAT.WAV", "assets/noteskin/**/*.png", "assets/ASSETS.md"]

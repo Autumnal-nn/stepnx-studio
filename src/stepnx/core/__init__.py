@@ -1,24 +1,60 @@
-from stepnx.core.commands import CommandStack, SetBlockField, SetMetadataValue, SetNoteCellRaw, SetRowRaw
+from stepnx.core.commands import (
+    CommandStack,
+    NoteEdit,
+    SetBlockField,
+    SetBlockFields,
+    SetMetadataValue,
+    SetNoteAt,
+    SetNoteCellRaw,
+    SetNotesAt,
+    SetRowRaw,
+)
 from stepnx.core.diff import StructuralChange, diff_documents
 from stepnx.core.model import NX20Document
+from stepnx.core.profiles import (
+    Evidence,
+    MetadataDefinition,
+    MetadataScope,
+    ValueKind,
+    authorable_metadata,
+    get_profile,
+    metadata_definition,
+    pack_u16_range,
+    profile_capabilities,
+    unpack_u16_range,
+)
 from stepnx.core.scalars import RawF32, RawU8, RawU16, RawU32, SourceSpan
 from stepnx.core.validation import ValidationIssue, ValidationReport, validate
 
 __all__ = [
     "CommandStack",
+    "Evidence",
+    "MetadataDefinition",
+    "MetadataScope",
     "NX20Document",
+    "NoteEdit",
     "RawF32",
     "RawU8",
     "RawU16",
     "RawU32",
     "SetBlockField",
+    "SetBlockFields",
     "SetMetadataValue",
+    "SetNoteAt",
     "SetNoteCellRaw",
+    "SetNotesAt",
     "SetRowRaw",
     "SourceSpan",
     "StructuralChange",
     "ValidationIssue",
     "ValidationReport",
+    "ValueKind",
+    "authorable_metadata",
     "diff_documents",
+    "get_profile",
+    "metadata_definition",
+    "pack_u16_range",
+    "profile_capabilities",
+    "unpack_u16_range",
     "validate",
 ]

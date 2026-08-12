@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
 
 from stepnx.codecs.nx20 import parse_bytes, serialize
 from stepnx.core.commands import (
@@ -14,18 +13,21 @@ from stepnx.core.commands import (
     MoveMetadata,
     MoveRow,
     MoveSplit,
+    NoteEdit,
     RemoveBlock,
     RemoveMetadata,
     RemoveRow,
     RemoveSplit,
     SetBlockField,
     SetMetadataValue,
+    SetNoteAt,
     SetNoteCellRaw,
+    SetNotesAt,
     SetRowRaw,
 )
 from stepnx.core.diff import diff_documents
 from stepnx.core.errors import ModelInvariantError
-from stepnx.core.model import NoteRow, OverlayRows
+from stepnx.core.model import EmptyRow, NoteRow, OverlayRows
 from stepnx.core.scalars import RawF32
 from stepnx.core.validation import validate
 from tests.fixture_factory import make_implicit_lightmap, make_normal_nx20
@@ -61,6 +63,60 @@ class EditingTests(unittest.TestCase):
         self.assertEqual(edited_rows[0].cells[2].stable_id, target.stable_id)
         self.assertEqual(edited_rows[0].cells[2].raw, b"\x09\x08\x07\x06")
         self.assertEqual(edited_rows[1], block.rows[1])
+
+        with self.assertRaisesRegex(ValueError, "empty-row marker"):
+            SetNoteCellRaw(target.stable_id, b"\x80\x00\x00\x00")
+
+    def test_note_placement_promotes_empty_row_and_clear_compacts_it_again(self) -> None:
+        document = parse_bytes(make_normal_nx20(sized_trailer=False), row_storage="compact")
+        empty = document.splits[0].blocks[0].rows[1]
+        self.assertIsInstance(empty, EmptyRow)
+
+        placed = SetNoteAt(empty.stable_id, 3, b"\x43\x04\x02\x00").apply(document)
+        row = placed.splits[0].blocks[0].rows[1]
+        self.assertIsInstance(row, NoteRow)
+        self.assertEqual(row.stable_id, empty.stable_id)
+        self.assertEqual(row.cells[3].raw, b"\x43\x04\x02\x00")
+        self.assertEqual(placed.next_stable_id, document.next_stable_id + 5)
+
+        cleared = SetNoteAt(empty.stable_id, 3, b"\x00\x00\x00\x00").apply(placed)
+        row = cleared.splits[0].blocks[0].rows[1]
+        self.assertIsInstance(row, EmptyRow)
+        self.assertEqual(row.stable_id, empty.stable_id)
+        self.assertTrue(validate(cleared).is_valid)
+        self.assertEqual(parse_bytes(serialize(cleared)).statistics(), cleared.statistics())
+
+    def test_bulk_note_edit_is_atomic_and_one_undo_step(self) -> None:
+        document = parse_bytes(make_normal_nx20(sized_trailer=False), row_storage="compact")
+        rows = document.splits[0].blocks[0].rows
+        stack = CommandStack(document)
+        edited = stack.execute(
+            SetNotesAt(
+                (
+                    NoteEdit(rows[0].stable_id, 0, b"\x43\x04\x01\x00"),
+                    NoteEdit(rows[1].stable_id, 4, b"\x41\x04\x09\x00"),
+                )
+            )
+        )
+        self.assertEqual(edited.splits[0].blocks[0].rows[0].cells[0].raw[0], 0x43)
+        self.assertEqual(edited.splits[0].blocks[0].rows[1].cells[4].raw[0], 0x41)
+        self.assertEqual(serialize(stack.undo()), serialize(document))
+
+    def test_drag_commands_coalesce_until_gesture_finishes(self) -> None:
+        document = parse_bytes(make_normal_nx20(sized_trailer=False), row_storage="compact")
+        row = document.splits[0].blocks[0].rows[0]
+        stack = CommandStack(document)
+        stack.execute(SetNoteAt(row.stable_id, 0, b"\x43\x04\x00\x00"), coalesce_key="paint")
+        final = stack.execute(
+            SetNoteAt(row.stable_id, 1, b"\x43\x04\x00\x00"),
+            coalesce_key="paint",
+        )
+        self.assertEqual(serialize(stack.undo()), serialize(document))
+        self.assertEqual(serialize(stack.redo()), serialize(final))
+
+        stack.finish_coalescing()
+        stack.execute(SetNoteAt(row.stable_id, 2, b"\x43\x04\x00\x00"), coalesce_key="paint")
+        self.assertEqual(serialize(stack.undo()), serialize(final))
 
     def test_row_edit_preserves_row_and_cell_ids(self) -> None:
         document = parse_bytes(make_normal_nx20(sized_trailer=False), row_storage="compact")

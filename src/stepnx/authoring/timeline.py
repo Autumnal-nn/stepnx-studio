@@ -10,17 +10,24 @@ from stepnx.authoring.snapshot import AuthoringSnapshot, BlockSnapshot
 @dataclass(frozen=True, slots=True)
 class TimelineGeometry:
     row_height: float = 24.0
-    block_header_height: float = 42.0
+    block_header_height: float = 0.0
     lane_width: float = 48.0
     ruler_width: float = 92.0
+    block_info_width: float = 300.0
     footer_height: float = 24.0
     minimum_row_height: float = 4.0
-    maximum_row_height: float = 96.0
+    # Dense NX20 divisions need substantially more headroom than a conventional
+    # step editor.  At the old 96 px/beat ceiling, split-128 rows were still
+    # sub-pixel even at maximum zoom.  Keep the minimum unchanged, but allow a
+    # further 64x magnification for precise work and playback inspection.
+    maximum_row_height: float = 6144.0
 
     def __post_init__(self) -> None:
         if not self.minimum_row_height <= self.row_height <= self.maximum_row_height:
             raise ValueError("row height is outside the supported zoom range")
-        if min(self.block_header_height, self.lane_width, self.ruler_width) <= 0:
+        if self.block_header_height < 0 or min(
+            self.lane_width, self.ruler_width, self.block_info_width
+        ) <= 0:
             raise ValueError("timeline dimensions must be positive")
 
     def zoomed(self, factor: float) -> TimelineGeometry:
@@ -32,11 +39,28 @@ class TimelineGeometry:
             block_header_height=self.block_header_height,
             lane_width=self.lane_width,
             ruler_width=self.ruler_width,
+            block_info_width=self.block_info_width,
             footer_height=self.footer_height,
             minimum_row_height=self.minimum_row_height,
             maximum_row_height=self.maximum_row_height,
         )
 
+    def note_rect(
+        self, lane: int, row_y: float, row_height: float | None = None
+    ) -> tuple[float, float, float, float]:
+        """Return a square note target centred on the row's timing position.
+
+        Vertical zoom changes the distance between timing positions.  It must
+        not distort note artwork to the row height, especially in high beat
+        splits where rows can be only a few pixels apart.
+        """
+        if lane < 0:
+            raise ValueError("lane must be non-negative")
+        size = max(1.0, self.lane_width - 4.0)
+        x = self.ruler_width + lane * self.lane_width + (self.lane_width - size) / 2
+        effective_height = self.row_height if row_height is None else row_height
+        y = row_y + (effective_height - size) / 2
+        return x, y, size, size
 
 @dataclass(frozen=True, slots=True)
 class TimelineSegment:
@@ -46,11 +70,12 @@ class TimelineSegment:
     top: float
     rows_top: float
     bottom: float
+    row_height: float
 
-    def y_for_row(self, row_index: int, geometry: TimelineGeometry) -> float:
+    def y_for_row(self, row_index: int) -> float:
         if not 0 <= row_index <= self.block.row_count:
             raise IndexError(row_index)
-        return self.rows_top + row_index * geometry.row_height
+        return self.rows_top + row_index * self.row_height
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +102,13 @@ class TimelineLayout:
 
     __slots__ = ("_bottoms", "content_height", "geometry", "segments", "snapshot")
 
-    def __init__(self, snapshot: AuthoringSnapshot, geometry: TimelineGeometry | None = None) -> None:
+    def __init__(
+        self,
+        snapshot: AuthoringSnapshot,
+        geometry: TimelineGeometry | None = None,
+        *,
+        playback: bool = False,
+    ) -> None:
         self.snapshot = snapshot
         self.geometry = geometry or TimelineGeometry()
         segments: list[TimelineSegment] = []
@@ -86,8 +117,16 @@ class TimelineLayout:
             if not split.blocks:
                 continue
             block = snapshot.active_block(split.stable_id)
+            # ``geometry.row_height`` is the visual distance of one beat, not
+            # one encoded row. Beat Split only controls how many rows occupy
+            # that beat; increasing it must make rows denser rather than
+            # expanding the chart. During playback Scroll scales that musical
+            # distance without acquiring an accidental Beat Split multiplier.
+            split_rows = max(1, block.beat_split)
+            scale = max(0.0, block.scroll) if playback else 1.0
+            row_height = self.geometry.row_height * scale / split_rows
             rows_top = top + self.geometry.block_header_height
-            bottom = rows_top + block.row_count * self.geometry.row_height
+            bottom = rows_top + block.row_count * row_height
             segments.append(
                 TimelineSegment(
                     split_id=split.stable_id,
@@ -96,6 +135,7 @@ class TimelineLayout:
                     top=top,
                     rows_top=rows_top,
                     bottom=bottom,
+                    row_height=row_height,
                 )
             )
             top = bottom
@@ -109,6 +149,14 @@ class TimelineLayout:
 
     @property
     def content_width(self) -> float:
+        return (
+            self.geometry.ruler_width
+            + self.lane_area_width
+            + self.geometry.block_info_width
+        )
+
+    @property
+    def chart_width(self) -> float:
         return self.geometry.ruler_width + self.lane_area_width
 
     def visible_segments(self, viewport_top: float, viewport_height: float, *, overscan_rows: int = 2) -> tuple[VisibleSegment, ...]:
@@ -126,10 +174,12 @@ class TimelineLayout:
         for segment in self.segments[index:]:
             if segment.top >= bottom:
                 break
-            first = max(0, math.floor((top - segment.rows_top) / self.geometry.row_height))
+            if segment.row_height <= 0:
+                continue
+            first = max(0, math.floor((top - segment.rows_top) / segment.row_height))
             last = min(
                 segment.block.row_count,
-                math.ceil((bottom - segment.rows_top) / self.geometry.row_height),
+                math.ceil((bottom - segment.rows_top) / segment.row_height),
             )
             first = min(segment.block.row_count, first)
             last = max(first, last)
@@ -146,10 +196,84 @@ class TimelineLayout:
         segment = self.segment_at_y(y)
         if segment is None or y < segment.rows_top:
             return None
-        index = int((y - segment.rows_top) // self.geometry.row_height)
+        if segment.row_height <= 0:
+            return None
+        index = int((y - segment.rows_top) // segment.row_height)
         if index >= segment.block.row_count:
             return None
         return segment, index
+
+    def cell_at(self, x: float, y: float) -> tuple[TimelineSegment, int, int] | None:
+        row = self.row_at_y(y)
+        if row is None or x < self.geometry.ruler_width:
+            return None
+        lane = int((x - self.geometry.ruler_width) // self.geometry.lane_width)
+        if not 0 <= lane < self.snapshot.columns:
+            return None
+        return row[0], row[1], lane
+
+    def pixels_for_beats_at_y(self, y: float, beats: float) -> float:
+        """Convert a musical wheel step to pixels for the split under ``y``."""
+        if not math.isfinite(beats):
+            raise ValueError("beats must be finite")
+        segment = self.segment_at_y(y)
+        if segment is None:
+            return 0.0
+        return beats * max(1, segment.block.beat_split) * segment.row_height
+
+    def y_for_chart_time(self, time_ms: float) -> float | None:
+        """Project absolute chart time onto the closest active Block row.
+
+        Blocks carry explicit time anchors, so gaps and discontinuities must
+        not be reconstructed from neighboring geometry. When time is outside
+        every Block, clamp to the closest endpoint.
+        """
+        if not math.isfinite(time_ms):
+            raise ValueError("chart time must be finite")
+        candidates: list[tuple[float, float]] = []
+        for segment in self.segments:
+            block = segment.block
+            if (
+                block.bpm <= 0.0
+                or block.beat_split <= 0
+                or block.smooth_speed & 0x02
+            ):
+                continue
+            row_duration = 60_000.0 / (block.bpm * block.beat_split)
+            row = (time_ms - block.start_time) / row_duration
+            clamped = min(float(block.row_count), max(0.0, row))
+            endpoint_time = block.start_time + clamped * row_duration
+            y = segment.rows_top + clamped * segment.row_height
+            candidates.append((abs(time_ms - endpoint_time), y))
+        if not candidates:
+            return None
+        return min(candidates, key=lambda candidate: candidate[0])[1]
+
+    @staticmethod
+    def snap_row_index(
+        segment: TimelineSegment, row_index: int, beat_interval: float
+    ) -> int:
+        """Snap a row to a musical interval without crossing Block bounds."""
+        if not math.isfinite(beat_interval) or beat_interval < 0.0:
+            raise ValueError("snap interval must be finite and non-negative")
+        if not 0 <= row_index < segment.block.row_count:
+            raise IndexError(row_index)
+        if beat_interval == 0.0:
+            return row_index
+        rows_per_snap = max(1, round(segment.block.beat_split * beat_interval))
+        # Use half-up rounding. Python's banker rounding makes exact midpoints
+        # alternate between the earlier and later guide, which feels broken in
+        # a mouse-driven grid even though it is mathematically defensible.
+        snapped = math.floor(row_index / rows_per_snap + 0.5) * rows_per_snap
+        return min(segment.block.row_count - 1, max(0, snapped))
+
+    @staticmethod
+    def rows_per_snap(segment: TimelineSegment, beat_interval: float) -> int:
+        if not math.isfinite(beat_interval) or beat_interval < 0.0:
+            raise ValueError("snap interval must be finite and non-negative")
+        if beat_interval == 0.0:
+            return 1
+        return max(1, round(segment.block.beat_split * beat_interval))
 
     def beat_markers(self, visible: VisibleSegment) -> tuple[BeatMarker, ...]:
         split = visible.segment.block.beat_split
@@ -163,7 +287,7 @@ class TimelineLayout:
             markers.append(
                 BeatMarker(
                     row_index=row_index,
-                    y=visible.segment.y_for_row(row_index, self.geometry),
+                    y=visible.segment.y_for_row(row_index),
                     beat=float(beat_index),
                     is_measure=measure > 0 and beat_index % measure == 0,
                 )

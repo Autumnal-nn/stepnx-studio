@@ -2,16 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from enum import Enum
 
 from stepnx.core.model import NX20Document, Row
+from stepnx.core.profiles import MetadataScope
 from stepnx.core.validation import Severity, validate
-
-
-class MetadataScope(str, Enum):
-    HEADER = "header"
-    SPLIT = "split"
-    DIVISION = "division"
 
 
 @dataclass(frozen=True, slots=True)

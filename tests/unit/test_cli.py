@@ -27,7 +27,9 @@ class CliTests(unittest.TestCase):
             path.write_bytes(make_normal_nx20())
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                result = main(["inspect", str(path), "--row-storage", "compact", "--json"])
+                result = main(
+                    ["inspect", str(path), "--row-storage", "compact", "--json"]
+                )
             self.assertEqual(result, 0)
             self.assertIn('"byte_exact_roundtrip": true', output.getvalue())
 
@@ -65,6 +67,29 @@ class CliTests(unittest.TestCase):
                 result = main(["validate", str(path), "--json"])
             self.assertEqual(result, 0)
             self.assertIn('"valid": true', output.getvalue())
+
+    def test_validate_authoring_uses_selected_profile_without_rejecting_unknown_bytes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "chart.NX"
+            path.write_bytes(make_normal_nx20())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "validate",
+                        str(path),
+                        "--authoring",
+                        "--profile",
+                        "nxa-step5-patched",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(result, 0)
+            report = output.getvalue()
+            self.assertIn('"validation": "structural+authoring"', report)
+            self.assertIn('"code": "metadata.unknown"', report)
 
     def test_diff_reports_structural_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -113,7 +138,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(source.read_bytes(), payload)
             self.assertIn("refusing to overwrite", error.getvalue())
 
-    def test_folder_inspect_reports_documents_failures_and_publication_gate(self) -> None:
+    def test_folder_inspect_reports_documents_failures_and_publication_gate(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "LM.NX").write_bytes(make_implicit_lightmap())

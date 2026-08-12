@@ -4,7 +4,7 @@ StepNX Studio is a lossless NX20 chart core and the foundation of a future
 visual editor for Pump It Up. It is created and maintained by Autumnal
 ([`Autumnal-nn`](https://github.com/Autumnal-nn)).
 
-Status: pre-alpha, with an initial read-only graphical viewport. The current
+Status: pre-alpha, with practical and advanced NX20 authoring slices. The current
 release proves the project's most important contract: an unedited NX20 or NFO
 document can be rebuilt byte for byte without normalizing metadata, flags,
 padding, note cells, floating-point payloads, or its trailer.
@@ -42,16 +42,38 @@ padding, note cells, floating-point payloads, or its trailer.
   `folder-inspect`, `folder-save-plan`, `folder-generate-lightmap`, and
   `mirror-compare` CLI commands;
 - immutable authoring snapshots and Qt-independent timeline culling;
-- optional PySide6 read-only shell with tabs, document tree, diagnostics,
-  metadata inspection, branch switching, and original vector glyphs;
+- optional PySide6 shell with tabs, document tree, diagnostics, metadata
+  inspection, branch switching, note tools, timing fields, undo/redo, and
+  guarded `Save All`;
+- stable Split/Block insertion, removal, and reordering;
+- rectangular stable-ID selection with copy, paste, erase, replace, mirror,
+  typed bulk placement, visible musical snapping, and StepEdit-compatible note
+  function/visibility flags;
+- deterministic row/beat/time projection, atomic Block timing editing, and
+  chart-wide Start Time shifting;
+- session audio transport, selection-or-viewport Play seeking, PCM WAV
+  waveform, per-beat or per-arrow metronome, follow-playhead, and explicit
+  audio offset;
+- bundled royalty-free static noteskin atlases and metronome sound, with local
+  noteskin/audio overrides;
+- declarative `nxa-native` and `nxa-step5-patched` capability registries with
+  scope-aware metadata labels and authoring validation;
+- ordered, duplicate-preserving typed metadata editing, including Brain Shower
+  fields and packed condition ranges;
+- conditional-route projection with direct branch navigation;
+- a safe mission-condition parser validated against every condition in the
+  supplied official NX2/NXA mission files;
+- same-byte-length UTF-8 trailer-string editing for proven metadata offsets,
+  with relocation and unknown encodings deliberately blocked;
+- previewed folder batches for header metadata and Block Start Times;
+- explicit GUI comparison and export of NX/NFO deployment mirrors;
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
   fixtures, and an external corpus gate.
 
 ## Not implemented yet
 
-- typed editing and relocation of trailer strings;
-- visual chart editing and save actions in the Qt timeline;
-- semantic engine profiles and authoring validation;
+- length-changing trailer-string relocation;
+- typed editing of trailer fields whose offsets or encodings are still unknown;
 - STF, NOT/NOT5, STX, and SEE importers;
 - full-corpus validation of the NX10 importer against the official NX2 dump.
 
@@ -70,6 +92,7 @@ set PYTHONPATH=src
 python -m unittest discover -s tests -v
 python -m stepnx inspect C:\charts\NO.NX
 python -m stepnx validate C:\charts\NO.NX
+python -m stepnx validate C:\charts\NO.NX --authoring --profile nxa-native
 python -m stepnx diff C:\charts\before.NX C:\charts\after.NX
 python -m stepnx import-nx10 C:\charts\legacy.NX -o C:\charts\native.NX
 python -m stepnx folder-inspect C:\charts\song-folder
@@ -100,17 +123,49 @@ stepnx --help
 nxroundtrip /path/to/NO.NX
 ```
 
-Read-only desktop viewport:
+Desktop authoring viewport:
 
 ```bash
 python -m pip install -e '.[gui]'
-stepnx-studio /path/to/chart/folder
+stepnx-studio --profile nxa-native /path/to/chart/folder
 ```
 
-Double-click a split header to cycle through its blocks without mutating the
-document. Hold Ctrl while using the mouse wheel to zoom. Local PNG/SVG visual
-packs are documented in [`docs/VISUAL_PACKS.md`](docs/VISUAL_PACKS.md); no
-proprietary sprites ship with the project.
+Choose a note tool and click or drag across cells to place notes; one drag is
+one undo step. `Bank / ID` supplies the noteskin bank, item ID, or Division ID.
+`Save All` performs validation, shows affected files and a structural diff,
+then uses the existing atomic multi-file save plan. Split/Block details live in
+the right-side gutter; double-click that gutter to cycle a Split's active Block.
+Hold Ctrl while using the mouse wheel to zoom; the `6144 px/beat` ceiling gives
+dense Beat Split rows enough magnification for precise editing.
+Without Ctrl, each mouse-wheel notch scrolls half a musical beat in the split under
+the pointer, so dense beat splits do not make navigation artificially slower.
+Use **Edit → Structure → Edit Block timing** for the nine native NX20 Block
+scalars. `Shift` extends a rectangular selection and `Ctrl` toggles cells;
+copy/paste, mirror, filtered replace, erase, and application of the current tool
+operate as one undo step. Audio source selection, metronome mode, and chart
+following live under **Audio**; engine profile and Snap live under
+**File → Settings**. On Play, an active selection becomes the seek anchor;
+without one, playback starts at the beat at or immediately before the 7%
+viewport playhead. Offset remains an explicit session-only numeric field. Beat
+height follows zoom and is independent of Beat Split, so denser splits produce
+smaller rows instead of taller charts. During Play, Block height additionally
+follows `scroll`; zero-scroll Blocks collapse, and
+smooth-warp Blocks are skipped; Pause restores the authoring grid. PCM WAV
+files also receive an in-timeline waveform. A blank virtual tail after the last
+row lets followed playback keep the playhead at 7% through the chart endpoint;
+the tail never becomes editable or serialized. Compressed files still use Qt's
+transport but do not pretend a waveform was decoded when it was not.
+Choose the engine profile before opening a folder. **Edit → Metadata** operates
+on the Header, Split, or Block selected in the workspace tree and preserves
+unknown entries and duplicate order. The Routes side tab projects Split flags,
+condition ranges, and Division triggers; double-clicking a branch activates its
+Block without changing chart data. Folder batches show every affected document
+before changing memory and still require **Save All**. NFO mirrors remain an
+explicit compare/export action and are never synchronized merely because their
+basename matches an NX chart.
+The bundled royalty-free authoring pack and optional local visual overrides are
+documented in [`docs/VISUAL_PACKS.md`](docs/VISUAL_PACKS.md). No proprietary
+sprites ship with the project.
 
 Run the culling benchmark against a large chart with:
 
@@ -124,8 +179,9 @@ without an explicit output and never replaces its NX10 source implicitly.
 `folder-save-plan` performs the complete publication preflight but never writes.
 `folder-generate-lightmap` is also a preview unless `--write` is explicit. It
 reuses a valid `LM.NX` and refuses to replace an invalid or case-colliding file.
-The current read-only GUI does not expose save operations. Phase 6 will execute
-the resulting plan only after showing its targets and diagnostics.
+The GUI executes a `Save All` plan only after showing its targets and structural
+diff. Validation failures and targets changed outside the editor still block the
+write.
 
 ## Corpus evidence
 
@@ -151,6 +207,8 @@ and [the corpus analysis](docs/NX20_NFO_CORPUS_ANALYSIS.md).
 - [Project charter](docs/PROJECT_CHARTER.md)
 - [Technical roadmap](docs/ROADMAP.md)
 - [Current implementation status](docs/STATUS.md)
+- [Phase 6 Windows validation](docs/PHASE6_VALIDATION.md)
+- [Phase 7 Windows validation](docs/PHASE7_VALIDATION.md)
 - [Viewer source audit](docs/VIEWER_SOURCE_AUDIT.md)
 - [Architecture decisions](docs/adr/)
 
