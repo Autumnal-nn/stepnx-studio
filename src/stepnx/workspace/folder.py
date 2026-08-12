@@ -6,20 +6,21 @@ import os
 import shutil
 import struct
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Literal
 
 from stepnx.codecs.nx20 import load, parse_bytes, serialize
 from stepnx.core.diff import StructuralChange, diff_documents
 from stepnx.core.errors import StepNXError
 from stepnx.core.model import NX20Document
 from stepnx.core.validation import Severity, ValidationReport, validate
-from stepnx.importers.nx10 import NX10ImportReport, import_bytes as import_nx10_bytes
+from stepnx.importers.nx10 import NX10ImportReport
+from stepnx.importers.nx10 import import_bytes as import_nx10_bytes
 
-
-AUDIO_SUFFIXES = frozenset({".FLAC", ".MP2", ".MP3", ".OGG", ".WAV"})
+AUDIO_SUFFIXES = frozenset({".AUD", ".FLAC", ".MP2", ".MP3", ".OGG", ".WAV"})
 STEPEDIT_BLANK_LIGHTMAP_ROWS = 400
 
 
@@ -685,14 +686,13 @@ def execute_save_plan(
                 staged[operation.target] = Path(handle.name)
 
             if operation.target.exists():
-                backup_handle = tempfile.NamedTemporaryFile(
+                with tempfile.NamedTemporaryFile(
                     prefix=f".{operation.target.name}.",
                     suffix=".stepnx-original",
                     dir=operation.target.parent,
                     delete=False,
-                )
-                backup = Path(backup_handle.name)
-                backup_handle.close()
+                ) as backup_handle:
+                    backup = Path(backup_handle.name)
                 shutil.copy2(operation.target, backup)
                 originals[operation.target] = backup
             else:

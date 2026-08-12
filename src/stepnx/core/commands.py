@@ -394,6 +394,40 @@ class SetBlockField:
         return _replace_block(document, self.block_id, transform)
 
 
+@dataclass(frozen=True, slots=True)
+class SetBlockFields:
+    """Replace several scalar fields on one Block as one undoable operation."""
+
+    block_id: int
+    values: tuple[tuple[str, RawScalar], ...]
+
+    def __post_init__(self) -> None:
+        if not self.values:
+            raise ValueError("a Block field edit cannot be empty")
+        fields = [field for field, _ in self.values]
+        if len(fields) != len(set(fields)):
+            raise ValueError("a Block field edit cannot contain duplicate fields")
+
+    def apply(self, document: NX20Document) -> NX20Document:
+        def transform(block: Block) -> Block:
+            replacements = {}
+            for field, value in self.values:
+                if field not in _BLOCK_FIELDS:
+                    raise ModelInvariantError(
+                        f"unsupported editable block field: {field}"
+                    )
+                current = getattr(block, field)
+                if type(current) is not type(value):
+                    raise ModelInvariantError(
+                        f"block field {field} requires {type(current).__name__}, "
+                        f"not {type(value).__name__}"
+                    )
+                replacements[field] = replace(value, span=None)
+            return replace(block, **replacements)
+
+        return _replace_block(document, self.block_id, transform)
+
+
 def _rich_note_row(row: NoteRow | PackedNoteRow) -> NoteRow:
     if isinstance(row, NoteRow):
         return row
@@ -408,6 +442,8 @@ class SetNoteCellRaw:
     def __post_init__(self) -> None:
         if len(self.raw) != 4:
             raise ValueError("an NX20 note cell edit requires exactly four bytes")
+        if self.raw[0] & 0x80:
+            raise ValueError("a note cell cannot contain an NX20 empty-row marker")
 
     def apply(self, document: NX20Document) -> NX20Document:
         matches = 0
@@ -453,6 +489,128 @@ class SetNoteCellRaw:
                 f"expected one note cell with stable ID {self.cell_id}, found {matches}"
             )
         return replace(document, splits=tuple(splits))
+
+
+@dataclass(frozen=True, slots=True)
+class NoteEdit:
+    """One lane edit addressed by a stable row ID.
+
+    Row addressing lets the authoring view place the first note on a compact
+    empty row, which has no cell IDs yet.  A zero cell clears the lane.
+    """
+
+    row_id: int
+    lane: int
+    raw: bytes
+
+    def __post_init__(self) -> None:
+        if self.lane < 0:
+            raise ValueError("a note lane cannot be negative")
+        if len(self.raw) != 4:
+            raise ValueError("an NX20 note edit requires exactly four bytes")
+        if self.raw[0] & 0x80:
+            raise ValueError("a note cell cannot contain an NX20 empty-row marker")
+
+
+@dataclass(frozen=True, slots=True)
+class SetNotesAt:
+    """Apply one or more row/lane note edits as one atomic command."""
+
+    edits: tuple[NoteEdit, ...]
+
+    def __post_init__(self) -> None:
+        if not self.edits:
+            raise ValueError("a bulk note edit cannot be empty")
+        targets = {(edit.row_id, edit.lane) for edit in self.edits}
+        if len(targets) != len(self.edits):
+            raise ValueError("a bulk note edit cannot target the same cell twice")
+
+    def apply(self, document: NX20Document) -> NX20Document:
+        pending_by_row: dict[int, dict[int, bytes]] = {}
+        for edit in self.edits:
+            pending_by_row.setdefault(edit.row_id, {})[edit.lane] = edit.raw
+        matches = 0
+        ids = _StableIdAllocator(document.next_stable_id)
+        columns = int(document.columns.value)
+        splits: list[Split] = []
+
+        for split in document.splits:
+            blocks: list[Block] = []
+            split_changed = False
+            for block in split.blocks:
+                rows = block.rows
+                edited_rows: list[Row] | None = None
+                for row_index, candidate in enumerate(rows):
+                    row_edits = pending_by_row.get(candidate.stable_id)
+                    if not row_edits:
+                        continue
+                    if isinstance(candidate, LightmapRow):
+                        raise ModelInvariantError("note tools cannot edit a Lightmap row")
+                    for lane in row_edits:
+                        if lane >= columns:
+                            raise ModelInvariantError(
+                                f"lane {lane} is outside the document's {columns} columns"
+                            )
+
+                    if isinstance(candidate, EmptyRow):
+                        if all(raw == b"\x00\x00\x00\x00" for raw in row_edits.values()):
+                            matches += len(row_edits)
+                            continue
+                        cells = [
+                            NoteCell(ids.take(), b"\x00\x00\x00\x00", None)
+                            for _ in range(columns)
+                        ]
+                    else:
+                        rich = _rich_note_row(candidate)
+                        if rich.cell_count != columns:
+                            raise ModelInvariantError(
+                                f"row {candidate.stable_id} has {rich.cell_count} cells, "
+                                f"expected {columns}"
+                            )
+                        cells = list(rich.cells)
+
+                    for lane, raw in row_edits.items():
+                        cell = cells[lane]
+                        cells[lane] = NoteCell(cell.stable_id, raw, None)
+                        matches += 1
+
+                    if all(cell.raw == b"\x00\x00\x00\x00" for cell in cells):
+                        replacement: Row = EmptyRow(
+                            candidate.stable_id, b"\x80\x00\x00\x00", None
+                        )
+                    else:
+                        replacement = NoteRow(candidate.stable_id, tuple(cells), None)
+                    if edited_rows is None:
+                        edited_rows = list(rows)
+                    edited_rows[row_index] = replacement
+
+                if edited_rows is not None:
+                    block = replace(block, rows=tuple(edited_rows))
+                    split_changed = True
+                blocks.append(block)
+            splits.append(replace(split, blocks=tuple(blocks)) if split_changed else split)
+
+        if matches != len(self.edits):
+            raise ModelInvariantError(
+                f"expected {len(self.edits)} note-edit targets, found {matches}"
+            )
+        return replace(
+            document,
+            splits=tuple(splits),
+            next_stable_id=ids.next_value,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SetNoteAt:
+    """Set or clear one lane while preserving the row's stable identity."""
+
+    row_id: int
+    lane: int
+    raw: bytes
+
+    def apply(self, document: NX20Document) -> NX20Document:
+        return SetNotesAt((NoteEdit(self.row_id, self.lane, self.raw),)).apply(document)
 
 
 @dataclass(frozen=True, slots=True)
@@ -761,6 +919,7 @@ class CommandStack:
         self._current = document
         self._undo: list[NX20Document] = []
         self._redo: list[NX20Document] = []
+        self._coalesce_key: object | None = None
 
     @property
     def current(self) -> NX20Document:
@@ -774,18 +933,26 @@ class CommandStack:
     def can_redo(self) -> bool:
         return bool(self._redo)
 
-    def execute(self, command: Command) -> NX20Document:
+    def execute(self, command: Command, *, coalesce_key: object | None = None) -> NX20Document:
         updated = command.apply(self._current)
-        self._undo.append(self._current)
+        if coalesce_key is None or coalesce_key != self._coalesce_key:
+            self._undo.append(self._current)
         self._current = updated
         self._redo.clear()
+        self._coalesce_key = coalesce_key
         return updated
+
+    def finish_coalescing(self) -> None:
+        """End the current drag/paint gesture without changing the document."""
+
+        self._coalesce_key = None
 
     def undo(self) -> NX20Document:
         if not self._undo:
             raise ModelInvariantError("nothing to undo")
         self._redo.append(self._current)
         self._current = self._undo.pop()
+        self._coalesce_key = None
         return self._current
 
     def redo(self) -> NX20Document:
@@ -793,4 +960,5 @@ class CommandStack:
             raise ModelInvariantError("nothing to redo")
         self._undo.append(self._current)
         self._current = self._redo.pop()
+        self._coalesce_key = None
         return self._current

@@ -174,7 +174,7 @@ Delivered:
 Performance gate: target 60 fps and require at least 30 fps during scroll/zoom on
 the stress fixture without abandoning compact storage.
 
-### Phase 6 — Practical visual editing
+### Phase 6 — Practical visual editing (implementation complete; Windows gate pending)
 
 - note placement, deletion, drag, and typed item editing;
 - block and split insertion/removal/move;
@@ -184,11 +184,41 @@ the stress fixture without abandoning compact storage.
 - validation-before-save and structural diff preview;
 - audio transport, waveform, metronome, snapping, and offset tools.
 
+Delivered for validation:
+
+- stable-row note placement and deletion, including promotion and recompaction
+  of empty rows;
+- typed tap, hold, item, and Division placement presets;
+- click/drag painting with one undo step per gesture;
+- atomic bulk-note command support used by the multi-selection UI;
+- guarded Qt `Save All` with validation, target confirmation, structural diff,
+  external-change detection, and the existing rollback path;
+- bundled royalty-free static noteskin atlases and validated local overrides,
+  with gameplay-only feedback assets
+  catalogued but not coupled to the authoring renderer;
+- dense-split viewport correction: square note targets, beat-relative wheel
+  scrolling, and noteskin-backed hold heads/shafts/tails;
+- stable-ID Split/Block insertion, removal, reordering, and tree selection;
+- atomic typed editing of every native Block timing scalar and chart-wide Start
+  Time shifting;
+- deterministic row/beat/millisecond projection based on explicit Block anchors;
+- rectangular stable-ID selection, musical snapping, copy/paste, erase, mirror,
+  filtered replace, and typed bulk placement;
+- session audio transport, selection-or-viewport Play seeking, explicit offset,
+  PCM WAV waveform, and an absolute-time metronome with per-beat and per-arrow modes;
+- atlas-faithful hold bodies with per-direction offsets and complete terminal
+  cells whose shaft fragments stop exactly at the head/tail artwork;
+- StepEdit-compatible note function/visibility flag editing and visible snap
+  guides.
+- Beat Split-independent beat geometry, playback-only `scroll` scaling, zero-scroll collapse,
+  smooth-warp skipping, and non-obstructing side-gutter Block labels;
+- compact Audio and Settings menus with conservative defaults.
+
 This phase is where the project finally earns the word “editor.” Shipping a
 pretty read-only timeline before commands are dependable would be a demo, not a
 product.
 
-### Phase 7 — Advanced NX20 authoring
+### Phase 7 — Advanced NX20 authoring (implementation complete; Windows gate pending)
 
 - profile-aware Brain Shower metadata and question tooling;
 - conditional branches and route visualization;
@@ -196,6 +226,29 @@ product.
 - typed mission-trailer strings/conditions where safe;
 - batch operations across a folder;
 - NFO deployment mirror workflow.
+
+Delivered for validation:
+
+- declarative metadata/capability registries for native NXA and the Step5
+  patched engine, with inheritance and explicit evidence levels;
+- separate structural and profile-aware authoring validation;
+- ordered metadata collection editing that retains duplicate order, stable IDs,
+  unknown entries, and exact untouched scalar bytes;
+- typed integer, float-bit, bitmask, enum, and packed-u16 range editors;
+- Brain Shower projection and editing for confirmed IDs 11/12, 21–26, and
+  31–34, while unidentified IDs 43–49 remain visible but raw-only;
+- Split selection and Division-condition route projection with direct Qt branch
+  navigation;
+- a non-evaluating mission-condition parser covering arithmetic, comparisons,
+  Boolean operators, rank constants, case variants, and patched variables;
+- validation against every `CONDITION_1..4` expression in the supplied official
+  NX2 and NXA mission text references;
+- safe typed views of known trailer string offsets and fixed-byte-length UTF-8
+  edits; relocation, unterminated strings, invalid offsets, and unknown
+  encodings remain blocked;
+- write-free folder batch plans for global metadata and Start Time shifts, with
+  explicit duplicate policy and Lightmap exclusion;
+- GUI mirror comparison/export that keeps NX and NFO deployment roles explicit.
 
 ### Phase 8 — Gameplay preview
 

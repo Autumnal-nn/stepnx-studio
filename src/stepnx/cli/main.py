@@ -4,9 +4,10 @@ import argparse
 import hashlib
 import json
 import sys
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Iterable, Sequence
 
+from stepnx.authoring.semantics import validate_authoring
 from stepnx.codecs.nx20 import load, parse_bytes, save_atomic, serialize
 from stepnx.core.diff import diff_documents
 from stepnx.core.errors import StepNXError, UnsupportedFormatError
@@ -19,7 +20,6 @@ from stepnx.workspace import (
     plan_blank_lightmap,
     plan_save_all,
 )
-
 
 SUPPORTED_SUFFIXES = {".NX", ".NFO"}
 
@@ -64,14 +64,18 @@ def _print_summary(summary: dict) -> None:
         f"blocks={summary['blocks']} rows={summary['rows']} notes={summary['note_cells']}"
     )
     print(f"envelope: {summary['envelope']} ({summary['envelope_size']} bytes)")
-    print(f"round-trip: {'BYTE-EXACT' if summary['byte_exact_roundtrip'] else 'DIFFERS'}")
+    print(
+        f"round-trip: {'BYTE-EXACT' if summary['byte_exact_roundtrip'] else 'DIFFERS'}"
+    )
 
 
 def _candidate_files(paths: Sequence[str]) -> Iterable[Path]:
     seen: set[Path] = set()
     for raw in paths:
         path = Path(raw)
-        candidates = [path] if path.is_file() else path.rglob("*") if path.is_dir() else []
+        candidates = (
+            [path] if path.is_file() else path.rglob("*") if path.is_dir() else []
+        )
         for candidate in candidates:
             if candidate.is_file() and candidate.suffix.upper() in SUPPORTED_SUFFIXES:
                 resolved = candidate.resolve()
@@ -107,7 +111,9 @@ def _roundtrip(args: argparse.Namespace) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         suffix = f" -> {args.output}" if args.output else ""
-        print(f"{'BYTE-EXACT' if exact else 'DIFFERS'}: {args.path}{suffix} ({len(rebuilt)} bytes)")
+        print(
+            f"{'BYTE-EXACT' if exact else 'DIFFERS'}: {args.path}{suffix} ({len(rebuilt)} bytes)"
+        )
     return 0 if exact else 2
 
 
@@ -167,13 +173,19 @@ def _verify(args: argparse.Namespace) -> int:
             totals["unsupported"] += 1
             if args.strict_formats:
                 totals["errors"] += 1
-            details.append({"path": str(path), "status": "unsupported", "error": str(exc)})
+            details.append(
+                {"path": str(path), "status": "unsupported", "error": str(exc)}
+            )
         except (OSError, StepNXError) as exc:
             totals["errors"] += 1
             details.append({"path": str(path), "status": "error", "error": str(exc)})
 
     if args.json:
-        print(json.dumps({"totals": totals, "details": details}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"totals": totals, "details": details}, ensure_ascii=False, indent=2
+            )
+        )
     else:
         print(
             f"verified={totals['exact']} imported={totals['imported']} "
@@ -181,9 +193,13 @@ def _verify(args: argparse.Namespace) -> int:
             f"errors={totals['errors']} total={totals['files']}"
         )
         for detail in details[: args.max_errors]:
-            print(f"{detail['status'].upper()}: {detail['path']}: {detail.get('error', '')}")
+            print(
+                f"{detail['status'].upper()}: {detail['path']}: {detail.get('error', '')}"
+            )
         if len(details) > args.max_errors:
-            print(f"... {len(details) - args.max_errors} additional diagnostic(s) omitted")
+            print(
+                f"... {len(details) - args.max_errors} additional diagnostic(s) omitted"
+            )
     if totals["files"] == 0:
         return 3
     return 1 if totals["errors"] else 0
@@ -191,12 +207,18 @@ def _verify(args: argparse.Namespace) -> int:
 
 def _validate(args: argparse.Namespace) -> int:
     document = load(args.path, profile=args.profile, row_storage=args.row_storage)
-    report = validate(document)
+    structural = validate(document)
+    authoring = validate_authoring(document) if args.authoring else None
+    issues = structural.issues + (() if authoring is None else authoring.issues)
+    errors = structural.errors + (() if authoring is None else authoring.errors)
+    warnings = structural.warnings + (() if authoring is None else authoring.warnings)
     result = {
         "source": str(args.path),
-        "valid": report.is_valid,
-        "errors": len(report.errors),
-        "warnings": len(report.warnings),
+        "validation": "structural+authoring" if args.authoring else "structural",
+        "profile": document.profile,
+        "valid": not errors,
+        "errors": len(errors),
+        "warnings": len(warnings),
         "issues": [
             {
                 "severity": issue.severity.value,
@@ -204,22 +226,27 @@ def _validate(args: argparse.Namespace) -> int:
                 "path": issue.path,
                 "message": issue.message,
             }
-            for issue in report.issues
+            for issue in issues
         ],
     }
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        status = "VALID" if report.is_valid else "INVALID"
-        print(f"{status}: {args.path} ({len(report.errors)} error(s), {len(report.warnings)} warning(s))")
+        status = "VALID" if not errors else "INVALID"
+        print(
+            f"{status}: {args.path} ({len(errors)} error(s), {len(warnings)} warning(s), "
+            f"{result['validation']}, profile={document.profile})"
+        )
         for item in result["issues"][: args.max_issues]:
             print(
                 f"{item['severity'].upper()} {item['code']} at {item['path']}: "
                 f"{item['message']}"
             )
         if len(result["issues"]) > args.max_issues:
-            print(f"... {len(result['issues']) - args.max_issues} additional issue(s) omitted")
-    return 0 if report.is_valid else 1
+            print(
+                f"... {len(result['issues']) - args.max_issues} additional issue(s) omitted"
+            )
+    return 0 if not errors else 1
 
 
 def _diff(args: argparse.Namespace) -> int:
@@ -227,7 +254,8 @@ def _diff(args: argparse.Namespace) -> int:
     right_bytes = Path(args.right).read_bytes()
     common = min(len(left_bytes), len(right_bytes))
     mismatch = next(
-        (index for index in range(common) if left_bytes[index] != right_bytes[index]), None
+        (index for index in range(common) if left_bytes[index] != right_bytes[index]),
+        None,
     )
     if mismatch is None and len(left_bytes) != len(right_bytes):
         mismatch = common
@@ -307,7 +335,9 @@ def _import_nx10(args: argparse.Namespace) -> int:
             f"({report.splits} split(s), {report.blocks} block(s), {report.rows} row(s))"
         )
         for diagnostic in report.diagnostics:
-            location = f" at 0x{diagnostic.offset:X}" if diagnostic.offset is not None else ""
+            location = (
+                f" at 0x{diagnostic.offset:X}" if diagnostic.offset is not None else ""
+            )
             path = f" [{diagnostic.path}]" if diagnostic.path else ""
             print(
                 f"{diagnostic.kind.value.upper()} {diagnostic.code}{location}{path}: "
@@ -329,13 +359,16 @@ def _folder_result(workspace) -> dict:
                 "valid": entry.validation.is_valid,
                 "modified": entry.is_modified,
                 "import_semantically_lossless": (
-                    entry.import_report.is_semantically_lossless if entry.import_report else None
+                    entry.import_report.is_semantically_lossless
+                    if entry.import_report
+                    else None
                 ),
             }
             for entry in workspace.documents
         ],
         "failures": [
-            {"path": str(failure.path), "error": failure.error} for failure in workspace.failures
+            {"path": str(failure.path), "error": failure.error}
+            for failure in workspace.failures
         ],
         "audio_candidates": [
             {"path": str(candidate.path), "score": candidate.score}
@@ -355,7 +388,9 @@ def _folder_result(workspace) -> dict:
 
 
 def _folder_inspect(args: argparse.Namespace) -> int:
-    workspace = open_folder(args.path, profile=args.profile, row_storage=args.row_storage)
+    workspace = open_folder(
+        args.path, profile=args.profile, row_storage=args.row_storage
+    )
     result = _folder_result(workspace)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -380,7 +415,9 @@ def _folder_inspect(args: argparse.Namespace) -> int:
 
 
 def _folder_save_plan(args: argparse.Namespace) -> int:
-    workspace = open_folder(args.path, profile=args.profile, row_storage=args.row_storage)
+    workspace = open_folder(
+        args.path, profile=args.profile, row_storage=args.row_storage
+    )
     plan = plan_save_all(workspace)
     result = {
         "root": str(workspace.root),
@@ -418,7 +455,9 @@ def _folder_save_plan(args: argparse.Namespace) -> int:
 
 
 def _folder_generate_lightmap(args: argparse.Namespace) -> int:
-    workspace = open_folder(args.path, profile=args.profile, row_storage=args.row_storage)
+    workspace = open_folder(
+        args.path, profile=args.profile, row_storage=args.row_storage
+    )
     target = (workspace.root / "LM.NX").resolve()
     existed = target.exists()
     plan = plan_blank_lightmap(workspace, args.bpm)
@@ -486,31 +525,47 @@ def _mirror_compare(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="stepnx", description="StepNX Studio lossless NX20 tools")
-    parser.add_argument("--version", action="version", version="StepNX Studio core 0.1.0.dev0")
+    parser = argparse.ArgumentParser(
+        prog="stepnx", description="StepNX Studio lossless NX20 tools"
+    )
+    parser.add_argument(
+        "--version", action="version", version="StepNX Studio core 0.1.0.dev0"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    inspect_parser = subparsers.add_parser("inspect", help="inspect an NX20/NFO document")
+    inspect_parser = subparsers.add_parser(
+        "inspect", help="inspect an NX20/NFO document"
+    )
     inspect_parser.add_argument("path", type=Path)
     inspect_parser.add_argument("--profile", default="nxa-native")
-    inspect_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    inspect_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     inspect_parser.add_argument("--json", action="store_true")
     inspect_parser.set_defaults(handler=_inspect)
 
-    roundtrip_parser = subparsers.add_parser("roundtrip", help="rebuild and compare an NX20/NFO document")
+    roundtrip_parser = subparsers.add_parser(
+        "roundtrip", help="rebuild and compare an NX20/NFO document"
+    )
     roundtrip_parser.add_argument("path", type=Path)
     roundtrip_parser.add_argument("--output", "-o", type=Path)
     roundtrip_parser.add_argument("--profile", default="nxa-native")
-    roundtrip_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    roundtrip_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     roundtrip_parser.add_argument("--force", action="store_true")
     roundtrip_parser.add_argument("--backup", action="store_true")
     roundtrip_parser.add_argument("--json", action="store_true")
     roundtrip_parser.set_defaults(handler=_roundtrip)
 
-    verify_parser = subparsers.add_parser("verify", help="verify byte-exact round-trip for files or folders")
+    verify_parser = subparsers.add_parser(
+        "verify", help="verify byte-exact round-trip for files or folders"
+    )
     verify_parser.add_argument("paths", nargs="+")
     verify_parser.add_argument("--profile", default="nxa-native")
-    verify_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    verify_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     verify_parser.add_argument("--strict-formats", action="store_true")
     verify_parser.add_argument("--max-errors", type=int, default=20)
     verify_parser.add_argument("--json", action="store_true")
@@ -521,16 +576,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_parser.add_argument("path", type=Path)
     validate_parser.add_argument("--profile", default="nxa-native")
-    validate_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    validate_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     validate_parser.add_argument("--max-issues", type=int, default=50)
+    validate_parser.add_argument(
+        "--authoring",
+        action="store_true",
+        help="also apply the selected engine profile's semantic authoring rules",
+    )
     validate_parser.add_argument("--json", action="store_true")
     validate_parser.set_defaults(handler=_validate)
 
-    diff_parser = subparsers.add_parser("diff", help="report binary and structural differences")
+    diff_parser = subparsers.add_parser(
+        "diff", help="report binary and structural differences"
+    )
     diff_parser.add_argument("left", type=Path)
     diff_parser.add_argument("right", type=Path)
     diff_parser.add_argument("--profile", default="nxa-native")
-    diff_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    diff_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     diff_parser.add_argument("--max-changes", type=int, default=100)
     diff_parser.add_argument("--json", action="store_true")
     diff_parser.set_defaults(handler=_diff)
@@ -547,20 +613,26 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.set_defaults(handler=_import_nx10)
 
     folder_parser = subparsers.add_parser(
-        "folder-inspect", help="open all immediate NX documents and report isolated failures"
+        "folder-inspect",
+        help="open all immediate NX documents and report isolated failures",
     )
     folder_parser.add_argument("path", type=Path)
     folder_parser.add_argument("--profile", default="nxa-native")
-    folder_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    folder_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     folder_parser.add_argument("--json", action="store_true")
     folder_parser.set_defaults(handler=_folder_inspect)
 
     plan_parser = subparsers.add_parser(
-        "folder-save-plan", help="preflight a complete-folder Save All operation without writing"
+        "folder-save-plan",
+        help="preflight a complete-folder Save All operation without writing",
     )
     plan_parser.add_argument("path", type=Path)
     plan_parser.add_argument("--profile", default="nxa-native")
-    plan_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    plan_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     plan_parser.add_argument("--json", action="store_true")
     plan_parser.set_defaults(handler=_folder_save_plan)
 
@@ -572,7 +644,9 @@ def build_parser() -> argparse.ArgumentParser:
     lightmap_parser.add_argument("--bpm", type=float, required=True)
     lightmap_parser.add_argument("--write", action="store_true")
     lightmap_parser.add_argument("--profile", default="nxa-native")
-    lightmap_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    lightmap_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     lightmap_parser.add_argument("--json", action="store_true")
     lightmap_parser.set_defaults(handler=_folder_generate_lightmap)
 
@@ -582,7 +656,9 @@ def build_parser() -> argparse.ArgumentParser:
     mirror_parser.add_argument("source", type=Path)
     mirror_parser.add_argument("target", type=Path)
     mirror_parser.add_argument("--profile", default="nxa-native")
-    mirror_parser.add_argument("--row-storage", choices=("rich", "compact"), default="compact")
+    mirror_parser.add_argument(
+        "--row-storage", choices=("rich", "compact"), default="compact"
+    )
     mirror_parser.add_argument("--max-changes", type=int, default=100)
     mirror_parser.add_argument("--json", action="store_true")
     mirror_parser.set_defaults(handler=_mirror_compare)
