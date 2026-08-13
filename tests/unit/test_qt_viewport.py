@@ -276,7 +276,10 @@ class QtViewportSmokeTests(unittest.TestCase):
         widget = TimelineWidget(create_authoring_snapshot(document))
         try:
             widget.resize(420, 300)
+            widget.show()
+            self.application.processEvents()
             widget._sync_scrollbars()
+            self.assertGreaterEqual(widget.horizontalScrollBar().maximum(), 12)
             widget.verticalScrollBar().setValue(700)
             widget.horizontalScrollBar().setValue(12)
 
@@ -355,6 +358,12 @@ class QtViewportSmokeTests(unittest.TestCase):
             scrollbar = widget.verticalScrollBar()
             scrollbar.setValue(200)
             before = scrollbar.value()
+            segment = widget._layout.segment_at_y(before + 120)
+            self.assertIsNotNone(segment)
+            expected_distance = round(
+                0.5 * segment.block.beat_split * segment.row_height
+            )
+            self.assertEqual(expected_distance, 48)
             event = QWheelEvent(
                 QPointF(200, 120),
                 QPointF(200, 120),
@@ -370,7 +379,7 @@ class QtViewportSmokeTests(unittest.TestCase):
 
             self.assertEqual(
                 scrollbar.value(),
-                before - 12,
+                before - expected_distance,
             )
         finally:
             widget.close()
