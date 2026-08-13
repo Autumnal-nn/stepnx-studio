@@ -1,0 +1,42 @@
+name: Windows package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-package:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install GUI and packaging dependencies
+        run: py -m pip install -e ".[gui,build]"
+
+      - name: Run the complete Windows test suite
+        run: py tools/run_windows_test_gate.py
+
+      - name: Build Windows package
+        shell: powershell
+        run: ./tools/build_windows_package.ps1 -SkipInstall -SkipTests
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: StepNX-Studio-Windows
+          path: dist/StepNX-Studio-Windows.zip
+          if-no-files-found: error
+          retention-days: 30
