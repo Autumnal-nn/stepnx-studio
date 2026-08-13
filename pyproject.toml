@@ -22,12 +22,14 @@ dependencies = []
 
 [project.optional-dependencies]
 gui = ["PySide6>=6.7,<7"]
+build = ["PyInstaller>=6.11,<7"]
 
 [project.scripts]
 stepnx = "stepnx.cli.main:main"
 nxroundtrip = "stepnx.cli.roundtrip:main"
 stepnx-studio = "stepnx.gui.app:main"
 stepnx-viewport-benchmark = "stepnx.authoring.benchmark:main"
+stepnx-preview-benchmark = "stepnx.preview.benchmark:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

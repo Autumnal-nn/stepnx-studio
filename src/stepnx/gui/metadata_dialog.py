@@ -22,7 +22,9 @@ from stepnx.core.profiles import (
     ValueKind,
     authorable_metadata,
     metadata_definition,
+    pack_dm120,
     pack_u16_range,
+    unpack_dm120,
     unpack_u16_range,
 )
 
@@ -218,6 +220,22 @@ class MetadataCollectionDialog(QDialog):
                 return pack_u16_range(int(left, 0), int(right, 0))
             except (ValueError, TypeError) as exc:
                 QMessageBox.critical(self, "Invalid range", str(exc))
+                return None
+        if definition.kind is ValueKind.PACKED_DM120:
+            mode, weight = unpack_dm120(current)
+            text, accepted = QInputDialog.getText(
+                self,
+                definition.label,
+                "Mode/weight (mode 0 or 1; signed weight):",
+                text=f"{mode}/{weight}",
+            )
+            if not accepted:
+                return None
+            try:
+                left, right = text.split("/", 1)
+                return pack_dm120(int(left, 0), int(right, 0))
+            except (ValueError, TypeError) as exc:
+                QMessageBox.critical(self, "Invalid DM120 value", str(exc))
                 return None
         if definition.kind is ValueKind.FLOAT32_BITS:
             value = struct.unpack("<f", struct.pack("<I", current))[0]

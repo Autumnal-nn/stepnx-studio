@@ -178,7 +178,6 @@ class MetronomeClock:
             if (
                 block.bpm <= 0
                 or block.beat_split <= 0
-                or block.smooth_speed & 0x02
             ):
                 continue
             end = block.start_time + block.row_count * 60_000.0 / (
@@ -216,7 +215,6 @@ class NoteMetronomeClock:
             if (
                 block.bpm <= 0
                 or block.beat_split <= 0
-                or block.smooth_speed & 0x02
             ):
                 continue
             row_duration = 60_000.0 / (block.bpm * block.beat_split)

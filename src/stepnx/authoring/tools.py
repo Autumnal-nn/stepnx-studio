@@ -18,7 +18,7 @@ class NoteFunction(str, Enum):
     """StepEdit-compatible meanings of the two functional bits in raw[0]."""
 
     NORMAL = "normal"
-    HIDDEN = "hidden"
+    BONUS = "bonus"
     GHOST = "ghost"
 
 
@@ -31,7 +31,7 @@ class NoteVisibility(IntEnum):
 
 _FUNCTION_BITS = {
     NoteFunction.NORMAL: 0x40,
-    NoteFunction.HIDDEN: 0x60,
+    NoteFunction.BONUS: 0x60,
     NoteFunction.GHOST: 0x20,
 }
 

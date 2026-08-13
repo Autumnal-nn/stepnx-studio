@@ -17,8 +17,10 @@ from stepnx.core.profiles import (
     ValueKind,
     authorable_metadata,
     metadata_definition,
+    pack_dm120,
     pack_u16_range,
     profile_capabilities,
+    unpack_dm120,
     unpack_u16_range,
 )
 from tests.fixture_factory import make_implicit_lightmap, make_normal_nx20
@@ -79,6 +81,32 @@ class ProfileRegistryTests(unittest.TestCase):
         self.assertEqual(unpack_u16_range(value), (2, 600))
         with self.assertRaises(ValueError):
             pack_u16_range(-1, 2)
+
+    def test_dm120_signed_packing_and_profile_scope(self) -> None:
+        self.assertEqual(unpack_dm120(pack_dm120(0, -1)), (0, -1))
+        self.assertEqual(unpack_dm120(pack_dm120(1, -2)), (1, -2))
+        self.assertEqual(unpack_dm120(pack_dm120(1, 255)), (1, 255))
+        with self.assertRaises(ValueError):
+            pack_dm120(0, -2)
+        with self.assertRaises(ValueError):
+            pack_dm120(1, -3)
+        with self.assertRaises(ValueError):
+            pack_dm120(2, 1)
+        self.assertIsNone(
+            metadata_definition("nxa-native", MetadataScope.DIVISION, 120)
+        )
+        definition = metadata_definition(
+            "nxa-step5-patched", MetadataScope.DIVISION, 120
+        )
+        self.assertEqual(definition.kind, ValueKind.PACKED_DM120)
+        self.assertEqual(
+            definition.display_value(pack_dm120(1, -2)),
+            "1/-2 (Same judgment)",
+        )
+        self.assertIn(
+            "division-120-judgment-weight",
+            profile_capabilities("nxa-step5-patched"),
+        )
 
 
 class SemanticProjectionTests(unittest.TestCase):
@@ -193,6 +221,23 @@ class SemanticProjectionTests(unittest.TestCase):
                 issue.path == gm65_path and issue.code == "metadata.unknown"
                 for issue in report.issues
             )
+        )
+
+    def test_patched_profile_rejects_invalid_dm120_encoding(self) -> None:
+        document = replace(
+            parse_bytes(make_normal_nx20()), profile="nxa-step5-patched"
+        )
+        block = document.splits[0].blocks[0]
+        for invalid_value in (2 | (1 << 16), 0xFFFE0000):
+            document = InsertMetadata.from_ints(
+                block.stable_id, 120, invalid_value
+            ).apply(document)
+        report = validate_authoring(document)
+        self.assertEqual(
+            sum(
+                issue.code == "metadata.dm120-invalid" for issue in report.errors
+            ),
+            2,
         )
 
 

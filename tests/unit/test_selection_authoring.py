@@ -138,7 +138,7 @@ class BulkSelectionTests(unittest.TestCase):
         )
 
         command = modify_selection_notes(
-            document, selection, NoteFunction.HIDDEN, NoteVisibility.APPEAR
+            document, selection, NoteFunction.BONUS, NoteVisibility.APPEAR
         )
         edited = command.apply(document).splits[0].blocks[0].rows[0]
 

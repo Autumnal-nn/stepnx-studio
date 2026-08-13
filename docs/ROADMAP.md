@@ -1,6 +1,6 @@
 # StepNX Studio technical roadmap
 
-Revision: 2026-08-11
+Revision: 2026-08-12
 
 Target: a lossless native NX20 desktop editor, not another converter wrapped in
 a brittle GUI
@@ -174,7 +174,7 @@ Delivered:
 Performance gate: target 60 fps and require at least 30 fps during scroll/zoom on
 the stress fixture without abandoning compact storage.
 
-### Phase 6 — Practical visual editing (implementation complete; Windows gate pending)
+### Phase 6 — Practical visual editing (complete)
 
 - note placement, deletion, drag, and typed item editing;
 - block and split insertion/removal/move;
@@ -210,15 +210,16 @@ Delivered for validation:
   cells whose shaft fragments stop exactly at the head/tail artwork;
 - StepEdit-compatible note function/visibility flag editing and visible snap
   guides.
-- Beat Split-independent beat geometry, playback-only `scroll` scaling, zero-scroll collapse,
-  smooth-warp skipping, and non-obstructing side-gutter Block labels;
+- StepEdit-style fixed encoded-row geometry shared exactly by editing and
+  playback, preserved viewport/zoom across Play/Pause, and non-obstructing
+  side-gutter Block labels;
 - compact Audio and Settings menus with conservative defaults.
 
 This phase is where the project finally earns the word “editor.” Shipping a
 pretty read-only timeline before commands are dependable would be a demo, not a
 product.
 
-### Phase 7 — Advanced NX20 authoring (implementation complete; Windows gate pending)
+### Phase 7 — Advanced NX20 authoring (complete)
 
 - profile-aware Brain Shower metadata and question tooling;
 - conditional branches and route visualization;
@@ -250,16 +251,52 @@ Delivered for validation:
   explicit duplicate policy and Lightmap exclusion;
 - GUI mirror comparison/export that keeps NX and NFO deployment roles explicit.
 
-### Phase 8 — Gameplay preview
+### Phase 8 — Gameplay simulator (implementation candidate; packaged gate pending)
 
 - export a read-only `PreviewSnapshot`;
 - manual route selection;
 - deterministic seeded random routes;
-- profile-specific all-perfect autoplay state;
+- runtime autoplay and two-player pad input on one execution surface;
+- one initialization dialog for `.NX` filename, 1x–9x, and COMMAND;
+- speed keys, debug display, guide, seek, and runtime flags;
 - unsupported-condition diagnostics;
 - compare timing against NXA behavior;
 - evaluate an independent web renderer versus a native Qt implementation;
 - ship with no official artwork/JPAK assets.
+
+Delivered for validation:
+
+- immutable `PreviewSnapshot` projection that retains every Block branch and
+  source-backed row collection without granting mutation access;
+- explicit manual route choices, local seeded RNG, recorded route decisions,
+  and deterministic all-perfect state for proven NXA condition counters;
+- blocking diagnostics for missing choices, random ties without a seed,
+  unsupported applause state, no-match routes, Lightmaps, and invalid timing;
+- a runtime event stream anchored to each Block's explicit Start Time and BPM,
+  with conservative warnings for unproven freeze, warp, and Scroll behavior;
+- a native Qt renderer selected over a browser/WebPrime integration, avoiding a
+  second parser and all unlicensed JPAK/runtime assets;
+- synchronized audio time, continuous scroll geometry, animated supported
+  noteskin frames, native five-pitch sequence-zone strips, remapped input/STEPFX
+  feedback, Double's continuous ten-lane receptor pitch, a divider-free field,
+  bounded recent feedback projection, original fallback shapes, and read-only
+  preview tabs;
+- composed chart visibility and COMMAND display behavior for Appear, Vanish,
+  Invisible, Non-Step, Freedom, Flash, Mirror, Random, and Judge Reverse, with
+  Ghost and Bonus/Hidden kept as distinct NX20 function families;
+- the shared authoring metronome toggle and per-arrow/per-beat mode apply to the
+  immutable snapshot of the active preview tab;
+- a recorded PIUTESTER behavioral audit with a strict prohibition on copying
+  its proprietary executable, scripts, DAT archives, manual text, or artwork.
+- internally randomized route seeds, with random selection restricted to Splits
+  whose flags request it and shared only by matching nonzero lower-five-bit
+  banks; zero lower bits create independent random events;
+- additive STEPFX composition for opaque RGB sheets that use black as the
+  neutral background.
+
+Exact judgment, grade, score, gauge, freeze, modifier-curve, and later-engine
+behavior are not complete until independent NXA, Fiesta 2, and Prime captures
+establish profile evidence. Local debug counters are labeled accordingly.
 
 The preview comes after the authoring timeline and command model. A simulator on
 top of unstable semantics is an attractive way to debug the wrong program.

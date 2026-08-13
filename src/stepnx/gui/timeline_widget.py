@@ -162,6 +162,16 @@ class TimelineWidget(QAbstractScrollArea):
         active = bool(active)
         if active == self._playback_active:
             return
+        vertical_position = self.verticalScrollBar().value()
+        # Layout height legitimately changes between the editable encoded-row
+        # grid and gameplay projection. Preserve the playhead's position in
+        # the viewport, rather than the now-meaningless raw scrollbar value.
+        playhead_view_y = (
+            None
+            if self._playback_y is None
+            else self._playback_y - vertical_position
+        )
+        horizontal_position = self.horizontalScrollBar().value()
         self._playback_active = active
         self._layout = TimelineLayout(
             self._snapshot, self._geometry, playback=self._playback_active
@@ -172,6 +182,12 @@ class TimelineWidget(QAbstractScrollArea):
             else self._layout.y_for_chart_time(self._playback_time_ms)
         )
         self._sync_scrollbars()
+        self.verticalScrollBar().setValue(
+            vertical_position
+            if playhead_view_y is None or self._playback_y is None
+            else round(self._playback_y - playhead_view_y)
+        )
+        self.horizontalScrollBar().setValue(horizontal_position)
         self.viewport().update()
 
     def _snapped_hit(self, hit):

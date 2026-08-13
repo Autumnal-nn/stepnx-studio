@@ -31,10 +31,8 @@ class BlockTimingDialog(QDialog):
         self._flag = self._integer(values.raw_flag, 0, 255)
         self._freeze = QCheckBox("Freeze/stop Block (negative Speed)")
         self._freeze.setChecked(values.is_freeze)
-        self._smooth_transition = QCheckBox("Smooth transition (bit 0)")
-        self._warp = QCheckBox("Warp Block (bit 1)")
-        self._smooth_transition.setChecked(bool(values.smooth_speed & 0x01))
-        self._warp.setChecked(bool(values.smooth_speed & 0x02))
+        self._smooth_transition = QCheckBox("Smooth scroll transition (nonzero byte)")
+        self._smooth_transition.setChecked(values.smooth_speed != 0)
         self._real_scroll = QLabel()
 
         form = QFormLayout()
@@ -49,7 +47,6 @@ class BlockTimingDialog(QDialog):
         form.addRow("Beat Measure", self._measure)
         form.addRow("Smooth Speed byte", self._smooth)
         form.addRow("", self._smooth_transition)
-        form.addRow("", self._warp)
         form.addRow("Raw Flag", self._flag)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -62,9 +59,8 @@ class BlockTimingDialog(QDialog):
 
         self._scroll.valueChanged.connect(self._refresh_real_scroll)
         self._split.valueChanged.connect(self._refresh_real_scroll)
-        self._smooth.valueChanged.connect(self._read_smooth_bits)
-        self._smooth_transition.toggled.connect(self._write_smooth_bits)
-        self._warp.toggled.connect(self._write_smooth_bits)
+        self._smooth.valueChanged.connect(self._read_smooth_value)
+        self._smooth_transition.toggled.connect(self._write_smooth_value)
         self._refresh_real_scroll()
 
     @staticmethod
@@ -89,21 +85,18 @@ class BlockTimingDialog(QDialog):
     def _refresh_real_scroll(self, *args) -> None:
         self._real_scroll.setText(f"{self._scroll.value() * self._split.value():g}")
 
-    def _read_smooth_bits(self, *args) -> None:
+    def _read_smooth_value(self, *args) -> None:
         raw = self._smooth.value()
         self._smooth_transition.blockSignals(True)
-        self._warp.blockSignals(True)
-        self._smooth_transition.setChecked(bool(raw & 0x01))
-        self._warp.setChecked(bool(raw & 0x02))
+        self._smooth_transition.setChecked(raw != 0)
         self._smooth_transition.blockSignals(False)
-        self._warp.blockSignals(False)
 
-    def _write_smooth_bits(self, *args) -> None:
-        raw = self._smooth.value() & ~0x03
+    def _write_smooth_value(self, *args) -> None:
+        raw = self._smooth.value()
         if self._smooth_transition.isChecked():
-            raw |= 0x01
-        if self._warp.isChecked():
-            raw |= 0x02
+            raw = raw or 1
+        else:
+            raw = 0
         self._smooth.blockSignals(True)
         self._smooth.setValue(raw)
         self._smooth.blockSignals(False)

@@ -19,8 +19,10 @@ from stepnx.core.profiles import (
     authorable_metadata,
     get_profile,
     metadata_definition,
+    pack_dm120,
     pack_u16_range,
     profile_capabilities,
+    unpack_dm120,
     unpack_u16_range,
 )
 from stepnx.core.scalars import RawF32, RawU8, RawU16, RawU32, SourceSpan
@@ -53,8 +55,10 @@ __all__ = [
     "diff_documents",
     "get_profile",
     "metadata_definition",
+    "pack_dm120",
     "pack_u16_range",
     "profile_capabilities",
+    "unpack_dm120",
     "unpack_u16_range",
     "validate",
 ]
