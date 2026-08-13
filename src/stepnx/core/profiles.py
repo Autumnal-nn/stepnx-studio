@@ -17,6 +17,7 @@ class ValueKind(str, Enum):
     FLOAT32_BITS = "float32-bits"
     BITMASK = "bitmask"
     PACKED_U16_RANGE = "packed-u16-range"
+    PACKED_DM120 = "packed-dm120"
     ENUM = "enum"
     TRAILER_OFFSET = "trailer-offset"
 
@@ -68,6 +69,12 @@ class MetadataDefinition:
         if self.kind is ValueKind.PACKED_U16_RANGE:
             minimum, maximum = unpack_u16_range(raw_value)
             return f"{minimum}..{maximum}"
+        if self.kind is ValueKind.PACKED_DM120:
+            mode, weight = unpack_dm120(raw_value)
+            mode_label = {0: "Perfect additions", 1: "Same judgment"}.get(
+                mode, f"Invalid mode {mode}"
+            )
+            return f"{mode}/{weight} ({mode_label})"
         if self.kind is ValueKind.BITMASK:
             labels = [bit.label for bit in self.bits if raw_value & bit.mask]
             known = sum(bit.mask for bit in self.bits)
@@ -101,6 +108,23 @@ def pack_u16_range(minimum: int, maximum: int) -> int:
     if not 0 <= minimum <= 0xFFFF or not 0 <= maximum <= 0xFFFF:
         raise ValueError("packed metadata bounds must fit unsigned 16-bit values")
     return minimum | (maximum << 16)
+
+
+def unpack_dm120(value: int) -> tuple[int, int]:
+    mode = value & 0xFFFF
+    weight = (value >> 16) & 0xFFFF
+    if weight & 0x8000:
+        weight -= 0x10000
+    return mode, weight
+
+
+def pack_dm120(mode: int, weight: int) -> int:
+    if mode not in (0, 1):
+        raise ValueError("DM120 mode must be 0 or 1")
+    minimum = -1 if mode == 0 else -2
+    if not minimum <= weight <= 255:
+        raise ValueError(f"DM120 mode {mode} weight must be {minimum}..255")
+    return mode | ((weight & 0xFFFF) << 16)
 
 
 _HEADER_SPLIT = frozenset((MetadataScope.HEADER, MetadataScope.SPLIT))
@@ -383,6 +407,17 @@ PATCHED_METADATA = (
         evidence=Evidence.RUNTIME_CONFIRMED,
         description="Patched full-range Division metadata; values are not collapsed to boolean.",
     ),
+    MetadataDefinition(
+        120,
+        "Judgment effect weight",
+        _DIVISION,
+        ValueKind.PACKED_DM120,
+        Evidence.EXECUTABLE,
+        description=(
+            "low16 mode (0=non-Miss adds Perfect, 1=repeats the same judgment); "
+            "signed high16 y. Mode 0 accepts -1..255 and mode 1 accepts -2..255."
+        ),
+    ),
     MetadataDefinition(900, "Default noteskin", _HEADER_SPLIT, minimum=0, maximum=31),
     *(
         MetadataDefinition(
@@ -430,6 +465,7 @@ PROFILES = {
                 "condition-minlife",
                 "gm65-vj-window",
                 "division-111-cheer",
+                "division-120-judgment-weight",
                 "items-21-23",
                 "noteskins-0-31",
                 "command-jh",

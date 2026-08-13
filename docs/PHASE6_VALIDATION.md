@@ -59,7 +59,7 @@ Validate these behaviors:
    - Verify each operation takes one Undo step and paste refuses to cross a
      lane or Block boundary.
 
-3. **Dense splits and snapping**
+3. **Fixed rows and snapping**
    - Compare a low Beat Split with a high one.
    - Under **File → Settings → Snap**, check **Off**, **1 beat**, **1/2 beat**,
      **1/4 beat**, and **1/8 beat** snapping. **Off** must be the default.
@@ -67,6 +67,8 @@ Validate these behaviors:
      on the closest guide. **Off — every row** intentionally disables rounding.
    - Confirm one wheel notch scrolls `0.5 beat` in both charts.
    - Confirm note heads remain square at minimum and maximum zoom.
+   - Confirm every encoded row has the same height in both charts. A higher
+     Beat Split must make the beat taller, not compress the rows.
 
 4. **Noteskin holds**
    - Start with the bundled royalty-free noteskin. A local `noteskin` directory
@@ -104,11 +106,11 @@ Validate these behaviors:
      tick, and hold bodies/tails must remain silent.
    - In **Per arrow**, Hidden and Invisible-registering taps/hold heads must
      tick, while Ghost notes must not. Visibility alone does not control sound.
-   - Compare low and high Beat Split values: one beat must retain the same
-     vertical height while the individual rows become denser. During playback,
-     confirm each Block uses `scroll` as its vertical scale, `scroll = 0`
-     collapses, and pausing restores authoring spacing. Smooth-warp Blocks
-     (`smooth speed & 0x02`) must be skipped.
+   - Compare low and high Beat Split values: every encoded row must retain the
+     same vertical height while the higher split makes one beat taller. Start
+     Play and Pause in the middle of the chart: zoom and viewport position must
+     remain identical. Scroll and Smooth Speed belong to gameplay projection
+     and must not rescale or collapse the authoring grid.
    - Confirm Split/Block/BPM information appears in the right-side gutter and
      never consumes a row above the chart.
    - Select `732.AUD` and confirm it decodes to a temporary MP3 and plays.

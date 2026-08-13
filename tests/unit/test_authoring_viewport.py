@@ -98,6 +98,7 @@ class TimelineLayoutTests(unittest.TestCase):
     def test_zoom_supports_sixty_four_times_the_previous_ceiling(self) -> None:
         geometry = TimelineGeometry()
 
+        self.assertEqual(geometry.row_height, geometry.lane_width)
         self.assertEqual(geometry.maximum_row_height, 96 * 64)
         self.assertEqual(geometry.zoomed(10_000).row_height, 96 * 64)
         self.assertEqual(geometry.zoomed(10_000).zoomed(2).row_height, 96 * 64)
@@ -114,7 +115,7 @@ class TimelineLayoutTests(unittest.TestCase):
         self.assertEqual(compressed_rect[0], normal_rect[0])
         self.assertEqual(normal_rect[1] - compressed_rect[1], 10.0)
 
-    def test_beat_distance_is_constant_across_beat_splits(self) -> None:
+    def test_encoded_row_height_is_constant_across_beat_splits(self) -> None:
         source_split = self.snapshot.splits[0]
 
         def layout_for(beat_split: int) -> TimelineLayout:
@@ -130,10 +131,10 @@ class TimelineLayoutTests(unittest.TestCase):
             split_128.segments[0].rows_top + 1, 1.0
         )
 
-        self.assertEqual(split_8.segments[0].row_height, 4 / 8)
-        self.assertEqual(split_128.segments[0].row_height, 4 / 128)
-        self.assertEqual(distance_8, 4)
-        self.assertEqual(distance_128, 4)
+        self.assertEqual(split_8.segments[0].row_height, 4)
+        self.assertEqual(split_128.segments[0].row_height, 4)
+        self.assertEqual(distance_8, 32)
+        self.assertEqual(distance_128, 512)
 
     def test_chart_time_projects_to_fractional_row_geometry(self) -> None:
         layout = TimelineLayout(self.snapshot, TimelineGeometry(row_height=20))
@@ -153,9 +154,9 @@ class TimelineLayoutTests(unittest.TestCase):
             segment.rows_top,
         )
 
-    def test_playback_scales_constant_beat_height_by_scroll(self) -> None:
+    def test_playback_projection_does_not_change_fixed_authoring_rows(self) -> None:
         source_split = self.snapshot.splits[0]
-        block = replace(source_split.blocks[0], scroll=0.75, beat_split=4)
+        block = replace(source_split.blocks[0], scroll=0.25, beat_split=4)
         snapshot = replace(
             self.snapshot,
             splits=(replace(source_split, blocks=(block,)),),
@@ -166,18 +167,18 @@ class TimelineLayoutTests(unittest.TestCase):
             snapshot, TimelineGeometry(row_height=20), playback=True
         )
 
-        self.assertEqual(authoring.segments[0].row_height, 5)
-        self.assertEqual(playback.segments[0].row_height, 3.75)
+        self.assertEqual(authoring.segments[0].row_height, 20)
+        self.assertEqual(playback.segments[0].row_height, 20)
         self.assertEqual(
             authoring.pixels_for_beats_at_y(authoring.segments[0].rows_top, 1),
-            20,
+            80,
         )
         self.assertEqual(
             playback.pixels_for_beats_at_y(playback.segments[0].rows_top, 1),
-            15,
+            80,
         )
 
-    def test_zero_scroll_block_collapses_only_in_playback(self) -> None:
+    def test_zero_scroll_does_not_collapse_the_authoring_grid(self) -> None:
         source_split = self.snapshot.splits[0]
         block = replace(source_split.blocks[0], scroll=0.0)
         snapshot = replace(
@@ -191,9 +192,34 @@ class TimelineLayoutTests(unittest.TestCase):
         )
 
         self.assertGreater(authoring.segments[0].bottom, authoring.segments[0].top)
+        self.assertEqual(playback.segments[0].row_height, 0)
         self.assertEqual(playback.segments[0].bottom, playback.segments[0].top)
+        row_duration = 60_000.0 / (block.bpm * block.beat_split)
+        middle_time = block.start_time + row_duration * (block.row_count / 2)
+        self.assertEqual(
+            playback.y_for_chart_time(middle_time),
+            playback.segments[0].rows_top,
+        )
+        self.assertGreater(
+            authoring.y_for_chart_time(middle_time),
+            authoring.segments[0].rows_top,
+        )
 
-    def test_smooth_warp_block_is_skipped_by_playhead_projection(self) -> None:
+    def test_playback_projection_uses_scroll_times_beat_split(self) -> None:
+        source_split = self.snapshot.splits[0]
+        block = replace(source_split.blocks[0], scroll=0.5, beat_split=4)
+        snapshot = replace(
+            self.snapshot,
+            splits=(replace(source_split, blocks=(block,)),),
+        )
+
+        playback = TimelineLayout(
+            snapshot, TimelineGeometry(row_height=20), playback=True
+        )
+
+        self.assertEqual(playback.segments[0].row_height, 40)
+
+    def test_smooth_speed_block_remains_in_playhead_projection(self) -> None:
         source_split = self.snapshot.splits[0]
         block = replace(source_split.blocks[0], smooth_speed=2)
         snapshot = replace(
@@ -201,7 +227,45 @@ class TimelineLayoutTests(unittest.TestCase):
             splits=(replace(source_split, blocks=(block,)),),
         )
 
-        self.assertIsNone(TimelineLayout(snapshot).y_for_chart_time(block.start_time))
+        self.assertIsNotNone(TimelineLayout(snapshot).y_for_chart_time(block.start_time))
+
+    def test_playhead_uses_latest_started_block_when_smooth_ranges_overlap(
+        self,
+    ) -> None:
+        source_split = self.snapshot.splits[0]
+        first = replace(source_split.blocks[0], smooth_speed=2, start_time=0.0)
+        second_split_id = source_split.stable_id + 100_000
+        second = replace(
+            source_split.blocks[0],
+            stable_id=source_split.blocks[0].stable_id + 100_000,
+            split_id=second_split_id,
+            smooth_speed=0,
+            start_time=500.0,
+        )
+        first_split = replace(source_split, blocks=(first,))
+        second_split = replace(
+            source_split,
+            stable_id=second_split_id,
+            index=source_split.index + 1,
+            blocks=(second,),
+        )
+        snapshot = replace(
+            self.snapshot,
+            splits=(first_split, second_split),
+            active_blocks=(
+                (first_split.stable_id, first.stable_id),
+                (second_split.stable_id, second.stable_id),
+            ),
+        )
+        layout = TimelineLayout(snapshot, TimelineGeometry(row_height=20))
+
+        expected = layout.segments[1].rows_top + (
+            (750.0 - second.start_time)
+            / (60_000.0 / (second.bpm * second.beat_split))
+            * layout.segments[1].row_height
+        )
+
+        self.assertAlmostEqual(layout.y_for_chart_time(750.0), expected)
 
     def test_snapping_uses_musical_intervals_and_stays_inside_block(self) -> None:
         layout = TimelineLayout(self.snapshot)

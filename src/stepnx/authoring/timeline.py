@@ -9,7 +9,9 @@ from stepnx.authoring.snapshot import AuthoringSnapshot, BlockSnapshot
 
 @dataclass(frozen=True, slots=True)
 class TimelineGeometry:
-    row_height: float = 24.0
+    # StepEdit uses a fixed 24 px for both a lane and every encoded row. StepNX
+    # renders lanes at 2x that size, so 48 px preserves the same square grid.
+    row_height: float = 48.0
     block_header_height: float = 0.0
     lane_width: float = 48.0
     ruler_width: float = 92.0
@@ -100,7 +102,13 @@ class BeatMarker:
 class TimelineLayout:
     """Pure geometry and culling for the active read-only branch."""
 
-    __slots__ = ("_bottoms", "content_height", "geometry", "segments", "snapshot")
+    __slots__ = (
+        "_bottoms",
+        "content_height",
+        "geometry",
+        "segments",
+        "snapshot",
+    )
 
     def __init__(
         self,
@@ -117,14 +125,18 @@ class TimelineLayout:
             if not split.blocks:
                 continue
             block = snapshot.active_block(split.stable_id)
-            # ``geometry.row_height`` is the visual distance of one beat, not
-            # one encoded row. Beat Split only controls how many rows occupy
-            # that beat; increasing it must make rows denser rather than
-            # expanding the chart. During playback Scroll scales that musical
-            # distance without acquiring an accidental Beat Split multiplier.
-            split_rows = max(1, block.beat_split)
-            scale = max(0.0, block.scroll) if playback else 1.0
-            row_height = self.geometry.row_height * scale / split_rows
+            # Paused authoring keeps every encoded row editable at a constant
+            # height.  During transport, match gameplay's spatial projection:
+            # Scroll is expressed per encoded row, while Beat Split supplies
+            # the rows per beat.  Their product keeps ordinary combinations
+            # such as .25/4 and .125/8 at the chosen zoom and collapses a real
+            # zero-Scroll timing block to zero visual height.
+            playback_scale = block.scroll * block.beat_split
+            if not math.isfinite(playback_scale):
+                playback_scale = 1.0
+            row_height = self.geometry.row_height * (
+                max(0.0, playback_scale) if playback else 1.0
+            )
             rows_top = top + self.geometry.block_header_height
             bottom = rows_top + block.row_count * row_height
             segments.append(
@@ -230,24 +242,24 @@ class TimelineLayout:
         """
         if not math.isfinite(time_ms):
             raise ValueError("chart time must be finite")
-        candidates: list[tuple[float, float]] = []
+        candidates: list[tuple[float, int, TimelineSegment]] = []
         for segment in self.segments:
             block = segment.block
-            if (
-                block.bpm <= 0.0
-                or block.beat_split <= 0
-                or block.smooth_speed & 0x02
-            ):
+            if block.bpm <= 0.0 or block.beat_split <= 0:
                 continue
-            row_duration = 60_000.0 / (block.bpm * block.beat_split)
-            row = (time_ms - block.start_time) / row_duration
-            clamped = min(float(block.row_count), max(0.0, row))
-            endpoint_time = block.start_time + clamped * row_duration
-            y = segment.rows_top + clamped * segment.row_height
-            candidates.append((abs(time_ms - endpoint_time), y))
+            candidates.append((block.start_time, segment.split_index, segment))
         if not candidates:
             return None
-        return min(candidates, key=lambda candidate: candidate[0])[1]
+        started = [candidate for candidate in candidates if candidate[0] <= time_ms]
+        if started:
+            _, _, selected = max(started, key=lambda candidate: candidate[:2])
+        else:
+            _, _, selected = min(candidates, key=lambda candidate: candidate[:2])
+        block = selected.block
+        row_duration = 60_000.0 / (block.bpm * block.beat_split)
+        row = (time_ms - block.start_time) / row_duration
+        clamped = min(float(block.row_count), max(0.0, row))
+        return selected.rows_top + clamped * selected.row_height
 
     @staticmethod
     def snap_row_index(

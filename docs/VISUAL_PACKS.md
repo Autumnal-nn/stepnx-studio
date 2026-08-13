@@ -51,10 +51,13 @@ the artwork's detected lower opaque edge, while the complete tail cell already
 limits its shaft to the area above the tail. Hold-body cells stretch the narrow
 strip while preserving its transparent per-direction offsets.
 
-The following gameplay-feedback resources are optional and retained for a later
-preview phase:
+The following gameplay-feedback resources are optional and used by gameplay
+preview:
 
-- `6.png`, `BASE.png`, `HD1.png`, and `HD2.png`: `480×192` feedback sheets;
+- `6.png`, `BASE.png`, `HD1.png`, and `HD2.png`: `480×192` feedback sheets.
+  The central 384 px of the first `BASE.png` row is projected as one five-pitch
+  strip; its 48 px edge regions are empty atlas padding. Two Double strips are
+  placed directly adjacent without a Versus gap or overlap;
 - one complete `STEPFX<number>_0.png` through `_4.png` sequence at `512×512`;
 
 Two additional atlas groups are optional; when present, the authoring viewport

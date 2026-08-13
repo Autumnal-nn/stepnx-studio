@@ -4,7 +4,8 @@ StepNX Studio is a lossless NX20 chart core and the foundation of a future
 visual editor for Pump It Up. It is created and maintained by Autumnal
 ([`Autumnal-nn`](https://github.com/Autumnal-nn)).
 
-Status: pre-alpha, with practical and advanced NX20 authoring slices. The current
+Status: pre-alpha, with practical and advanced NX20 authoring plus a read-only
+native gameplay preview. The current
 release proves the project's most important contract: an unedited NX20 or NFO
 document can be rebuilt byte for byte without normalizing metadata, flags,
 padding, note cells, floating-point payloads, or its trailer.
@@ -67,6 +68,12 @@ padding, note cells, floating-point payloads, or its trailer.
   with relocation and unknown encodings deliberately blocked;
 - previewed folder batches for header metadata and Block Start Times;
 - explicit GUI comparison and export of NX/NFO deployment mirrors;
+- immutable gameplay snapshots that retain every route branch, with internal
+  random-route state and explicit non-random Block choices;
+- a read-only native Qt gameplay preview synchronized to the shared audio
+  transport, using bundled royalty-free or validated local noteskin atlases;
+- route provenance, conservative timing warnings, and
+  refusal of conditions whose runtime state cannot be proven;
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
   fixtures, and an external corpus gate.
 
@@ -130,15 +137,26 @@ python -m pip install -e '.[gui]'
 stepnx-studio --profile nxa-native /path/to/chart/folder
 ```
 
+Before producing a Windows package, install the GUI extra and run the strict
+gate. Unlike plain `unittest`, this rejects a misleading green run when the Qt
+tests were merely skipped:
+
+```powershell
+py -m pip install -e ".[gui]"
+py tools/run_windows_test_gate.py
+```
+
 Choose a note tool and click or drag across cells to place notes; one drag is
 one undo step. `Bank / ID` supplies the noteskin bank, item ID, or Division ID.
 `Save All` performs validation, shows affected files and a structural diff,
 then uses the existing atomic multi-file save plan. Split/Block details live in
 the right-side gutter; double-click that gutter to cycle a Split's active Block.
-Hold Ctrl while using the mouse wheel to zoom; the `6144 px/beat` ceiling gives
-dense Beat Split rows enough magnification for precise editing.
-Without Ctrl, each mouse-wheel notch scrolls half a musical beat in the split under
-the pointer, so dense beat splits do not make navigation artificially slower.
+Hold Ctrl while using the mouse wheel to zoom; the `6144 px/row` ceiling gives
+ample magnification for precise editing. Following StepEdit's square 24 px grid,
+StepNX uses a square 48 px grid by default: every encoded row keeps the same
+height as a lane is wide. A larger Beat Split therefore makes a beat physically
+taller instead of compressing its rows. Without Ctrl, each mouse-wheel notch
+still scrolls half a musical beat in the split under the pointer.
 Use **Edit → Structure → Edit Block timing** for the nine native NX20 Block
 scalars. `Shift` extends a rectangular selection and `Ctrl` toggles cells;
 copy/paste, mirror, filtered replace, erase, and application of the current tool
@@ -146,12 +164,12 @@ operate as one undo step. Audio source selection, metronome mode, and chart
 following live under **Audio**; engine profile and Snap live under
 **File → Settings**. On Play, an active selection becomes the seek anchor;
 without one, playback starts at the beat at or immediately before the 7%
-viewport playhead. Offset remains an explicit session-only numeric field. Beat
-height follows zoom and is independent of Beat Split, so denser splits produce
-smaller rows instead of taller charts. During Play, Block height additionally
-follows `scroll`; zero-scroll Blocks collapse, and
-smooth-warp Blocks are skipped; Pause restores the authoring grid. PCM WAV
-files also receive an in-timeline waveform. A blank virtual tail after the last
+viewport playhead. Offset remains an explicit session-only numeric field. The
+paused authoring grid retains the selected row zoom; Beat Split never silently
+divides it. During Play, the spatial projection uses `Scroll × Beat Split`,
+including zero-height `scroll = 0` blocks. Returning to Pause restores the
+editable grid while retaining the playhead at the same viewport position. PCM WAV
+files receive an in-timeline waveform. A blank virtual tail after the last
 row lets followed playback keep the playhead at 7% through the chart endpoint;
 the tail never becomes editable or serialized. Compressed files still use Qt's
 transport but do not pretend a waveform was decoded when it was not.
@@ -209,11 +227,25 @@ and [the corpus analysis](docs/NX20_NFO_CORPUS_ANALYSIS.md).
 - [Current implementation status](docs/STATUS.md)
 - [Phase 6 Windows validation](docs/PHASE6_VALIDATION.md)
 - [Phase 7 Windows validation](docs/PHASE7_VALIDATION.md)
+- [Phase 8 Windows validation](docs/PHASE8_VALIDATION.md)
 - [Viewer source audit](docs/VIEWER_SOURCE_AUDIT.md)
 - [Architecture decisions](docs/adr/)
 
-The authoring viewport and gameplay preview will be separate projections of the
-same canonical document. Only the StepNX core may open, mutate, or save NX/NFO.
+The authoring viewport and gameplay preview are separate projections of the same
+canonical document. Only the StepNX core may open, mutate, or save NX/NFO.
+Open **Preview → Open gameplay preview** to choose the `.NX` filename, a speed
+from 1x through 9x, and startup COMMAND in one window. The selected chart alone
+defines the field layout. Random route state is generated internally and is
+not exposed as a game option; nonzero matching lower-five-bit banks reuse one
+Block index, while different banks remain independent. Zero lower bits mean no
+bank, so every `80`/`40` occurrence is independent. During the run, `1`
+through `9` select 1x through 9x, `F6` toggles local debug and live FPS/paint
+timing, `F8` toggles autoplay, `F9` toggles the guide, and Space seeks
+forward five seconds. P1 uses `Q E S Z C`; P2 uses
+`Home PageUp Num5 End PageDown`. These controls are independently implemented;
+no PIUTESTER code or official game assets are distributed. The existing Audio
+menu Metronome toggle and per-arrow/per-beat mode also apply while a preview tab
+is active.
 
 ## License and trademark
 

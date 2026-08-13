@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import sys
 from pathlib import Path
 
@@ -93,10 +94,23 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
     from stepnx.core.diff import diff_documents
     from stepnx.core.errors import ModelInvariantError
     from stepnx.core.profiles import MetadataScope, metadata_definition
+    from stepnx.core.validation import Severity
     from stepnx.gui.audio_transport import AudioTransport
     from stepnx.gui.metadata_dialog import MetadataCollectionDialog
+    from stepnx.gui.preview_dialog import (
+        GameplayInitializationDialog,
+        PreviewChartChoice,
+    )
+    from stepnx.gui.preview_widget import GameplayPreviewWidget
     from stepnx.gui.timeline_widget import TimelineWidget
     from stepnx.gui.timing_dialog import BlockTimingDialog
+    from stepnx.preview import (
+        RoutePolicy,
+        build_event_stream,
+        create_preview_snapshot,
+        parse_gameplay_command,
+        resolve_route,
+    )
     from stepnx.resources import bundled_metronome_path, bundled_noteskin_root
     from stepnx.workspace import (
         WorkspaceError,
@@ -135,6 +149,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self.sessions: dict[int, CommandStack] = {}
             self.baselines = {}
             self.widget_documents: dict[TimelineWidget, int] = {}
+            self.preview_snapshots = {}
             self.gesture_keys: dict[TimelineWidget, object] = {}
             self.tree = QTreeWidget()
             self.tree.setHeaderLabels(["Workspace", "Details"])
@@ -319,6 +334,11 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self.follow_audio_action = audio_menu.addAction("Follow chart")
             self.follow_audio_action.setCheckable(True)
             self.follow_audio_action.setChecked(True)
+            preview_menu = self.menuBar().addMenu("&Preview")
+            self.open_preview_action = preview_menu.addAction(
+                "Open gameplay preview…", self._open_gameplay_preview
+            )
+            self.open_preview_action.setShortcut("Ctrl+Shift+P")
 
             toolbar = self.addToolBar("Note tools")
             toolbar.setMovable(False)
@@ -347,7 +367,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self.function_combo = QComboBox()
             for label, mode in (
                 ("Normal", NoteFunction.NORMAL),
-                ("Hidden (H)", NoteFunction.HIDDEN),
+                ("Bonus / Hidden (H)", NoteFunction.BONUS),
                 ("Ghost (G)", NoteFunction.GHOST),
             ):
                 self.function_combo.addItem(label, mode.value)
@@ -513,7 +533,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 return
             for index in range(self.tabs.count()):
                 widget = self.tabs.widget(index)
-                if isinstance(widget, TimelineWidget):
+                if isinstance(widget, (TimelineWidget, GameplayPreviewWidget)):
                     widget.set_noteskin_pack(self.noteskin)
             banks = ", ".join(f"{bank.bank_id:02d}" for bank in self.noteskin.banks)
             self.statusBar().showMessage(f"Loaded local noteskin banks: {banks}", 5000)
@@ -540,6 +560,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 for index, entry in enumerate(self.workspace.documents)
             }
             self.widget_documents.clear()
+            self.preview_snapshots.clear()
             self.gesture_keys.clear()
             self.audio_transport.load(None)
             self.waveform = None
@@ -865,6 +886,165 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 else None
             )
 
+        def _open_gameplay_preview(self) -> None:
+            source_widget = self.tabs.currentWidget()
+            current_document_index = self._current_document_index()
+            if (
+                current_document_index is None
+                or not isinstance(source_widget, TimelineWidget)
+                or self.workspace is None
+            ):
+                QMessageBox.information(
+                    self,
+                    "Gameplay preview",
+                    "Select an authoring timeline before opening a gameplay preview.",
+                )
+                return
+            charts = tuple(
+                PreviewChartChoice(
+                    document_index,
+                    entry.path.name,
+                )
+                for document_index, entry in enumerate(self.workspace.documents)
+                if not self.sessions[document_index].current.effective_lightmap
+            )
+            if not charts:
+                QMessageBox.information(
+                    self,
+                    "Gameplay preview",
+                    "The workspace has no playable NX chart.",
+                )
+                return
+            dialog = GameplayInitializationDialog(
+                charts,
+                current_document_index=current_document_index,
+                parent=self,
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            options = dialog.options()
+            document_index = options.document_index
+            command = parse_gameplay_command(options.command).with_speed(options.speed)
+            if command.unknown:
+                QMessageBox.warning(
+                    self,
+                    "Unknown COMMAND",
+                    "Unsupported character(s): " + ", ".join(command.unknown),
+                )
+                return
+
+            snapshot = create_preview_snapshot(self.sessions[document_index].current)
+            random_route = any(
+                split.random_at_start or split.random_at_trigger
+                for split in snapshot.splits
+            )
+            policy = RoutePolicy.SEEDED if random_route else RoutePolicy.MANUAL
+            seed = secrets.randbits(64) if random_route else None
+            errors = [
+                diagnostic
+                for diagnostic in snapshot.diagnostics
+                if diagnostic.severity is Severity.ERROR
+            ]
+            if errors:
+                QMessageBox.warning(
+                    self,
+                    "Gameplay preview unavailable",
+                    "\n".join(f"{item.code}: {item.message}" for item in errors[:12]),
+                )
+                return
+            selected_view = next(
+                (
+                    self.tabs.widget(index)
+                    for index in range(self.tabs.count())
+                    if isinstance(self.tabs.widget(index), TimelineWidget)
+                    and self.widget_documents.get(self.tabs.widget(index))
+                    == document_index
+                ),
+                None,
+            )
+            manual = (
+                dict(selected_view.snapshot.active_blocks)
+                if selected_view is not None
+                else {
+                    split.stable_id: split.blocks[0].stable_id
+                    for split in snapshot.splits
+                    if split.blocks
+                }
+            )
+            route = resolve_route(snapshot, policy, seed=seed, manual=manual)
+            if not route.is_executable:
+                QMessageBox.warning(
+                    self,
+                    "Route cannot be previewed",
+                    "\n".join(
+                        f"{'Split ' + str(item.split_id) if item.split_id else 'Document'}: "
+                        f"{item.message}"
+                        for item in route.diagnostics
+                    ),
+                )
+                return
+            stream = build_event_stream(snapshot, route)
+            preview = GameplayPreviewWidget(
+                stream,
+                columns=snapshot.columns,
+                start_column=snapshot.start_column,
+                command=command,
+            )
+            preview.seekRequested.connect(
+                lambda chart_time: self.audio_transport.seek(
+                    round(self.audio_alignment.chart_to_audio(chart_time))
+                )
+            )
+            preview.statusChanged.connect(
+                lambda message: self.statusBar().showMessage(message, 4000)
+            )
+            preview.exitRequested.connect(
+                lambda view=preview: self.tabs.removeTab(self.tabs.indexOf(view))
+            )
+            preview.set_noteskin_pack(self.noteskin)
+            preview.set_playback_time(
+                self.audio_alignment.audio_to_chart(float(self.audio_position.value()))
+            )
+            entry = self.workspace.documents[document_index]
+            tab_index = self.tabs.addTab(preview, f"Play: {entry.path.name}")
+            route_summary = ", ".join(
+                f"S{decision.split_id}→B{decision.block_id}"
+                for decision in route.decisions
+            )
+            self.tabs.setTabToolTip(
+                tab_index,
+                f"Read-only; COMMAND={command.raw or '(none)'}; "
+                f"route={policy.value}; {route_summary}",
+            )
+            metronome_snapshot = create_authoring_snapshot(
+                self.sessions[document_index].current
+            )
+            for decision in route.decisions:
+                metronome_snapshot = metronome_snapshot.with_active_block(
+                    decision.split_id, decision.block_id
+                )
+            self.preview_snapshots[preview] = metronome_snapshot
+            self.tabs.setCurrentIndex(tab_index)
+            warning = " · ".join(stream.warnings)
+            command_status = []
+            if command.approximate_effects:
+                command_status.append(
+                    "approximate COMMAND curves: "
+                    + ",".join(command.approximate_effects)
+                )
+            if command.pending_effects:
+                command_status.append(
+                    "COMMAND flags pending projection: "
+                    + ",".join(command.pending_effects)
+                )
+            if command_status:
+                warning = " · ".join(filter(None, (warning, *command_status)))
+            self.statusBar().showMessage(
+                f"Opened read-only gameplay preview ({len(stream.events)} events)"
+                + (f" · {warning}" if warning else ""),
+                8000,
+            )
+
         def _edit_note(
             self, document_index: int, widget: TimelineWidget, row_id: int, lane: int
         ) -> None:
@@ -1070,6 +1250,8 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                             and self.follow_audio_action.isChecked()
                         ),
                     )
+                elif isinstance(widget, GameplayPreviewWidget):
+                    widget.set_playback_time(chart_time)
             if not self.metronome_enabled.isChecked() or self.metronome_clock is None:
                 return
             if self._selected_metronome_mode() == "arrow":
@@ -1133,10 +1315,17 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             widget = self.tabs.currentWidget()
             if isinstance(widget, TimelineWidget):
                 self._set_metronome_snapshot(widget.snapshot)
+            elif isinstance(widget, GameplayPreviewWidget):
+                snapshot = self.preview_snapshots.get(widget)
+                if snapshot is not None:
+                    self._set_metronome_snapshot(snapshot)
+                else:
+                    self.metronome_clock = None
+                    self.note_metronome_clock = None
             else:
                 self.metronome_clock = None
                 self.note_metronome_clock = None
-            if isinstance(widget, TimelineWidget):
+            if isinstance(widget, (TimelineWidget, GameplayPreviewWidget)):
                 widget.set_playback_time(
                     self.audio_alignment.audio_to_chart(
                         float(self.audio_position.value())

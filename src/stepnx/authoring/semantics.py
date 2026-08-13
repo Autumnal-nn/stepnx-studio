@@ -6,7 +6,10 @@ from stepnx.core.model import NoteRow, NX20Document, PackedNoteRow
 from stepnx.core.profiles import (
     MetadataDefinition,
     MetadataScope,
+    ValueKind,
     metadata_definition,
+    pack_dm120,
+    unpack_dm120,
     unpack_u16_range,
 )
 from stepnx.core.validation import Severity, ValidationIssue, ValidationReport
@@ -260,6 +263,18 @@ def validate_authoring(document: NX20Document) -> ValidationReport:
                 )
             )
             continue
+        if definition.kind is ValueKind.PACKED_DM120:
+            try:
+                pack_dm120(*unpack_dm120(item.value))
+            except ValueError as exc:
+                issues.append(
+                    ValidationIssue(
+                        Severity.ERROR,
+                        "metadata.dm120-invalid",
+                        item.path,
+                        str(exc),
+                    )
+                )
         if definition.minimum is not None and item.value < definition.minimum:
             issues.append(
                 ValidationIssue(

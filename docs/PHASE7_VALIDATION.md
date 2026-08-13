@@ -60,9 +60,10 @@ Validate:
 4. Inspect the Routes tab. Confirm Split flags, Block condition ranges, and
    Division triggers. Double-click a branch and verify it activates the matching
    Block without dirtying the document.
-5. Under the patched profile, confirm Header ID 65 and Division ID 111 receive
-   patched labels. Under the native profile, they must remain unknown rather
-   than silently borrowing patched semantics.
+5. Under the patched profile, confirm Header ID 65 and Division IDs 111 and 120
+   receive patched labels. Confirm ID 120 uses `mode/weight`, accepts `0/-1`
+   and `1/-2`, and rejects `0/-2`. Under the native profile, they must remain
+   unknown rather than silently borrowing patched semantics.
 6. Run both folder batches. Review the affected-file preview, confirm `LM.NX` is
    excluded, Undo an affected chart, then use guarded **Save All** on the copy.
 7. For a sized-trailer fixture, inspect typed trailer strings. A same-byte-length
@@ -76,8 +77,9 @@ Validate:
 10. Confirm **File → Settings** contains Engine profile and Snap, the Audio
     toolbar contains only Play/Pause, Offset, and Metronome, and the **Audio**
     menu contains source selection, metronome mode, and Follow chart.
-11. Ctrl-wheel to the maximum zoom and confirm dense Beat Split rows can reach
-    the new `6144 px/beat` ceiling in both authoring and playback.
+11. Ctrl-wheel to the maximum zoom and confirm fixed Beat Split rows can reach
+    the new `6144 px/row` ceiling. Play and Pause must preserve that selected
+    zoom; only the Block's explicit `Scroll` may scale playback rows.
 12. Follow playback through the final chart timing. Confirm the viewport shows
     blank space below the chart and the playhead remains at its 7% anchor instead
     of sliding toward the bottom edge.

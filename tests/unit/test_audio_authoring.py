@@ -172,14 +172,17 @@ class AudioTimingTests(unittest.TestCase):
         self.assertEqual(registered.row_index, 0)
         self.assertEqual(after_ghost, registered)
 
-    def test_metronomes_skip_smooth_warp_blocks(self) -> None:
-        snapshot = create_authoring_snapshot(
-            parse_bytes(make_normal_nx20(), source="NM.NX")
+    def test_metronomes_keep_smooth_speed_blocks(self) -> None:
+        document = parse_bytes(make_normal_nx20(), source="NM.NX")
+        first_row = document.splits[0].blocks[0].rows[0]
+        document = SetNoteAt(first_row.stable_id, 0, b"\x43\x03\x00\x00").apply(
+            document
         )
+        snapshot = create_authoring_snapshot(document)
         block = snapshot.splits[0].blocks[0]
 
-        self.assertIsNone(MetronomeClock(snapshot).beat_at(block.start_time))
-        self.assertIsNone(NoteMetronomeClock(snapshot).note_at(block.start_time))
+        self.assertIsNotNone(MetronomeClock(snapshot).beat_at(block.start_time))
+        self.assertIsNotNone(NoteMetronomeClock(snapshot).note_at(block.start_time))
 
 
 if __name__ == "__main__":

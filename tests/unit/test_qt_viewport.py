@@ -250,7 +250,9 @@ class QtViewportSmokeTests(unittest.TestCase):
         )
         snapshot = create_authoring_snapshot(document)
         source_split = snapshot.splits[0]
-        playback_block = replace(source_split.blocks[0], scroll=1.0)
+        playback_block = replace(
+            source_split.blocks[0], scroll=0.125, beat_split=8
+        )
         snapshot = replace(
             snapshot,
             splits=(replace(source_split, blocks=(playback_block,)),),
@@ -264,6 +266,56 @@ class QtViewportSmokeTests(unittest.TestCase):
 
             self.assertEqual(playback_height, authoring_height)
             self.assertEqual(widget._layout.segments[0].row_height, authoring_height)
+        finally:
+            widget.close()
+
+    def test_play_pause_preserves_the_exact_viewport_position(self) -> None:
+        document = parse_bytes(
+            make_large_lightmap(rows=80), source="LM.NX", row_storage="compact"
+        )
+        widget = TimelineWidget(create_authoring_snapshot(document))
+        try:
+            widget.resize(420, 300)
+            widget._sync_scrollbars()
+            widget.verticalScrollBar().setValue(700)
+            widget.horizontalScrollBar().setValue(12)
+
+            widget.set_playback_active(True)
+            self.assertEqual(widget.verticalScrollBar().value(), 700)
+            self.assertEqual(widget.horizontalScrollBar().value(), 12)
+            widget.set_playback_active(False)
+
+            self.assertEqual(widget.verticalScrollBar().value(), 700)
+            self.assertEqual(widget.horizontalScrollBar().value(), 12)
+        finally:
+            widget.close()
+
+    def test_play_pause_preserves_playhead_viewport_anchor_across_projection(self) -> None:
+        document = parse_bytes(
+            make_large_lightmap(rows=80), source="LM.NX", row_storage="compact"
+        )
+        snapshot = create_authoring_snapshot(document)
+        source_split = snapshot.splits[0]
+        block = replace(source_split.blocks[0], scroll=0.5, beat_split=4)
+        snapshot = replace(
+            snapshot,
+            splits=(replace(source_split, blocks=(block,)),),
+        )
+        widget = TimelineWidget(snapshot)
+        try:
+            widget.resize(420, 300)
+            row_duration = 60_000.0 / (block.bpm * block.beat_split)
+            widget.set_playback_time(block.start_time + 30 * row_duration)
+            widget.verticalScrollBar().setValue(round(widget._playback_y - 80))
+            before = widget._playback_y - widget.verticalScrollBar().value()
+
+            widget.set_playback_active(True)
+            during = widget._playback_y - widget.verticalScrollBar().value()
+            widget.set_playback_active(False)
+            after = widget._playback_y - widget.verticalScrollBar().value()
+
+            self.assertAlmostEqual(during, before, delta=1)
+            self.assertAlmostEqual(after, before, delta=1)
         finally:
             widget.close()
 

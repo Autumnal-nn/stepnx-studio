@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-11
+Date: 2026-08-12
 
 Version: 0.1.0.dev0
 
@@ -58,7 +58,7 @@ Version: 0.1.0.dev0
 - bundled royalty-free static noteskin atlases plus validated local overrides,
   with no proprietary artwork
   copied into the repository, workspace, recovery data, or release;
-- square, row-height-independent note rendering at dense beat splits;
+- StepEdit-style constant square encoded rows at every Beat Split;
 - half-beat-relative mouse-wheel scrolling and atlas-faithful noteskin hold
   rendering with per-direction body offsets and complete tail cells;
 - empty Split/Block insertion, guarded removal, stable reordering, and undo/redo;
@@ -78,8 +78,8 @@ Version: 0.1.0.dev0
   orthogonal raw bytes;
 - visible musical snap guides and a follow-playhead anchor at 7% viewport
   height;
-- Beat Split-independent beat geometry, playback-only `scroll` scaling, zero-scroll collapse,
-  smooth-warp skipping, and side-gutter Block labels;
+- fixed encoded-row geometry, zoom, and viewport position shared by editing and
+  playback, with side-gutter Block labels;
 - register-aware per-arrow metronome events: Hidden/Invisible may tick, Ghost
   does not;
 - validated ENC2 AUD-to-MP3 support for the self-contained `ENCDecrypt.exe`
@@ -95,6 +95,22 @@ Version: 0.1.0.dev0
   conditions, including profile-gated patched variables;
 - safe fixed-byte-length UTF-8 trailer-string editing for proven offset fields;
 - previewed folder batches and explicit Qt NX/NFO mirror deployment workflow;
+- read-only `PreviewSnapshot` export with all route alternatives retained;
+- manual, internally randomized, and profile-aware all-perfect route resolution
+  without exposing an implementation seed as a game option;
+- conservative blocking diagnostics for ambiguous routes and conditions whose
+  runtime state is not proven;
+- explicit Start Time/BPM runtime-event projection with warp/freeze/Scroll
+  diagnostics rather than invented NXA behavior;
+- native Qt gameplay tabs synchronized to the existing audio transport, with
+  continuous scroll geometry, one file/speed/COMMAND dialog, the shared
+  metronome control, PIUTESTER-style speed/debug/autoplay/pad controls, native
+  complete five-pitch sequence-zone strips and continuous Double geometry,
+  press-timed STEPFX, normal row-based judgment including hold body/tail,
+  composed raw visibility/COMMAND display rules, fallback artwork, and bounded
+  visible-event culling;
+- patched-profile-only DM120 signed mode/weight editing and validation, including
+  the distinct `0/-1` and `1/-2` sentinel limits;
 
 | Corpus metric | Value |
 | --- | ---: |
@@ -131,22 +147,27 @@ without abandoning compact row storage.
 - trailer string relocation remains disabled; only proven offsets containing
   valid UTF-8 may be edited, and only at the same encoded byte length;
 - NX10 importer awaits validation against the complete official NX2 dump;
-- the accumulated Phase 6/7 branch still needs its Windows/PySide6 validation
-  gate before publication;
+- Phase 8 has passed its iterative Windows manual preview gate; its 19 automated
+  Qt tests still require the packaged Windows/PySide6 workflow before the
+  Windows artifact is accepted;
 - waveform extraction is intentionally limited to PCM WAV; Qt transport still
   plays supported compressed formats without fabricating waveform data;
 - ENC2 AUD support currently accepts the profile proven by `732.AUD`; the
   distinct profiles in `D91.AUD` and `508.AUD` remain unsupported;
 - cross-Split Block moves remain outside the current structural UI;
-- noteskin press overlays, receptor bars, and STEPFX are intentionally deferred
-  to the separate gameplay-preview phase.
+- exact judgment windows, score, grade, gauge, modifier curves, and later-engine
+  presentation still require independent NXA, Fiesta 2, and Prime measurements;
+- negative Speed/Freeze remains diagnostic-only until NXA behavior is
+  independently measured; Smooth Speed 0–3 preserves notes and every nonzero
+  value interpolates the fifth-float factor;
 
 ## Next gate
 
 1. validate the NX10 importer against the official NX2 corpus and NXA runtime;
 2. execute the generated blank `LM.NX` in NXA as an independent runtime gate;
-3. execute the Phase 7 native Windows/manual validation gate.
+3. execute the Phase 8 Windows packaging workflow and its strict Qt gate.
 
 The viewer audit accepts STEPEdit-pixi as a conditional layout reference and
-WebPrime as a possible basis for a separate gameplay preview. Neither external
-parser becomes authoritative, and no proprietary artwork enters the build.
+WebPrime as a behavioral reference only. Phase 8 uses a native Qt projection;
+neither external parser becomes authoritative, and no proprietary artwork
+enters the build.
