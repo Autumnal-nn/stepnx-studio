@@ -450,6 +450,25 @@ PROFILES = {
             }
         ),
     ),
+    "fiesta2": EngineProfile(
+        "fiesta2",
+        "Pump It Up Fiesta 2",
+        "nxa-native",
+        (),
+        frozenset(
+            {
+                "later-nx20-trailer",
+                "items-21-23",
+            }
+        ),
+    ),
+    "prime2": EngineProfile(
+        "prime2",
+        "Pump It Up Prime 2",
+        "fiesta2",
+        (),
+        frozenset(),
+    ),
     "nxa-step5-patched": EngineProfile(
         "nxa-step5-patched",
         "NXA Step5 patched engine",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import secrets
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -30,6 +31,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             QInputDialog,
             QLabel,
             QMainWindow,
+            QMenu,
             QMessageBox,
             QPushButton,
             QSlider,
@@ -38,6 +40,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             QTableWidget,
             QTableWidgetItem,
             QTabWidget,
+            QToolButton,
             QTreeWidget,
             QTreeWidgetItem,
         )
@@ -68,6 +71,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
         insert_empty_split_after,
         load_noteskin_pack,
         load_pcm_wav_waveform,
+        estimate_bpm,
         load_visual_pack,
         metadata_drafts,
         metadata_owner,
@@ -93,6 +97,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
     from stepnx.core.commands import CommandStack, SetNoteAt
     from stepnx.core.diff import diff_documents
     from stepnx.core.errors import ModelInvariantError
+    from stepnx.core.model import EmptyRow, LightmapRow, PackedNoteRow
     from stepnx.core.profiles import MetadataScope, metadata_definition
     from stepnx.core.validation import Severity
     from stepnx.gui.audio_transport import AudioTransport
@@ -199,6 +204,8 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             profile_group.setExclusive(True)
             for label, value in (
                 ("NXA native", "nxa-native"),
+                ("Fiesta 2", "fiesta2"),
+                ("Prime 2", "prime2"),
                 ("NXA Step5 patched", "nxa-step5-patched"),
             ):
                 action = profile_menu.addAction(label)
@@ -236,6 +243,10 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self.undo_action.setShortcut("Ctrl+Z")
             self.redo_action = edit_menu.addAction("Redo", self._redo)
             self.redo_action.setShortcut("Ctrl+Y")
+            self.advanced_split_timing_action = edit_menu.addAction(
+                "Show advanced Split timing"
+            )
+            self.advanced_split_timing_action.setCheckable(True)
             edit_menu.addSeparator()
             self.apply_selection_action = edit_menu.addAction(
                 "Apply current tool to selection", self._apply_tool_to_selection
@@ -318,6 +329,8 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             audio_menu = self.menuBar().addMenu("&Audio")
             audio_menu.addAction("Select audio…", self._choose_audio)
             audio_menu.addAction("Select metronome WAV…", self._choose_metronome)
+            audio_menu.addAction("Calibrate audio offset…", self._calibrate_audio_offset)
+            audio_menu.addAction("Estimate BPM from waveform…", self._estimate_bpm)
             audio_menu.addSeparator()
             metronome_mode_menu = audio_menu.addMenu("Metronome mode")
             self.metronome_mode_actions = {}
@@ -345,8 +358,8 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             toolbar.addWidget(QLabel("Tool: "))
             self.tool_combo = QComboBox()
             for label, tool in (
-                ("Select", NoteTool.SELECT),
                 ("Tap", NoteTool.TAP),
+                ("Select", NoteTool.SELECT),
                 ("Hold head", NoteTool.HOLD_HEAD),
                 ("Hold body", NoteTool.HOLD_BODY),
                 ("Hold tail", NoteTool.HOLD_TAIL),
@@ -362,6 +375,10 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self.tool_value = QSpinBox()
             self.tool_value.setRange(0, 255)
             toolbar.addWidget(self.tool_value)
+            self.visual_value_button = QToolButton()
+            self.visual_value_button.setText("Visual…")
+            self.visual_value_button.clicked.connect(self._show_visual_value_menu)
+            toolbar.addWidget(self.visual_value_button)
             toolbar.addSeparator()
             toolbar.addWidget(QLabel("Function: "))
             self.function_combo = QComboBox()
@@ -399,12 +416,16 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self.audio_position.sliderMoved.connect(self.audio_transport.seek)
             self.audio_position.hide()
             audio_toolbar.addSeparator()
-            audio_toolbar.addWidget(QLabel("Offset ms: "))
+            audio_toolbar.addWidget(QLabel("Start Time ms: "))
+            self.chart_start_time = QDoubleSpinBox()
+            self.chart_start_time.setRange(-1_000_000.0, 1_000_000.0)
+            self.chart_start_time.setDecimals(3)
+            self.chart_start_time.valueChanged.connect(self._chart_start_time_changed)
+            audio_toolbar.addWidget(self.chart_start_time)
             self.audio_offset = QDoubleSpinBox()
             self.audio_offset.setRange(-1_000_000.0, 1_000_000.0)
             self.audio_offset.setDecimals(3)
             self.audio_offset.valueChanged.connect(self._audio_offset_changed)
-            audio_toolbar.addWidget(self.audio_offset)
             self.metronome_enabled = QCheckBox("Metronome")
             audio_toolbar.addWidget(self.metronome_enabled)
             self._refresh_edit_actions()
@@ -496,6 +517,70 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             if selected:
                 self._load_metronome(Path(selected))
 
+        def _calibrate_audio_offset(self) -> None:
+            value, accepted = QInputDialog.getDouble(
+                self, "Audio calibration", "Session-only audio offset (ms):",
+                self.audio_offset.value(), -1_000_000.0, 1_000_000.0, 3,
+            )
+            if accepted:
+                self.audio_offset.setValue(value)
+
+        def _estimate_bpm(self) -> None:
+            if self.waveform is None:
+                QMessageBox.information(self, "Estimate BPM", "Load a PCM WAV first.")
+                return
+            try:
+                bpm = estimate_bpm(self.waveform)
+            except WaveformError as exc:
+                QMessageBox.warning(self, "Estimate BPM", str(exc))
+                return
+            answer = QMessageBox.question(
+                self, "Estimate BPM", f"Estimated tempo: {bpm:.3f} BPM\n\nApply to the active Block?"
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            selection = self._structure_selection()
+            if selection is None or selection[0] != "block" or self.workspace is None:
+                QMessageBox.information(self, "Estimate BPM", "Select a Block first.")
+                return
+            _, document_index, target = selection
+            document = self.sessions[document_index].current
+            block = next(
+                block for split in document.splits for block in split.blocks
+                if block.stable_id == target.block_id
+            )
+            command = replace(BlockTimingValues.from_block(block), bpm=bpm).command(block.stable_id)
+            self._execute_structure(
+                document_index, command,
+                ("block", document_index, target.split_id, target.block_id),
+                "Applied estimated BPM",
+            )
+
+        def _show_visual_value_menu(self) -> None:
+            tool = NoteTool(self.tool_combo.currentData())
+            maximum = 31 if tool is NoteTool.ITEM else 4 if tool is NoteTool.DIVISION else -1
+            if maximum < 0:
+                self.statusBar().showMessage("Visual IDs apply only to Item and Division tools", 4000)
+                return
+            menu = QMenu(self)
+            for value in range(maximum + 1):
+                action = menu.addAction(f"ID {value}")
+                action.triggered.connect(lambda checked=False, selected=value: self.tool_value.setValue(selected))
+            menu.exec(self.visual_value_button.mapToGlobal(self.visual_value_button.rect().bottomLeft()))
+
+        def _show_structure_context(self, document_index: int, split_id: int, block_id: int, point) -> None:
+            self._populate_tree(("block", document_index, split_id, block_id))
+            self._inspect("block", document_index, split_id, block_id)
+            menu = QMenu(self)
+            menu.addAction("Add Split after", self._insert_split)
+            menu.addAction("Delete Split…", self._remove_split)
+            menu.addSeparator()
+            menu.addAction("Create Block after", self._insert_block)
+            menu.addAction("Delete Block…", self._remove_block)
+            menu.addSeparator()
+            menu.addAction("Edit Block timing…", self._edit_block_timing)
+            menu.exec(point)
+
         def _load_metronome(self, path: Path) -> None:
             self.metronome_path = path.resolve()
             self.audio_transport.load_metronome(self.metronome_path)
@@ -572,8 +657,19 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self._populate_routes()
             if self.workspace.documents:
                 self._open_document(0)
-            if self.workspace.audio_candidates:
-                self._load_audio(self.workspace.audio_candidates[0].path)
+            preferred_audio_name = f"{self.workspace.root.name}.mp3".casefold()
+            preferred_audio = next(
+                (
+                    candidate
+                    for candidate in self.workspace.root.parent.iterdir()
+                    if candidate.is_file()
+                    and not candidate.is_symlink()
+                    and candidate.name.casefold() == preferred_audio_name
+                ),
+                None,
+            )
+            if preferred_audio is not None:
+                self._load_audio(preferred_audio)
 
         def _save_all(self) -> None:
             if self.workspace is None:
@@ -863,6 +959,16 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                     doc, view, row_id, lane
                 )
             )
+            widget.holdEditRequested.connect(
+                lambda row_ids, lane, doc=document_index, view=widget: self._edit_hold(
+                    doc, view, row_ids, lane
+                )
+            )
+            widget.contextStructureRequested.connect(
+                lambda split_id, block_id, point, doc=document_index: self._show_structure_context(
+                    doc, split_id, block_id, point
+                )
+            )
             widget.editGestureStarted.connect(
                 lambda view=widget: self.gesture_keys.__setitem__(view, object())
             )
@@ -876,6 +982,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self.tabs.setCurrentIndex(index)
             self.widget_documents[widget] = document_index
             self._set_metronome_snapshot(widget.snapshot)
+            self._refresh_chart_start_time(widget)
             self._refresh_edit_actions()
 
         def _current_document_index(self) -> int | None:
@@ -998,23 +1105,17 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             preview.statusChanged.connect(
                 lambda message: self.statusBar().showMessage(message, 4000)
             )
-            preview.exitRequested.connect(
-                lambda view=preview: self.tabs.removeTab(self.tabs.indexOf(view))
-            )
+            preview.exitRequested.connect(preview.close)
             preview.set_noteskin_pack(self.noteskin)
             preview.set_playback_time(
                 self.audio_alignment.audio_to_chart(float(self.audio_position.value()))
             )
             entry = self.workspace.documents[document_index]
-            tab_index = self.tabs.addTab(preview, f"Play: {entry.path.name}")
+            preview.setWindowTitle(f"StepNX Preview — {entry.path.name}")
+            preview.resize(720, 900)
             route_summary = ", ".join(
                 f"S{decision.split_id}→B{decision.block_id}"
                 for decision in route.decisions
-            )
-            self.tabs.setTabToolTip(
-                tab_index,
-                f"Read-only; COMMAND={command.raw or '(none)'}; "
-                f"route={policy.value}; {route_summary}",
             )
             metronome_snapshot = create_authoring_snapshot(
                 self.sessions[document_index].current
@@ -1024,7 +1125,8 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                     decision.split_id, decision.block_id
                 )
             self.preview_snapshots[preview] = metronome_snapshot
-            self.tabs.setCurrentIndex(tab_index)
+            preview.destroyed.connect(lambda *_args, view=preview: self.preview_snapshots.pop(view, None))
+            preview.show()
             warning = " · ".join(stream.warnings)
             command_status = []
             if command.approximate_effects:
@@ -1053,11 +1155,16 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 self.statusBar().showMessage(f"Selected row {row_id}, lane {lane + 1}")
                 return
             try:
-                raw = note_tool_raw(
-                    tool,
-                    self.tool_value.value(),
-                    self._selected_function(),
-                    self._selected_visibility(),
+                current = self._cell_raw(document_index, row_id, lane)
+                raw = (
+                    b"\0\0\0\0"
+                    if tool is NoteTool.ERASE or (tool in (NoteTool.TAP, NoteTool.ITEM, NoteTool.DIVISION) and current[0] & 0x0F)
+                    else note_tool_raw(
+                        tool,
+                        self.tool_value.value(),
+                        self._selected_function(),
+                        self._selected_visibility(),
+                    )
                 )
                 updated = self.sessions[document_index].execute(
                     SetNoteAt(row_id, lane, raw),
@@ -1065,6 +1172,41 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 )
             except (ValueError, ModelInvariantError) as exc:
                 QMessageBox.critical(self, "Cannot edit note", str(exc))
+                return
+            self._apply_document(document_index, widget, updated)
+
+        def _cell_raw(self, document_index: int, row_id: int, lane: int) -> bytes:
+            document = self.sessions[document_index].current
+            for split in document.splits:
+                for block in split.blocks:
+                    for row in block.rows:
+                        if row.stable_id != row_id:
+                            continue
+                        if isinstance(row, (EmptyRow, LightmapRow)):
+                            return b"\0\0\0\0"
+                        return row.cell(lane).raw if isinstance(row, PackedNoteRow) else row.cells[lane].raw
+            raise ModelInvariantError(f"row {row_id} does not exist")
+
+        def _edit_hold(self, document_index: int, widget: TimelineWidget, row_ids, lane: int) -> None:
+            row_ids = tuple(row_ids)
+            if len(row_ids) < 2:
+                self._edit_note(document_index, widget, row_ids[0], lane)
+                return
+            raws = (
+                note_tool_raw(NoteTool.HOLD_HEAD, self.tool_value.value(), self._selected_function(), self._selected_visibility()),
+                note_tool_raw(NoteTool.HOLD_BODY, self.tool_value.value(), self._selected_function(), self._selected_visibility()),
+                note_tool_raw(NoteTool.HOLD_TAIL, self.tool_value.value(), self._selected_function(), self._selected_visibility()),
+            )
+            try:
+                updated = None
+                for index, row_id in enumerate(row_ids):
+                    raw = raws[0 if index == 0 else 2 if index == len(row_ids) - 1 else 1]
+                    updated = self.sessions[document_index].execute(
+                        SetNoteAt(row_id, lane, raw), coalesce_key=self.gesture_keys.get(widget)
+                    )
+                assert updated is not None
+            except (ValueError, ModelInvariantError) as exc:
+                QMessageBox.critical(self, "Cannot create hold", str(exc))
                 return
             self._apply_document(document_index, widget, updated)
 
@@ -1252,6 +1394,8 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                     )
                 elif isinstance(widget, GameplayPreviewWidget):
                     widget.set_playback_time(chart_time)
+            for preview in tuple(self.preview_snapshots):
+                preview.set_playback_time(chart_time)
             if not self.metronome_enabled.isChecked() or self.metronome_clock is None:
                 return
             if self._selected_metronome_mode() == "arrow":
@@ -1311,10 +1455,36 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                     widget.set_waveform(self.waveform, self.audio_alignment)
             self._audio_position_changed(self.audio_position.value())
 
+        def _refresh_chart_start_time(self, widget: TimelineWidget) -> None:
+            blocks = [block for split in widget.snapshot.splits for block in split.blocks]
+            value = blocks[0].start_time if blocks else 0.0
+            self.chart_start_time.blockSignals(True)
+            self.chart_start_time.setValue(value)
+            self.chart_start_time.blockSignals(False)
+
+        def _chart_start_time_changed(self, value: float) -> None:
+            document_index = self._current_document_index()
+            widget = self.tabs.currentWidget()
+            if document_index is None or not isinstance(widget, TimelineWidget):
+                return
+            document = self.sessions[document_index].current
+            block = next((block for split in document.splits for block in split.blocks), None)
+            if block is None or abs(float(block.start_time.value) - value) < 0.0001:
+                return
+            try:
+                command = replace(BlockTimingValues.from_block(block), start_time_ms=value).command(block.stable_id)
+                updated = self.sessions[document_index].execute(command)
+            except (ValueError, ModelInvariantError) as exc:
+                QMessageBox.critical(self, "Invalid Start Time", str(exc))
+                self._refresh_chart_start_time(widget)
+                return
+            self._apply_document(document_index, widget, updated)
+
         def _active_tab_changed(self, *args) -> None:
             widget = self.tabs.currentWidget()
             if isinstance(widget, TimelineWidget):
                 self._set_metronome_snapshot(widget.snapshot)
+                self._refresh_chart_start_time(widget)
             elif isinstance(widget, GameplayPreviewWidget):
                 snapshot = self.preview_snapshots.get(widget)
                 if snapshot is not None:
@@ -1787,7 +1957,21 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             block = next(
                 item for item in split.blocks if item.stable_id == target.block_id
             )
-            dialog = BlockTimingDialog(BlockTimingValues.from_block(block), self)
+            flattened = [item for candidate in document.splits for item in candidate.blocks]
+            block_index = flattened.index(block)
+            previous_end = None
+            if block_index:
+                previous = flattened[block_index - 1]
+                previous_end = float(previous.start_time.value)
+                if float(previous.bpm.value) > 0 and int(previous.beat_split.value) > 0:
+                    previous_end += len(previous.rows) * 60_000.0 / (
+                        float(previous.bpm.value) * int(previous.beat_split.value)
+                    )
+            dialog = BlockTimingDialog(
+                BlockTimingValues.from_block(block), self,
+                previous_end_ms=previous_end,
+                advanced=self.advanced_split_timing_action.isChecked(),
+            )
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             try:
@@ -2309,7 +2493,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("folder", nargs="?", type=Path, help="chart folder to open")
     parser.add_argument(
         "--profile",
-        choices=("nxa-native", "nxa-step5-patched"),
+        choices=("nxa-native", "fiesta2", "prime2", "nxa-step5-patched"),
         default="nxa-native",
         help="engine semantics used for typed authoring and validation",
     )

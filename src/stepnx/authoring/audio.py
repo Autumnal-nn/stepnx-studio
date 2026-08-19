@@ -88,6 +88,38 @@ class WaveformEnvelope:
         return self.peaks[index]
 
 
+def estimate_bpm(
+    waveform: WaveformEnvelope, *, minimum: float = 60.0, maximum: float = 220.0
+) -> float:
+    """Estimate tempo by normalized autocorrelation of the waveform envelope.
+
+    The result is advisory: half/double-time ambiguity cannot be eliminated
+    reliably, so UI callers must confirm it before modifying chart timing.
+    """
+    if not 0 < minimum < maximum or not waveform.peaks or waveform.duration_ms <= 0:
+        raise WaveformError("BPM estimation needs a non-empty waveform and valid range")
+    interval_ms = waveform.duration_ms / len(waveform.peaks)
+    mean = sum(waveform.peaks) / len(waveform.peaks)
+    signal = tuple(max(0.0, value - mean) for value in waveform.peaks)
+    if not any(signal):
+        raise WaveformError("waveform has no usable rhythmic variation")
+    first_lag = max(1, round(60_000.0 / (maximum * interval_ms)))
+    last_lag = min(len(signal) // 2, round(60_000.0 / (minimum * interval_ms)))
+    if first_lag > last_lag:
+        raise WaveformError("waveform is too short for the requested BPM range")
+    best_lag = first_lag
+    best_score = float("-inf")
+    for lag in range(first_lag, last_lag + 1):
+        left, right = signal[:-lag], signal[lag:]
+        numerator = sum(a * b for a, b in zip(left, right))
+        denominator = math.sqrt(sum(a * a for a in left) * sum(b * b for b in right))
+        score = numerator / denominator if denominator else 0.0
+        score += 1e-8 / lag
+        if score > best_score:
+            best_score, best_lag = score, lag
+    return 60_000.0 / (best_lag * interval_ms)
+
+
 def _sample(data: bytes, offset: int, width: int) -> float:
     if width == 1:
         return abs(data[offset] - 128) / 128.0

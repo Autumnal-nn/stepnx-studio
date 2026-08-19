@@ -28,9 +28,15 @@ class PlayfieldGeometry:
 
     @property
     def lane_spacing(self) -> float:
+        # Keep Single at the same visual pitch as Double. PIUTESTER renders a
+        # Single chart as one centered five-lane field without enlarging the
+        # receptors/notes to consume the extra horizontal space. Use the
+        # ten-lane viewport pitch as the reference for Single, while retaining
+        # the existing maximum native panel pitch at wider viewports.
+        pitch_columns = 10 if self.columns <= 5 else self.columns
         return min(
             self.maximum_panel_width / 6.0,
-            self.viewport_width / (self.columns + 1),
+            self.viewport_width / (pitch_columns + 1),
         )
 
     @property

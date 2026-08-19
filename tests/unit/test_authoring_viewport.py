@@ -119,7 +119,7 @@ class TimelineLayoutTests(unittest.TestCase):
         source_split = self.snapshot.splits[0]
 
         def layout_for(beat_split: int) -> TimelineLayout:
-            block = replace(source_split.blocks[0], beat_split=beat_split)
+            block = replace(source_split.blocks[0], beat_split=beat_split, scroll=0.5)
             split = replace(source_split, blocks=(block,))
             snapshot = replace(self.snapshot, splits=(split,))
             return TimelineLayout(snapshot, TimelineGeometry(row_height=4))
@@ -131,10 +131,12 @@ class TimelineLayoutTests(unittest.TestCase):
             split_128.segments[0].rows_top + 1, 1.0
         )
 
-        self.assertEqual(split_8.segments[0].row_height, 4)
-        self.assertEqual(split_128.segments[0].row_height, 4)
-        self.assertEqual(distance_8, 32)
-        self.assertEqual(distance_128, 512)
+        # Scroll is distance per encoded row. Beat Split changes rows/beat,
+        # not the per-row scale itself.
+        self.assertEqual(split_8.segments[0].row_height, 2)
+        self.assertEqual(split_128.segments[0].row_height, 2)
+        self.assertEqual(distance_8, 16)
+        self.assertEqual(distance_128, 256)
 
     def test_chart_time_projects_to_fractional_row_geometry(self) -> None:
         layout = TimelineLayout(self.snapshot, TimelineGeometry(row_height=20))
@@ -167,15 +169,15 @@ class TimelineLayoutTests(unittest.TestCase):
             snapshot, TimelineGeometry(row_height=20), playback=True
         )
 
-        self.assertEqual(authoring.segments[0].row_height, 20)
-        self.assertEqual(playback.segments[0].row_height, 20)
+        self.assertEqual(authoring.segments[0].row_height, 5)
+        self.assertEqual(playback.segments[0].row_height, 5)
         self.assertEqual(
             authoring.pixels_for_beats_at_y(authoring.segments[0].rows_top, 1),
-            80,
+            20,
         )
         self.assertEqual(
             playback.pixels_for_beats_at_y(playback.segments[0].rows_top, 1),
-            80,
+            20,
         )
 
     def test_zero_scroll_does_not_collapse_the_authoring_grid(self) -> None:
@@ -205,7 +207,7 @@ class TimelineLayoutTests(unittest.TestCase):
             authoring.segments[0].rows_top,
         )
 
-    def test_playback_projection_uses_scroll_times_beat_split(self) -> None:
+    def test_playback_projection_uses_scroll_per_encoded_row(self) -> None:
         source_split = self.snapshot.splits[0]
         block = replace(source_split.blocks[0], scroll=0.5, beat_split=4)
         snapshot = replace(
@@ -213,11 +215,17 @@ class TimelineLayoutTests(unittest.TestCase):
             splits=(replace(source_split, blocks=(block,)),),
         )
 
+        authoring = TimelineLayout(snapshot, TimelineGeometry(row_height=20))
         playback = TimelineLayout(
             snapshot, TimelineGeometry(row_height=20), playback=True
         )
 
-        self.assertEqual(playback.segments[0].row_height, 40)
+        self.assertEqual(authoring.segments[0].row_height, 10)
+        self.assertEqual(playback.segments[0].row_height, 10)
+        self.assertEqual(
+            playback.pixels_for_beats_at_y(playback.segments[0].rows_top, 1),
+            40,
+        )
 
     def test_smooth_speed_block_remains_in_playhead_projection(self) -> None:
         source_split = self.snapshot.splits[0]

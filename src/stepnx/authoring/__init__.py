@@ -8,6 +8,7 @@ from stepnx.authoring.audio import (
     WaveformEnvelope,
     WaveformError,
     decode_enc2_aud,
+    estimate_bpm,
     load_pcm_wav_waveform,
 )
 from stepnx.authoring.batch import (
@@ -120,6 +121,7 @@ from stepnx.authoring.trailer import (
 __all__ = [
     "AudDecodeError",
     "AudioAlignment",
+    "estimate_bpm",
     "AuthoringSnapshot",
     "BatchDocumentCommand",
     "BeatMarker",

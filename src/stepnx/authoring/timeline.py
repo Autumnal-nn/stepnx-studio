@@ -127,16 +127,15 @@ class TimelineLayout:
             block = snapshot.active_block(split.stable_id)
             # Paused authoring keeps every encoded row editable at a constant
             # height.  During transport, match gameplay's spatial projection:
-            # Scroll is expressed per encoded row, while Beat Split supplies
-            # the rows per beat.  Their product keeps ordinary combinations
-            # such as .25/4 and .125/8 at the chosen zoom and collapses a real
-            # zero-Scroll timing block to zero visual height.
-            playback_scale = block.scroll * block.beat_split
+            # Row time already includes Beat Split. Multiplying by it here a
+            # second time makes equal-BPM blocks change visual speed merely
+            # because their tickcount differs.
+            playback_scale = block.scroll
             if not math.isfinite(playback_scale):
                 playback_scale = 1.0
-            row_height = self.geometry.row_height * (
-                max(0.0, playback_scale) if playback else 1.0
-            )
+            authoring_scale = playback_scale if playback_scale > 0.0 else 1.0
+            row_scale = max(0.0, playback_scale) if playback else authoring_scale
+            row_height = self.geometry.row_height * row_scale
             rows_top = top + self.geometry.block_header_height
             bottom = rows_top + block.row_count * row_height
             segments.append(

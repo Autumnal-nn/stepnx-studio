@@ -30,6 +30,8 @@ class TimelineWidget(QAbstractScrollArea):
     snapshotChanged = Signal(object)
     inspectionRequested = Signal(int, int)
     noteEditRequested = Signal(int, int)
+    holdEditRequested = Signal(object, int)
+    contextStructureRequested = Signal(int, int, object)
     editGestureStarted = Signal()
     editGestureFinished = Signal()
     selectedCellsChanged = Signal(object)
@@ -45,7 +47,9 @@ class TimelineWidget(QAbstractScrollArea):
         self._atlas_pixmaps: dict[str, QPixmap] = {}
         self._hold_terminal_pixmaps: dict[tuple[str, int, int, bool], QPixmap] = {}
         self._selection = CellSelection()
-        self._selection_mode = True
+        self._selection_mode = False
+        self._drag_start = None
+        self._drag_current = None
         self._snap_beats = 0.0
         self._waveform: WaveformEnvelope | None = None
         self._audio_alignment = AudioAlignment()
@@ -387,14 +391,30 @@ class TimelineWidget(QAbstractScrollArea):
         segment = self._layout.segment_at_y(content_y)
         if segment is not None:
             self.inspectionRequested.emit(segment.split_id, segment.block.stable_id)
+        if event.button() == Qt.MouseButton.RightButton and segment is not None:
+            self.contextStructureRequested.emit(
+                segment.split_id, segment.block.stable_id, event.globalPosition().toPoint()
+            )
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             hit = self._snapped_hit(self._layout.cell_at(content_x, content_y))
             if hit is not None:
-                self.editGestureStarted.emit()
                 hit_segment, row_index, lane = hit
-                row_id = hit_segment.block.rows[row_index].stable_id
-                self._select_hit(hit_segment, row_index, lane, event.modifiers())
-                self.noteEditRequested.emit(row_id, lane)
+                if event.modifiers() & (
+                    Qt.KeyboardModifier.ShiftModifier
+                    | Qt.KeyboardModifier.ControlModifier
+                ) or self._selection_mode:
+                    self._select_hit(hit_segment, row_index, lane, event.modifiers())
+                else:
+                    self.editGestureStarted.emit()
+                    self._drag_start = hit
+                    self._drag_current = hit
+                    self.set_selection(
+                        self._selection.replace(
+                            CellTarget(hit_segment.block.rows[row_index].stable_id, lane)
+                        )
+                    )
                 event.accept()
                 return
         super().mousePressEvent(event)
@@ -408,22 +428,38 @@ class TimelineWidget(QAbstractScrollArea):
                 segment, row_index, lane = hit
                 row_id = segment.block.rows[row_index].stable_id
                 target = CellTarget(row_id, lane)
-                if self._selection_mode:
+                if self._selection_mode or event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                     try:
                         selection = self._selection.rectangle(self._row_ids(segment), target)
                     except ValueError:
                         selection = self._selection.replace(target)
                     if selection != self._selection:
                         self.set_selection(selection)
-                elif self._selection.targets != frozenset((target,)):
-                    self.set_selection(self._selection.replace(target))
-                    self.noteEditRequested.emit(row_id, lane)
+                elif self._drag_start is not None:
+                    start_segment, _, start_lane = self._drag_start
+                    if segment.split_id == start_segment.split_id and lane == start_lane:
+                        self._drag_current = hit
                 event.accept()
                 return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._drag_start is not None:
+                start_segment, start_row, lane = self._drag_start
+                end_segment, end_row, end_lane = self._drag_current or self._drag_start
+                if start_segment.split_id == end_segment.split_id and lane == end_lane:
+                    first, last = sorted((start_row, end_row))
+                    row_ids = tuple(
+                        start_segment.block.rows[index].stable_id
+                        for index in range(first, last + 1)
+                    )
+                    if len(row_ids) == 1:
+                        self.noteEditRequested.emit(row_ids[0], lane)
+                    else:
+                        self.holdEditRequested.emit(row_ids, lane)
+                self._drag_start = None
+                self._drag_current = None
             self.editGestureFinished.emit()
         super().mouseReleaseEvent(event)
 

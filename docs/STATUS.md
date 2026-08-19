@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-12
+Date: 2026-08-19
 
 Version: 0.1.0.dev0
 
@@ -165,9 +165,28 @@ without abandoning compact row storage.
 
 1. validate the NX10 importer against the official NX2 corpus and NXA runtime;
 2. execute the generated blank `LM.NX` in NXA as an independent runtime gate;
-3. execute the Phase 8 Windows packaging workflow and its strict Qt gate.
+3. keep public release packaging disabled until the project is ready for a public build.
 
 The viewer audit accepts STEPEdit-pixi as a conditional layout reference and
 WebPrime as a behavioral reference only. Phase 8 uses a native Qt projection;
 neither external parser becomes authoritative, and no proprietary artwork
 enters the build.
+
+
+## Phase 9/10 consolidation
+
+The current Phase 9/10 tree consolidates the validated work
+without recovery-overlay scripts or generated package metadata.
+
+Additional delivered behavior includes:
+
+- import-only legacy format projections with structured diagnostics;
+- Fiesta 2 and Prime 2 GUI engine profiles;
+- StepEdit-style Toggle interaction and context-menu Split/Block editing;
+- patched-NXA SPECIAL/Number Block authoring and raw Source Slot/Brain fields;
+- fixed 640x480 external Gameplay Preview with arcade-calibrated scroll pitch;
+- Space Play/Pause with silent transport when chart audio is absent;
+- lazy AUD staging and strict sibling `<FolderName>.mp3` auto-load;
+
+SEE import remains deliberately disabled pending a verified decryption
+profile.
