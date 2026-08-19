@@ -13,6 +13,7 @@ from stepnx.core.diff import diff_documents
 from stepnx.core.errors import StepNXError, UnsupportedFormatError
 from stepnx.core.validation import validate
 from stepnx.importers.nx10 import load as load_nx10
+from stepnx.importers.legacy import LegacyContainer, load_legacy, project_nx20
 from stepnx.workspace import (
     compare_mirror,
     execute_save_plan,
@@ -524,6 +525,37 @@ def _mirror_compare(args: argparse.Namespace) -> int:
     return 0 if comparison.binary_identical else 1
 
 
+def _import_legacy(args: argparse.Namespace) -> int:
+    imported = load_legacy(args.path)
+    charts = imported.charts if isinstance(imported, LegacyContainer) else (imported,)
+    if not 0 <= args.slot < len(charts):
+        raise ValueError(f"slot {args.slot} is outside 0..{len(charts) - 1}")
+    chart = charts[args.slot]
+    document = project_nx20(chart, start_column=args.start_column)
+    output = args.output or args.path.with_suffix(".NX")
+    if output.resolve() == args.path.resolve():
+        raise ValueError("legacy import will not overwrite its source")
+    save_atomic(document, output, overwrite=args.force)
+    result = {
+        "source": str(args.path),
+        "format": chart.source_format,
+        "slot": args.slot,
+        "columns": chart.columns,
+        "blocks": len(chart.blocks),
+        "rows": sum(len(block.rows) for block in chart.blocks),
+        "diagnostics": [diagnostic.code for diagnostic in chart.diagnostics],
+        "output": str(output),
+    }
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(
+            f"IMPORTED {chart.source_format.upper()}: {args.path} -> {output} "
+            f"({result['blocks']} block(s), {result['rows']} row(s))"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stepnx", description="StepNX Studio lossless NX20 tools"
@@ -612,6 +644,18 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.add_argument("--json", action="store_true")
     import_parser.set_defaults(handler=_import_nx10)
 
+    legacy_parser = subparsers.add_parser(
+        "import-legacy",
+        help="project STF, NOT/NOT5, STX, or KSF into a new native NX20 chart",
+    )
+    legacy_parser.add_argument("path", type=Path)
+    legacy_parser.add_argument("--output", "-o", type=Path)
+    legacy_parser.add_argument("--slot", type=int, default=0)
+    legacy_parser.add_argument("--start-column", type=int, default=0)
+    legacy_parser.add_argument("--force", action="store_true")
+    legacy_parser.add_argument("--json", action="store_true")
+    legacy_parser.set_defaults(handler=_import_legacy)
+
     folder_parser = subparsers.add_parser(
         "folder-inspect",
         help="open all immediate NX documents and report isolated failures",
@@ -670,7 +714,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
-    except (OSError, StepNXError) as exc:
+    except (OSError, StepNXError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

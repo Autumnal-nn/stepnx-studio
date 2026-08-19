@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QElapsedTimer, QObject, QTemporaryDir, QTimer, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QElapsedTimer, QObject, QTemporaryDir, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QSoundEffect
 
 from stepnx.authoring.audio import AudDecodeError, decode_enc2_aud
@@ -23,7 +23,10 @@ class AudioTransport(QObject):
         self.metronome = QSoundEffect(self)
         self.metronome.setLoopCount(1)
         self.metronome.setVolume(0.9)
-        self._aud_directory = QTemporaryDir("stepnx-aud-XXXXXX")
+        self._aud_directory: QTemporaryDir | None = None
+        application = QCoreApplication.instance()
+        if application is not None:
+            application.aboutToQuit.connect(self.cleanup_aud_staging)
         self._aud_serial = 0
         self._position_anchor = 0
         self._last_emitted_position = -1
@@ -50,6 +53,8 @@ class AudioTransport(QObject):
         self._position_anchor = 0
         self._last_emitted_position = -1
         if path is None:
+            if self._aud_directory is not None:
+                self.cleanup_aud_staging()
             return True
         source = Path(path)
         if source.suffix.casefold() == ".aud":
@@ -58,11 +63,11 @@ class AudioTransport(QObject):
             except AudDecodeError as exc:
                 self.errorOccurred.emit(str(exc))
                 return False
-            if not self._aud_directory.isValid():
-                self.errorOccurred.emit("cannot create temporary directory for decoded AUD")
+            directory = self._ensure_aud_directory()
+            if directory is None:
                 return False
             self._aud_serial += 1
-            source = Path(self._aud_directory.path()) / f"decoded-{self._aud_serial}.mp3"
+            source = Path(directory.path()) / f"decoded-{self._aud_serial}.mp3"
             try:
                 source.write_bytes(payload)
             except OSError as exc:
@@ -81,6 +86,28 @@ class AudioTransport(QObject):
         position = max(0, milliseconds)
         self.player.setPosition(position)
         self._position_changed(position)
+
+    def _ensure_aud_directory(self) -> QTemporaryDir | None:
+        if self._aud_directory is not None and self._aud_directory.isValid():
+            return self._aud_directory
+        directory = QTemporaryDir("stepnx-aud-XXXXXX")
+        if not directory.isValid():
+            self.errorOccurred.emit("cannot create temporary directory for decoded AUD")
+            return None
+        directory.setAutoRemove(True)
+        self._aud_directory = directory
+        return directory
+
+    def cleanup_aud_staging(self) -> bool:
+        directory = self._aud_directory
+        if directory is None:
+            return True
+        self.player.stop()
+        self.player.setSource(QUrl())
+        self._position_timer.stop()
+        self._position_clock.invalidate()
+        self._aud_directory = None
+        return bool(directory.remove())
 
     def load_metronome(self, path: str | Path | None) -> None:
         self.metronome.stop()

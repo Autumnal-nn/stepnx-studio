@@ -17,3 +17,4 @@ tests/corpus/local-manifest.json
 
 # Optional user-supplied artwork that overrides the bundled authoring pack.
 /noteskin/
+*.pyc

@@ -1,4 +1,4 @@
-from stepnx.gui.app import main
+from stepnx.gui.phase10_app import main
 
 
 if __name__ == "__main__":

@@ -15,3 +15,24 @@ __all__ = [
     "import_bytes",
     "load",
 ]
+from .legacy import (
+    LegacyBlock,
+    LegacyChart,
+    LegacyContainer,
+    LegacyDiagnostic,
+    LegacyRow,
+    load_legacy,
+    parse_ksf,
+    parse_not,
+    parse_not5,
+    parse_stf,
+    parse_stx,
+    project_nx20,
+    row_similarity,
+)
+
+__all__ = [
+    "LegacyBlock", "LegacyChart", "LegacyContainer", "LegacyDiagnostic",
+    "LegacyRow", "load_legacy", "parse_ksf", "parse_not", "parse_not5",
+    "parse_stf", "parse_stx", "project_nx20", "row_similarity",
+]

@@ -17,10 +17,23 @@ from stepnx.authoring.timing import BlockTimingValues
 class BlockTimingDialog(QDialog):
     """Typed editor for the exact nine scalar fields stored by an NX20 Block."""
 
-    def __init__(self, values: BlockTimingValues, parent=None) -> None:
+    def __init__(
+        self,
+        values: BlockTimingValues,
+        parent=None,
+        *,
+        previous_end_ms: float | None = None,
+        advanced: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit Block timing")
-        self._start = self._float(values.start_time_ms, decimals=4)
+        self._previous_end_ms = None if advanced else previous_end_ms
+        shown_start = (
+            values.start_time_ms
+            if self._previous_end_ms is None
+            else values.start_time_ms - self._previous_end_ms
+        )
+        self._start = self._float(shown_start, decimals=4)
         self._bpm = self._float(values.bpm, minimum=0.0001, decimals=6)
         self._scroll = self._float(values.scroll_factor, decimals=6)
         self._offset = self._float(values.offset_or_delay_ms, decimals=4)
@@ -36,7 +49,10 @@ class BlockTimingDialog(QDialog):
         self._real_scroll = QLabel()
 
         form = QFormLayout()
-        form.addRow("Start Time (ms)", self._start)
+        form.addRow(
+            "Start Time (ms)" if self._previous_end_ms is None else "Gap after previous Block (ms)",
+            self._start,
+        )
         form.addRow("BPM", self._bpm)
         form.addRow("Scroll Factor", self._scroll)
         form.addRow("Real Scroll", self._real_scroll)
@@ -106,7 +122,7 @@ class BlockTimingDialog(QDialog):
         if self._freeze.isChecked():
             speed = -speed
         return BlockTimingValues(
-            self._start.value(),
+            self._start.value() + (self._previous_end_ms or 0.0),
             self._bpm.value(),
             self._scroll.value(),
             self._offset.value(),

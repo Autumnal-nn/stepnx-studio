@@ -145,13 +145,16 @@ class PreviewGeometryTests(unittest.TestCase):
                 )
 
     def test_single_centres_one_native_sequence_zone_strip(self) -> None:
-        geometry = PlayfieldGeometry(640, 5)
+        single = PlayfieldGeometry(640, 5)
+        double = PlayfieldGeometry(640, 10)
 
-        self.assertEqual(geometry.left, 80)
-        self.assertEqual(
-            tuple(geometry.lane_center(lane) for lane in range(5)),
-            (160, 240, 320, 400, 480),
+        self.assertAlmostEqual(single.lane_spacing, double.lane_spacing)
+        self.assertAlmostEqual(single.lane_center(2), 320.0)
+        self.assertAlmostEqual(
+            single.panel_left(0) + single.panel_width / 2.0,
+            320.0,
         )
+        self.assertAlmostEqual(single.panel_width, 5 * double.lane_spacing)
 
 
 class PreviewNoteSemanticsTests(unittest.TestCase):

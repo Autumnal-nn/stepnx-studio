@@ -27,7 +27,7 @@ build = ["PyInstaller>=6.11,<7"]
 [project.scripts]
 stepnx = "stepnx.cli.main:main"
 nxroundtrip = "stepnx.cli.roundtrip:main"
-stepnx-studio = "stepnx.gui.app:main"
+stepnx-studio = "stepnx.gui.phase10_app:main"
 stepnx-viewport-benchmark = "stepnx.authoring.benchmark:main"
 stepnx-preview-benchmark = "stepnx.preview.benchmark:main"
 

@@ -164,7 +164,8 @@ class GameplayPreviewWidget(QWidget):
                 + event.lane
             )
             multiplier *= random.Random(seed).uniform(0.65, 1.35)
-        pixels = distance * 96.0 * multiplier
+        scroll_pitch = self._geometry().lane_spacing
+        pixels = distance * scroll_pitch * multiplier
         if self.command.acceleration:
             pixels = math.copysign(abs(pixels) ** 1.08, pixels)
         elif self.command.deceleration:
@@ -191,6 +192,16 @@ class GameplayPreviewWidget(QWidget):
         timing = self.stream.timing
         if not timing or not self.stream.events:
             return ()
+        # position_at() intentionally clamps beyond the final timing segment.
+        # Without a time-domain end guard, that can make the last notes appear
+        # again indefinitely after playback has passed the chart.
+        if self._chart_time_ms > self.stream.duration_ms + 250.0:
+            return ()
+        # position_at() intentionally clamps beyond the final timing segment.
+        # Without a time-domain end guard, that can make the last notes appear
+        # again indefinitely after playback has passed the chart.
+        if self._chart_time_ms > self.stream.duration_ms + 250.0:
+            return ()
         current_position = self.stream.position_at(self._chart_time_ms)
         multiplier = max(
             0.001,
@@ -199,8 +210,9 @@ class GameplayPreviewWidget(QWidget):
                 * self.stream.speed_factor_at(self._chart_time_ms)
             ),
         )
+        scroll_pitch = self._geometry().lane_spacing
         visible_position = (self.height() + margin + abs(self._receptor_y())) / (
-            96.0 * multiplier
+            scroll_pitch * multiplier
         )
         positions = (
             current_position - visible_position,

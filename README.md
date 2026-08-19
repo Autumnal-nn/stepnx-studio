@@ -4,9 +4,8 @@ StepNX Studio is a lossless NX20 chart core and the foundation of a future
 visual editor for Pump It Up. It is created and maintained by Autumnal
 ([`Autumnal-nn`](https://github.com/Autumnal-nn)).
 
-Status: pre-alpha, with practical and advanced NX20 authoring plus a read-only
-native gameplay preview. The current
-release proves the project's most important contract: an unedited NX20 or NFO
+Status: pre-alpha, with practical and advanced NX20 authoring plus an
+external native gameplay preview. The current build proves the project's most important contract: an unedited NX20 or NFO
 document can be rebuilt byte for byte without normalizing metadata, flags,
 padding, note cells, floating-point payloads, or its trailer.
 
@@ -23,6 +22,8 @@ padding, note cells, floating-point payloads, or its trailer.
 - one NX20 codec shared by `.NX` and `.NFO`;
 - isolated one-way NX10 importer with preserved source bytes and structured
   conversion diagnostics;
+- conservative STF, NOT/NOT5, STX, and KSF import projections through a shared
+  legacy semantic model;
 - compact/lazy row storage, now the default;
 - sparse row overlays: editing one cell promotes one row, not the entire block;
 - immutable commands for metadata, block fields, rows, and cells;
@@ -36,11 +37,11 @@ padding, note cells, floating-point payloads, or its trailer.
   NX10-to-NX20 materialization required for imported Lightmaps;
 - StepEdit-compatible blank NX20 Lightmap generation with preview, explicit
   write, valid-file reuse, and no replacement of existing Lightmaps;
-- manifest-free audio discovery and session-only audio selection;
+- explicit chart-audio selection plus deterministic sibling `<FolderName>.mp3` auto-load;
 - application-state recovery snapshots with payload hash verification;
 - explicit NX/NFO mirror comparison and export primitives;
 - `inspect`, `roundtrip`, `verify`, `validate`, `diff`, `import-nx10`,
-  `folder-inspect`, `folder-save-plan`, `folder-generate-lightmap`, and
+  `import-legacy`, `folder-inspect`, `folder-save-plan`, `folder-generate-lightmap`, and
   `mirror-compare` CLI commands;
 - immutable authoring snapshots and Qt-independent timeline culling;
 - optional PySide6 shell with tabs, document tree, diagnostics, metadata
@@ -70,8 +71,8 @@ padding, note cells, floating-point payloads, or its trailer.
 - explicit GUI comparison and export of NX/NFO deployment mirrors;
 - immutable gameplay snapshots that retain every route branch, with internal
   random-route state and explicit non-random Block choices;
-- a read-only native Qt gameplay preview synchronized to the shared audio
-  transport, using bundled royalty-free or validated local noteskin atlases;
+- a native Qt gameplay preview synchronized to the shared audio transport,
+  using bundled royalty-free or validated local noteskin atlases;
 - route provenance, conservative timing warnings, and
   refusal of conditions whose runtime state cannot be proven;
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
@@ -81,11 +82,11 @@ padding, note cells, floating-point payloads, or its trailer.
 
 - length-changing trailer-string relocation;
 - typed editing of trailer fields whose offsets or encodings are still unknown;
-- STF, NOT/NOT5, STX, and SEE importers;
+- corpus-verified SEE decryption/import;
 - full-corpus validation of the NX10 importer against the official NX2 dump.
 
-Calling the current package a finished editor would be marketing sludge. It is
-the tested core on which an editor can safely be built.
+This pre-alpha tree is suitable for focused authoring tests, not as a stable
+release or a substitute for runtime validation in the target game.
 
 ## Running from a checkout
 
@@ -102,6 +103,7 @@ python -m stepnx validate C:\charts\NO.NX
 python -m stepnx validate C:\charts\NO.NX --authoring --profile nxa-native
 python -m stepnx diff C:\charts\before.NX C:\charts\after.NX
 python -m stepnx import-nx10 C:\charts\legacy.NX -o C:\charts\native.NX
+python -m stepnx import-legacy C:\charts\legacy.STX -o C:\charts\native.NX
 python -m stepnx folder-inspect C:\charts\song-folder
 python -m stepnx folder-save-plan C:\charts\song-folder
 python -m stepnx folder-generate-lightmap C:\charts\song-folder --bpm 150 --write
@@ -116,6 +118,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 PYTHONPATH=src python3 -m stepnx inspect /path/to/NO.NX
 PYTHONPATH=src python3 -m stepnx roundtrip /path/to/NO.NX
 PYTHONPATH=src python3 -m stepnx import-nx10 /path/to/legacy.NX -o /path/to/native.NX
+PYTHONPATH=src python3 -m stepnx import-legacy /path/to/legacy.KSF -o /path/to/native.NX
 PYTHONPATH=src python3 -m stepnx folder-inspect /path/to/song-folder
 PYTHONPATH=src python3 -m stepnx folder-save-plan /path/to/song-folder
 PYTHONPATH=src python3 -m stepnx folder-generate-lightmap /path/to/song-folder --bpm 150 --write
@@ -146,6 +149,7 @@ py -m pip install -e ".[gui]"
 py tools/run_windows_test_gate.py
 ```
 
+
 Choose a note tool and click or drag across cells to place notes; one drag is
 one undo step. `Bank / ID` supplies the noteskin bank, item ID, or Division ID.
 `Save All` performs validation, shows affected files and a structural diff,
@@ -164,9 +168,11 @@ operate as one undo step. Audio source selection, metronome mode, and chart
 following live under **Audio**; engine profile and Snap live under
 **File → Settings**. On Play, an active selection becomes the seek anchor;
 without one, playback starts at the beat at or immediately before the 7%
-viewport playhead. Offset remains an explicit session-only numeric field. The
+viewport playhead. Audio offset remains a session-only calibration action in
+the Audio menu. The
 paused authoring grid retains the selected row zoom; Beat Split never silently
-divides it. During Play, the spatial projection uses `Scroll × Beat Split`,
+divides it. During Play, the spatial projection uses per-row `Scroll`; row
+timing already contains Beat Split, so tickcount is not multiplied twice,
 including zero-height `scroll = 0` blocks. Returning to Pause restores the
 editable grid while retaining the playhead at the same viewport position. PCM WAV
 files receive an in-timeline waveform. A blank virtual tail after the last
