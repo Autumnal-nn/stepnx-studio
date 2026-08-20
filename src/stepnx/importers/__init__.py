@@ -6,15 +6,6 @@ from stepnx.importers.nx10 import (
     import_bytes,
     load,
 )
-
-__all__ = [
-    "ImportDiagnostic",
-    "ImportDiagnosticKind",
-    "NX10ImportReport",
-    "NX10ImportResult",
-    "import_bytes",
-    "load",
-]
 from .legacy import (
     LegacyBlock,
     LegacyChart,
@@ -30,9 +21,31 @@ from .legacy import (
     project_nx20,
     row_similarity,
 )
+from .ucs import load_ucs, parse_ucs
+from .dispatch import LEGACY_IMPORT_SUFFIXES, load_importable
 
 __all__ = [
-    "LegacyBlock", "LegacyChart", "LegacyContainer", "LegacyDiagnostic",
-    "LegacyRow", "load_legacy", "parse_ksf", "parse_not", "parse_not5",
-    "parse_stf", "parse_stx", "project_nx20", "row_similarity",
+    "ImportDiagnostic",
+    "ImportDiagnosticKind",
+    "NX10ImportReport",
+    "NX10ImportResult",
+    "import_bytes",
+    "load",
+    "LegacyBlock",
+    "LegacyChart",
+    "LegacyContainer",
+    "LegacyDiagnostic",
+    "LegacyRow",
+    "load_legacy",
+    "parse_ksf",
+    "parse_not",
+    "parse_not5",
+    "parse_stf",
+    "parse_stx",
+    "project_nx20",
+    "row_similarity",
+    "load_ucs",
+    "parse_ucs",
+    "LEGACY_IMPORT_SUFFIXES",
+    "load_importable",
 ]
