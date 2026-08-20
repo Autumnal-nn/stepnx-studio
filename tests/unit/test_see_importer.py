@@ -123,7 +123,7 @@ class SEEImporterTests(unittest.TestCase):
         self.assertTrue(chart.document.effective_lightmap)
         self.assertEqual(chart.document.columns.value, 3)
         self.assertEqual(
-            chart.document.splits[0].blocks[0].rows[0].raw,
+            chart.document.splits[0].blocks[0].rows[0].raw_channels,
             b"\x01\x00\x01\x00",
         )
 
