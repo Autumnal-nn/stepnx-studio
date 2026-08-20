@@ -77,7 +77,9 @@ class SEEImporterTests(unittest.TestCase):
         self.assertEqual(block.beat_measure.value, 4)
         self.assertEqual(block.beat_split.value, 4)
         self.assertEqual(len(block.rows), 2)
-        self.assertEqual(block.divisions[3].value.value, (7 << 16) | 3)
+        self.assertEqual(len(block.divisions), 1)
+        self.assertEqual(block.divisions[0].meta_id.value, 0)
+        self.assertEqual(block.divisions[0].value.value, (7 << 16) | 3)
 
     def test_unverified_or_damaged_crypto_profile_fails_explicitly(self) -> None:
         with self.assertRaisesRegex(ParseError, "verified StepEdit 5.63 SEE profile"):
