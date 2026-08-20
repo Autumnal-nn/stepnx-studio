@@ -21,6 +21,7 @@ from .legacy import (
     project_nx20,
     row_similarity,
 )
+from .see import SEEChartResult, SEEImportResult, SEEMode, SEE_MODES, import_bytes as import_see_bytes, load as load_see
 from .ucs import load_ucs, parse_ucs
 from .dispatch import LEGACY_IMPORT_SUFFIXES, load_importable
 
@@ -44,6 +45,12 @@ __all__ = [
     "parse_stx",
     "project_nx20",
     "row_similarity",
+    "SEEMode",
+    "SEE_MODES",
+    "SEEChartResult",
+    "SEEImportResult",
+    "import_see_bytes",
+    "load_see",
     "load_ucs",
     "parse_ucs",
     "LEGACY_IMPORT_SUFFIXES",
