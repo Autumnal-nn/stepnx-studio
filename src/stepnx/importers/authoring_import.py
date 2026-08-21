@@ -49,9 +49,9 @@ def _legacy_candidate(
         + (f" (offset 0x{diagnostic.offset:X})" if diagnostic.offset is not None else "")
         for diagnostic in chart.diagnostics
     ]
-    if chart.controls:
+    if chart.controls and chart.source_format != "ucs":
         diagnostics.append(
-            "legacy.controls-not-projected: source control/directive records that do not have "
+            "legacy.controls-not-projected: source control records that do not have "
             "a proven NX20 equivalent remain source-only"
         )
     # STF/NOT/STX/KSF are conservative projections rather than native-format
