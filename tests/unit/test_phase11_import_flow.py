@@ -10,6 +10,7 @@ from stepnx.importers.authoring_import import (
     load_authoring_import_candidates,
     materialize_authoring_import,
     validate_import_filename,
+    validate_import_target,
 )
 
 
@@ -57,12 +58,30 @@ class AuthoringImportFlowTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 materialize_authoring_import(candidate, root, "S4_TEST.NX")
 
-    def test_target_filename_must_remain_inside_open_folder(self) -> None:
+    def test_target_filename_must_be_windows_safe_and_local(self) -> None:
         self.assertEqual(validate_import_filename("S10.NX"), "S10.NX")
-        for invalid in ("", "S10", "../S10.NX", "sub/S10.NX", "LM.NFO"):
+        for invalid in (
+            "",
+            "S10",
+            "../S10.NX",
+            "sub/S10.NX",
+            r"sub\S10.NX",
+            "LM.NFO",
+            "CON.NX",
+            "bad:name.NX",
+        ):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(ValueError):
                     validate_import_filename(invalid)
+
+    def test_non_lightmap_cannot_claim_reserved_lm_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "sample.ucs"
+            source.write_bytes(UCS)
+            candidate = load_authoring_import_candidates(source)[0]
+            with self.assertRaisesRegex(ValueError, "reserved for a Lightmap"):
+                validate_import_target(candidate, root, "LM.NX")
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
