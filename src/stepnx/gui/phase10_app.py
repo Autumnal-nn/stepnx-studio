@@ -17,6 +17,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase10_timeline import Phase10TimelineWidget
     from stepnx.gui.phase10_timing import Phase10BlockTimingDialog
     from stepnx.gui.phase10_preview import Phase10GameplayPreviewWidget
+    from stepnx.gui.phase11_import import install_phase11_import
 
     timeline_module.TimelineWidget = Phase10TimelineWidget
     timing_module.BlockTimingDialog = Phase10BlockTimingDialog
@@ -27,6 +28,7 @@ def main(argv=None) -> int:
     def show_with_phase10(self, *args, **kwargs):
         if self.windowTitle() == "StepNX Studio":
             install_phase10(self)
+            install_phase11_import(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10
