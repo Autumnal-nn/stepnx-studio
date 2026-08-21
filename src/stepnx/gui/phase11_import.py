@@ -21,7 +21,7 @@ from stepnx.importers.authoring_import import (
     AuthoringImportCandidate,
     load_authoring_import_candidates,
     materialize_authoring_import,
-    validate_import_filename,
+    validate_import_target,
 )
 
 
@@ -140,7 +140,7 @@ class AuthoringImportDialog(QDialog):
         )
         if candidate.diagnostics:
             prefix = (
-                "ATTENTION: conversion contains approximations or unsupported details.\n\n"
+                "ATTENTION: conversion contains approximations or source-only details.\n\n"
                 if not candidate.semantically_lossless
                 else ""
             )
@@ -151,17 +151,16 @@ class AuthoringImportDialog(QDialog):
 
     def _validate_target(self) -> bool:
         try:
-            name = validate_import_filename(self.selected_filename())
-            target = self._root / name
-            if target.exists():
-                raise FileExistsError(
-                    f"{name} already exists. Import never overwrites an existing NX file."
-                )
+            target = validate_import_target(
+                self.selected_candidate(),
+                self._root,
+                self.selected_filename(),
+            )
         except (ValueError, FileExistsError) as exc:
             self.validation.setText(str(exc))
             self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
             return False
-        self.validation.setText(f"Will create: {self._root / name}")
+        self.validation.setText(f"Will create: {target}")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
         return True
 
