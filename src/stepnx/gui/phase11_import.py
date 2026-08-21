@@ -239,6 +239,30 @@ def _choose_import_source(window) -> None:
             f"Created {target.name}, but the workspace could not be reloaded:\n{exc}",
         )
         return
+
+    refreshed = getattr(window, "workspace", None)
+    imported_index = None
+    if refreshed is not None:
+        wanted = target.resolve()
+        imported_index = next(
+            (
+                index
+                for index, entry in enumerate(refreshed.documents)
+                if entry.path.resolve() == wanted
+            ),
+            None,
+        )
+    if imported_index is None:
+        QMessageBox.warning(
+            window,
+            "Imported, but workspace did not refresh",
+            f"Created {target.name}, but it is not present in the reloaded workspace.",
+        )
+        return
+
+    opener = getattr(window, "_open_document", None)
+    if callable(opener):
+        opener(imported_index)
     window.statusBar().showMessage(
         f"Imported {source.name} → {target.name}",
         7000,
