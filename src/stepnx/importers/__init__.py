@@ -24,6 +24,13 @@ from .legacy import (
 from .see import SEEChartResult, SEEImportResult, SEEMode, SEE_MODES, import_bytes as import_see_bytes, load as load_see
 from .ucs import load_ucs, parse_ucs
 from .dispatch import LEGACY_IMPORT_SUFFIXES, load_importable
+from .authoring_import import (
+    AuthoringImportCandidate,
+    load_authoring_import_candidates,
+    materialize_authoring_import,
+    validate_import_filename,
+    validate_import_target,
+)
 
 __all__ = [
     "ImportDiagnostic",
@@ -55,4 +62,9 @@ __all__ = [
     "parse_ucs",
     "LEGACY_IMPORT_SUFFIXES",
     "load_importable",
+    "AuthoringImportCandidate",
+    "load_authoring_import_candidates",
+    "materialize_authoring_import",
+    "validate_import_filename",
+    "validate_import_target",
 ]
