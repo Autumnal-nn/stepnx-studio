@@ -249,14 +249,14 @@ def parse_ksf(data: bytes, *, source: str | None = None) -> LegacyChart:
             match = _HEADER.match(line)
             if match:
                 key, value = match.groups()
-                headers[key.upper()] = value
+                headers[key.upper()] = value.strip().removesuffix(";").strip()
                 in_step = key.upper() == "STEP"
             continue
         control = _CONTROL.match(line)
         if control:
-            controls.append((control.group(1).upper(), control.group(2)))
+            controls.append((control.group(1).upper(), control.group(2).strip().removesuffix(";").strip()))
             continue
-        if line.startswith("#") and line.upper() in {"#END", "#ENDSTEP"}:
+        if line.startswith("#") and line.upper().removesuffix(";") in {"#END", "#ENDSTEP"}:
             break
         if not line or line.startswith("//"):
             continue
