@@ -21,7 +21,15 @@ class Phase11TrailerTests(unittest.TestCase):
         metadata = (
             replace(entries[0], meta_id=RawU32.from_value(20), value=RawU32.from_value(0), span=None),
             replace(entries[1], meta_id=RawU32.from_value(1003), value=RawU32.from_value(8), span=None),
-            replace(entries[2], meta_id=RawU32.from_value(0x00011103), value=RawU32.from_value(16), span=None),
+            # Localized trailer IDs pack the language/variant in high16 while
+            # low16 remains the decimal metadata ID. For GM1103, variant 1 is
+            # therefore 0x0001044F, not the visually tempting 0x00011103.
+            replace(
+                entries[2],
+                meta_id=RawU32.from_value((1 << 16) | 1103),
+                value=RawU32.from_value(16),
+                span=None,
+            ),
         )
         payload = b"alpha\x00\x00\x00beta\x00\x00\x00\x00gamma\x00\x00\x00"
         marker = RawU32.from_value(len(payload) + 4).raw
@@ -95,10 +103,24 @@ class Phase11TrailerTests(unittest.TestCase):
             SetTrailerString(target.metadata_stable_id, "alphabet").apply(guarded)
 
     def test_unaligned_synthetic_string_remains_same_size_only(self) -> None:
-        document = parse_bytes(make_normal_nx20(), profile="fiesta2")
-        target = project_trailer_strings(document).strings[0]
+        document = self._fiesta2_pool()
+        entries = document.header_metadata
+        # Point the typed GM20 at byte 1 ("lpha") solely to exercise the
+        # conservative relocation guard. Projection/same-size editing can read
+        # such a pointer, but length-changing relocation must reject it because
+        # official later-engine string slots begin on four-byte boundaries.
+        unaligned = replace(
+            document,
+            header_metadata=(
+                replace(entries[0], value=RawU32.from_value(1), span=None),
+                entries[1],
+                entries[2],
+            ),
+        )
+        target = project_trailer_strings(unaligned).strings[0]
+        self.assertEqual(target.offset, 1)
         with self.assertRaisesRegex(ModelInvariantError, "four-byte-aligned"):
-            SetTrailerString(target.metadata_stable_id, "a much longer value").apply(document)
+            SetTrailerString(target.metadata_stable_id, "a much longer value").apply(unaligned)
 
 
 if __name__ == "__main__":
