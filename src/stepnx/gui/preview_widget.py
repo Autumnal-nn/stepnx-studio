@@ -254,14 +254,18 @@ class GameplayPreviewWidget(QWidget):
     def _pair_holds(
         events: tuple[PreviewEvent, ...],
     ) -> tuple[tuple[PreviewEvent, PreviewEvent], ...]:
-        open_heads: dict[tuple[int, int], PreviewEvent] = {}
+        # RuntimeEventStream already contains one resolved route, so a Split or
+        # Block boundary is not a break in hold identity. Native NX20 charts
+        # routinely continue a long note into the next sequential Split. Keep
+        # one open head per lane instead of incorrectly scoping it to block_id.
+        open_heads: dict[int, PreviewEvent] = {}
         pairs: list[tuple[PreviewEvent, PreviewEvent]] = []
         for event in events:
-            key = (event.block_id, event.lane)
+            lane = event.lane
             if event.note_type == 0x7:
-                open_heads[key] = event
-            elif event.note_type == 0xF and key in open_heads:
-                pairs.append((open_heads.pop(key), event))
+                open_heads[lane] = event
+            elif event.note_type == 0xF and lane in open_heads:
+                pairs.append((open_heads.pop(lane), event))
         return tuple(pairs)
 
     def _pixmap(self, atlas: PngAtlas) -> QPixmap | None:
