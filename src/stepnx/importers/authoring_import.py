@@ -5,6 +5,7 @@ from pathlib import Path
 
 from stepnx.codecs.nx20 import save_atomic
 from stepnx.core.model import NX20Document
+from stepnx.importers.andamiro import AndamiroImportResult
 from stepnx.importers.dispatch import load_importable
 from stepnx.importers.legacy import LegacyChart, LegacyContainer, project_nx20
 from stepnx.importers.see import SEEImportResult
@@ -54,8 +55,6 @@ def _legacy_candidate(
             "legacy.controls-not-projected: source control records that do not have "
             "a proven NX20 equivalent remain source-only"
         )
-    # STF/NOT/STX/KSF are conservative projections rather than native-format
-    # round trips. UCS can be semantically complete when no diagnostics remain.
     semantically_lossless = chart.source_format == "ucs" and not diagnostics
     if chart.source_format != "ucs":
         diagnostics.insert(
@@ -83,14 +82,24 @@ def load_authoring_import_candidates(
     *,
     profile: str = "nxa-native",
 ) -> tuple[AuthoringImportCandidate, ...]:
-    """Project one supported import source into selectable NX20 candidates.
-
-    The source is never modified. SEE deliberately keeps StepEdit's native
-    mode split, so one .SEE may expose several independent NX20 candidates.
-    """
+    """Project one supported import source into selectable NX20 candidates."""
 
     source = Path(path)
     imported = load_importable(source, profile=profile)
+
+    if isinstance(imported, AndamiroImportResult):
+        return tuple(
+            AuthoringImportCandidate(
+                key=chart.key,
+                label=chart.label,
+                source_format=chart.source_format,
+                document=chart.document,
+                default_filename=chart.default_filename,
+                diagnostics=chart.diagnostics,
+                semantically_lossless=chart.semantically_lossless,
+            )
+            for chart in imported.charts
+        )
 
     if isinstance(imported, SEEImportResult):
         candidates: list[AuthoringImportCandidate] = []
