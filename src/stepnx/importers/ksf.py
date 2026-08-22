@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stepnx.core.errors import ParseError
+from stepnx.core.scalars import RawU32
 from stepnx.importers.andamiro import (
     AndamiroChartResult,
     AndamiroImportResult,
@@ -22,6 +23,12 @@ _COLON_CONTROL = re.compile(
 )
 _END_ROW = re.compile(r"^2{10,13};?$")
 _SUPPORTED_ROW_CHARS = frozenset("014")
+_TIMING_CONTROL_CODES = frozenset("BTED")
+_LEGACY_TIMING_KEYS = frozenset(
+    {"BPM2", "BPM3", "BUNKI", "BUNKI2", "STARTTIME2", "STARTTIME3"}
+)
+_HALFDOUBLE_NAMES = ("halfdouble", "half-double", "h_double", "hdb")
+_DOUBLE_TOKEN = re.compile(r"(?:^|[_-])(?:db|nm|fs)(?:$|[_-])", re.I)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,9 +60,12 @@ def _decode(data: bytes) -> str:
 def _number(headers: dict[str, str], key: str, default: float, *, source: str) -> float:
     raw = headers.get(key, str(default)).strip().removesuffix(";").strip()
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError as exc:
         raise ParseError(0, f"KSF {key}", f"invalid numeric value {raw!r}", source) from exc
+    if not math.isfinite(value):
+        raise ParseError(0, f"KSF {key}", f"value must be finite, found {value!r}", source)
+    return value
 
 
 def _expand_holds(rows: list[list[int]]) -> None:
@@ -90,6 +100,17 @@ def _parse_control(line: str, *, row_index: int, line_number: int) -> _Control |
     return _Control(row_index, code.upper(), value, line_number)
 
 
+def _unsupported_control_diagnostics(controls: tuple[_Control, ...]) -> tuple[str, ...]:
+    unsupported = sorted({control.code for control in controls if control.code not in _TIMING_CONTROL_CODES})
+    if not unsupported:
+        return ()
+    return (
+        "ksf.direct-move-controls-not-projected: inline controls "
+        + ", ".join(unsupported)
+        + " remain source-only and do not create note/item cells",
+    )
+
+
 def _timing_segments(
     row_count: int,
     controls: tuple[_Control, ...],
@@ -99,13 +120,7 @@ def _timing_segments(
     initial_delay_ms: float,
     source: str,
 ) -> tuple[tuple[_Segment, ...], tuple[str, ...]]:
-    """Project Direct Move inline timing controls to homogeneous row segments.
-
-    Direct Move control lines do not consume a step row. B/T change the
-    timing state at the current row boundary. E/D add a delay at that
-    boundary. Other Direct Move extensions are preserved as diagnostics
-    rather than being mistaken for KSF note cells.
-    """
+    """Project Direct Move inline timing controls to homogeneous row segments."""
 
     bpm = initial_bpm
     tick = initial_tick
@@ -114,7 +129,6 @@ def _timing_segments(
     segments: list[_Segment] = []
     diagnostics: list[str] = []
     projected_counts = {"B": 0, "T": 0, "E": 0, "D": 0}
-    unsupported: list[_Control] = []
 
     def flush(end_row: int) -> None:
         nonlocal start_row, pending_delay
@@ -127,8 +141,7 @@ def _timing_segments(
     for control in controls:
         code = control.code
         value = control.value
-        if code not in {"B", "T", "E", "D"}:
-            unsupported.append(control)
+        if code not in _TIMING_CONTROL_CODES:
             continue
 
         boundary = max(0, min(row_count, control.row_index))
@@ -136,7 +149,7 @@ def _timing_segments(
             flush(boundary)
 
         if code == "B":
-            if not math.isfinite(value) or value <= 0:
+            if value <= 0:
                 raise ParseError(
                     control.line_number,
                     "KSF Direct Move BPM",
@@ -146,7 +159,7 @@ def _timing_segments(
             bpm = value
             projected_counts["B"] += 1
         elif code == "T":
-            if not math.isfinite(value) or value <= 0 or not value.is_integer():
+            if value <= 0 or not value.is_integer():
                 raise ParseError(
                     control.line_number,
                     "KSF Direct Move TICKCOUNT",
@@ -156,25 +169,9 @@ def _timing_segments(
             tick = int(value)
             projected_counts["T"] += 1
         elif code == "E":
-            if not math.isfinite(value):
-                raise ParseError(
-                    control.line_number,
-                    "KSF Direct Move beat delay",
-                    f"|E...| must be finite, found {value!r}",
-                    source,
-                )
-            # Direct Move semantics as preserved by the StepMania KSF loader:
-            # delay_seconds = 60 / current_BPM * value / current_TICKCOUNT.
             pending_delay += 60_000.0 / bpm * value / tick
             projected_counts["E"] += 1
         elif code == "D":
-            if not math.isfinite(value):
-                raise ParseError(
-                    control.line_number,
-                    "KSF Direct Move millisecond delay",
-                    f"|D...| must be finite, found {value!r}",
-                    source,
-                )
             pending_delay += value
             projected_counts["D"] += 1
 
@@ -192,14 +189,148 @@ def _timing_segments(
             "ksf.direct-move-timing: projected inline Direct Move controls "
             f"as NX block boundaries ({summary})"
         )
-    if unsupported:
-        codes = ", ".join(sorted({control.code for control in unsupported}))
-        diagnostics.append(
-            "ksf.direct-move-controls-not-projected: inline controls "
-            f"{codes} remain source-only and do not create note/item cells"
-        )
-
+    diagnostics.extend(_unsupported_control_diagnostics(controls))
     return tuple(segments), tuple(diagnostics)
+
+
+def _ceil_legacy_row(value: float) -> int:
+    # Suppress floating-point noise around exact historical row boundaries.
+    return int(math.ceil(value - 1e-9))
+
+
+def _legacy_header_segments(
+    row_count: int,
+    headers: dict[str, str],
+    *,
+    initial_bpm: float,
+    initial_tick: int,
+    source: str,
+) -> tuple[tuple[_Segment, ...], tuple[str, ...]]:
+    """Project Kick It Up BPM/STARTTIME/BUNKI timing to NX block anchors.
+
+    The original KIU runtime stores three BPMs and three STARTTIMEs. At each
+    non-zero BUNKI it swaps both the BPM and the timing anchor. This is the
+    same timing model carried by NOT4, but KSF rows are already explicit and
+    therefore do not need NOT4's sparse-record padding corrections.
+    """
+
+    initial_start = _number(headers, "STARTTIME", 0.0, source=source)
+    transition_specs = (
+        ("BUNKI", "BPM2", "STARTTIME2"),
+        ("BUNKI2", "BPM3", "STARTTIME3"),
+    )
+    transitions: list[tuple[float, float, float, str]] = []
+    for bunki_key, bpm_key, start_key in transition_specs:
+        bunki = _number(headers, bunki_key, 0.0, source=source)
+        if bunki <= 0:
+            continue
+        next_bpm = _number(headers, bpm_key, 0.0, source=source)
+        if next_bpm <= 0:
+            raise ParseError(
+                0,
+                "KSF Kick It Up timing",
+                f"{bunki_key}={bunki:g} requires a positive {bpm_key}",
+                source,
+            )
+        next_start = _number(headers, start_key, 0.0, source=source)
+        transitions.append((bunki, next_bpm, next_start, bunki_key))
+
+    for previous, current in zip(transitions, transitions[1:]):
+        if current[0] <= previous[0]:
+            raise ParseError(
+                0,
+                "KSF Kick It Up timing",
+                "BUNKI transition times must be strictly increasing",
+                source,
+            )
+
+    states: list[tuple[float, float]] = [(initial_bpm, initial_start)]
+    states.extend((bpm, start) for _, bpm, start, _ in transitions)
+    boundaries = [bunki for bunki, _, _, _ in transitions]
+
+    segments: list[_Segment] = []
+    previous_absolute_end = 0.0
+    previous_source_end = 0
+    remaps: list[str] = []
+
+    for index, (bpm, start_cs) in enumerate(states):
+        rows_per_cs = bpm / 6000.0 * initial_tick
+        row_ms = 60_000.0 / (bpm * initial_tick)
+        if index == 0:
+            begin = 0
+        else:
+            begin = _ceil_legacy_row((boundaries[index - 1] - start_cs) * rows_per_cs)
+        if index < len(boundaries):
+            end = _ceil_legacy_row((boundaries[index] - start_cs) * rows_per_cs)
+        else:
+            end = row_count
+
+        begin = max(0, min(row_count, begin))
+        end = max(begin, min(row_count, end))
+
+        if index and begin != previous_source_end:
+            direction = "skips" if begin > previous_source_end else "replays"
+            remaps.append(
+                f"{boundaries[index - 1]:g}cs {direction} source rows "
+                f"{previous_source_end}..{begin}"
+            )
+
+        if end > begin:
+            absolute_start = start_cs * 10.0 + begin * row_ms
+            delay_ms = absolute_start if not segments else absolute_start - previous_absolute_end
+            segments.append(_Segment(begin, end, bpm, initial_tick, delay_ms))
+            previous_absolute_end = absolute_start + (end - begin) * row_ms
+        previous_source_end = end
+
+    if not segments and row_count:
+        segments.append(_Segment(0, row_count, initial_bpm, initial_tick, initial_start * 10.0))
+
+    diagnostics = [
+        "ksf.kiu-header-timing: projected BPM2/BPM3 + BUNKI/BUNKI2 + "
+        "STARTTIME2/STARTTIME3 using the original Kick It Up segment-anchor model"
+    ]
+    if not transitions:
+        diagnostics.append(
+            "ksf.kiu-header-timing-unused: numbered timing fields are present but no "
+            "non-zero BUNKI transition is active"
+        )
+    if remaps:
+        diagnostics.append(
+            "ksf.kiu-row-remap: STARTTIME segment anchors intentionally remap the source "
+            "row cursor (" + "; ".join(remaps) + ")"
+        )
+    return tuple(segments), tuple(diagnostics)
+
+
+def _ksf_mode(source_name: str, headers: dict[str, str], *, p2_active: bool) -> str:
+    stem = Path(source_name).stem.casefold()
+    player = headers.get("PLAYER", "").strip().casefold()
+
+    if any(token in stem for token in _HALFDOUBLE_NAMES):
+        return "halfdouble"
+    if "double" in player:
+        return "double"
+    if "couple" in player:
+        return "couple"
+    if player == "single":
+        return "single"
+
+    if (
+        "double" in stem
+        or "nightmare" in stem
+        or "freestyle" in stem
+        or _DOUBLE_TOKEN.search(stem)
+    ):
+        return "double"
+    if stem.endswith("_2"):
+        return "couple"
+    if stem.endswith("_1"):
+        return "single"
+    return "couple" if p2_active else "single"
+
+
+def _has_activity(rows: tuple[tuple[int, ...], ...]) -> bool:
+    return any(any(row) for row in rows)
 
 
 def import_bytes(
@@ -244,9 +375,6 @@ def import_bytes(
             controls.append(control)
             continue
 
-        # Pipe-delimited input is Direct Move control syntax, never a note
-        # row. Reject malformed payloads rather than turning characters inside
-        # them into bogus NX item IDs.
         if line.startswith("|") and line.endswith("|"):
             raise ParseError(
                 line_number,
@@ -279,7 +407,7 @@ def import_bytes(
         raise ParseError(0, "KSF", "missing step rows", source_name)
 
     bpm = _number(headers, "BPM", 120.0, source=source_name)
-    if not math.isfinite(bpm) or bpm <= 0:
+    if bpm <= 0:
         raise ParseError(0, "KSF BPM", f"BPM must be positive, found {bpm!r}", source_name)
     tick_value = _number(headers, "TICKCOUNT", 4.0, source=source_name)
     if not tick_value.is_integer() or tick_value <= 0:
@@ -296,29 +424,41 @@ def import_bytes(
     p2_active = any(any(row[5:10]) for row in playable_rows)
     stem = Path(source_name).stem
 
-    segments, direct_move_diagnostics = _timing_segments(
-        len(playable_rows),
-        tuple(controls),
-        initial_bpm=bpm,
-        initial_tick=tick,
-        initial_delay_ms=start_time_ms,
-        source=source_name,
-    )
+    extended_timing = any(key in headers for key in _LEGACY_TIMING_KEYS)
+    inline_timing = any(control.code in _TIMING_CONTROL_CODES for control in controls)
+    if extended_timing and inline_timing:
+        raise ParseError(
+            0,
+            "KSF timing syntax",
+            "file mixes Kick It Up BPM2/BUNKI/STARTTIME2 timing with Direct Move "
+            "B/T/E/D controls; coexistence is not verified",
+            source_name,
+        )
+
+    if extended_timing:
+        segments, timing_diagnostics = _legacy_header_segments(
+            len(playable_rows),
+            headers,
+            initial_bpm=bpm,
+            initial_tick=tick,
+            source=source_name,
+        )
+        timing_diagnostics += _unsupported_control_diagnostics(tuple(controls))
+    else:
+        segments, timing_diagnostics = _timing_segments(
+            len(playable_rows),
+            tuple(controls),
+            initial_bpm=bpm,
+            initial_tick=tick,
+            initial_delay_ms=start_time_ms,
+            source=source_name,
+        )
 
     diagnostics = [
         "ksf.starttime-centiseconds: #STARTTIME is multiplied by 10 to project milliseconds",
         f"ksf.row-width: source uses {width} channels",
-        *direct_move_diagnostics,
+        *timing_diagnostics,
     ]
-    if any(
-        key.startswith(("BPM", "BUNKI", "STARTTIME"))
-        and key not in {"BPM", "STARTTIME"}
-        for key in headers
-    ):
-        diagnostics.append(
-            "ksf.extended-timing-not-projected: numbered BPM/BUNKI/STARTTIME "
-            "fields remain source-only pending verified KIU/StepEdit block semantics"
-        )
 
     def blocks_for_rows(rows):
         rows = tuple(rows)
@@ -335,58 +475,106 @@ def import_bytes(
         )
 
     results: list[AndamiroChartResult] = []
+    mode = _ksf_mode(source_name, headers, p2_active=p2_active)
+    diagnostics.append(f"ksf.mode: classified source as {mode}")
 
-    if p2_active:
+    if mode == "double":
+        rows10 = tuple(tuple(row[:10]) for row in playable_rows)
+        results.append(
+            AndamiroChartResult(
+                "double",
+                "KSF — Double",
+                "ksf",
+                _build_nx20(
+                    blocks_for_rows(rows10),
+                    columns=10,
+                    lightmap=False,
+                    source=f"{source_name} [KSF Double projection]",
+                    profile=profile,
+                ),
+                f"{stem}.NX",
+                tuple(diagnostics + ["ksf.bank-layout: playable lanes 0..9 kept as one Double chart"]),
+            )
+        )
+    elif mode == "halfdouble":
+        rows6 = tuple(tuple(row[2:8]) for row in playable_rows)
+        document = _build_nx20(
+            blocks_for_rows(rows6),
+            columns=6,
+            lightmap=False,
+            source=f"{source_name} [KSF Half Double projection]",
+            profile=profile,
+        )
+        document = replace(document, start_column=RawU32.from_value(2))
+        results.append(
+            AndamiroChartResult(
+                "halfdouble",
+                "KSF — Half Double",
+                "ksf",
+                document,
+                f"{stem}.NX",
+                tuple(diagnostics + ["ksf.bank-layout: lanes 2..7 projected as 6-lane Half Double at start_column=2"]),
+            )
+        )
+    elif mode == "couple":
         p1_rows = tuple(tuple(row[:5]) for row in playable_rows)
         p2_rows = tuple(tuple(row[5:10]) for row in playable_rows)
-        results.append(
-            AndamiroChartResult(
-                "p1",
-                "KSF — Player 1",
-                "ksf",
-                _build_nx20(
-                    blocks_for_rows(p1_rows),
-                    columns=5,
-                    lightmap=False,
-                    source=f"{source_name} [KSF P1 projection]",
-                    profile=profile,
-                ),
-                f"{stem}_P1.NX",
-                tuple(diagnostics),
+        if _has_activity(p1_rows):
+            results.append(
+                AndamiroChartResult(
+                    "p1",
+                    "KSF — Player 1",
+                    "ksf",
+                    _build_nx20(
+                        blocks_for_rows(p1_rows),
+                        columns=5,
+                        lightmap=False,
+                        source=f"{source_name} [KSF Couple P1 projection]",
+                        profile=profile,
+                    ),
+                    f"{stem}_P1.NX",
+                    tuple(diagnostics + ["ksf.couple-bank: lanes 0..4 projected as Player 1"]),
+                )
             )
-        )
-        results.append(
-            AndamiroChartResult(
-                "p2",
-                "KSF — Player 2",
-                "ksf",
-                _build_nx20(
-                    blocks_for_rows(p2_rows),
-                    columns=5,
-                    lightmap=False,
-                    source=f"{source_name} [KSF P2 projection]",
-                    profile=profile,
-                ),
-                f"{stem}_P2.NX",
-                tuple(diagnostics),
+        if _has_activity(p2_rows):
+            results.append(
+                AndamiroChartResult(
+                    "p2",
+                    "KSF — Player 2",
+                    "ksf",
+                    _build_nx20(
+                        blocks_for_rows(p2_rows),
+                        columns=5,
+                        lightmap=False,
+                        source=f"{source_name} [KSF Couple P2 projection]",
+                        profile=profile,
+                    ),
+                    f"{stem}_P2.NX",
+                    tuple(diagnostics + ["ksf.couple-bank: lanes 5..9 projected as Player 2"]),
+                )
             )
-        )
     else:
         p1_rows = tuple(tuple(row[:5]) for row in playable_rows)
         results.append(
             AndamiroChartResult(
                 "chart",
-                "KSF — chart",
+                "KSF — Single",
                 "ksf",
                 _build_nx20(
                     blocks_for_rows(p1_rows),
                     columns=5,
                     lightmap=False,
-                    source=f"{source_name} [KSF projection]",
+                    source=f"{source_name} [KSF Single projection]",
                     profile=profile,
                 ),
                 f"{stem}.NX",
-                tuple(diagnostics),
+                tuple(
+                    diagnostics
+                    + [
+                        "ksf.bank-layout: Single uses lanes 0..4"
+                        + ("; activity in lanes 5..9 is ignored by Single semantics" if p2_active else "")
+                    ]
+                ),
             )
         )
 
