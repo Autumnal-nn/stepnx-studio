@@ -4,7 +4,8 @@ from pathlib import Path
 
 from stepnx.core.errors import UnsupportedFormatError
 from stepnx.importers.andamiro import AndamiroImportResult, load_andamiro
-from stepnx.importers.legacy import LegacyChart, LegacyContainer, load_legacy
+from stepnx.importers.ksf import load as load_ksf
+from stepnx.importers.legacy import LegacyChart, LegacyContainer
 from stepnx.importers.see import SEEImportResult, load as load_see
 from stepnx.importers.ucs import parse_ucs
 
@@ -29,5 +30,5 @@ def load_importable(
     if suffix == ".see":
         return load_see(source, profile=profile)
     if suffix == ".ksf":
-        return load_legacy(source)
+        return load_ksf(source, profile=profile)
     raise UnsupportedFormatError(f"unsupported import suffix: {source.suffix}")
