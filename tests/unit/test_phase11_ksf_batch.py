@@ -12,6 +12,16 @@ from stepnx.importers.authoring_import import (
 
 
 class KSFBatchImportTests(unittest.TestCase):
+    def _timeline_blocks(self, document):
+        """Return sequential timing Blocks, which live one-per-Split in NX20."""
+
+        self.assertTrue(document.splits)
+        self.assertTrue(
+            all(len(split.blocks) == 1 for split in document.splits),
+            "sequential KSF timing must not be encoded as alternative Blocks in one Split",
+        )
+        return tuple(split.blocks[0] for split in document.splits)
+
     def test_starttime_centiseconds_are_projected_as_milliseconds(self) -> None:
         source = b"""#BPM:180.0;
 #TICKCOUNT:4;
@@ -140,7 +150,7 @@ class KSFBatchImportTests(unittest.TestCase):
         self.assertEqual(chart.document.columns.value, 6)
         self.assertEqual(chart.document.start_column.value, 2)
 
-    def test_kick_it_up_bunki_headers_create_reanchored_blocks(self) -> None:
+    def test_kick_it_up_bunki_headers_create_reanchored_sequential_splits(self) -> None:
         rows = "\n".join(
             "1000000000000" if index % 2 == 0 else "0100000000000"
             for index in range(16)
@@ -162,7 +172,8 @@ class KSFBatchImportTests(unittest.TestCase):
             candidates = load_authoring_import_candidates(path)
 
         chart = candidates[0]
-        blocks = chart.document.splits[0].blocks
+        blocks = self._timeline_blocks(chart.document)
+        self.assertEqual(len(chart.document.splits), 2)
         self.assertEqual(len(blocks), 2)
         self.assertEqual([block.row_count.value for block in blocks], [8, 8])
         self.assertEqual([block.bpm.value for block in blocks], [120.0, 240.0])
@@ -190,7 +201,7 @@ class KSFBatchImportTests(unittest.TestCase):
             with self.assertRaisesRegex(ParseError, "mixes Kick It Up"):
                 load_authoring_import_candidates(path)
 
-    def test_direct_move_pipe_timing_creates_block_boundaries_not_note_rows(self) -> None:
+    def test_direct_move_pipe_timing_creates_sequential_splits_not_note_rows(self) -> None:
         source = b"""#BPM:138;
 #TICKCOUNT:12;
 #STARTTIME:25;
@@ -211,7 +222,8 @@ class KSFBatchImportTests(unittest.TestCase):
             candidates = load_authoring_import_candidates(path)
 
         chart = candidates[0]
-        blocks = chart.document.splits[0].blocks
+        blocks = self._timeline_blocks(chart.document)
+        self.assertEqual(len(chart.document.splits), 4)
         self.assertEqual(len(blocks), 4)
         self.assertEqual(sum(block.row_count.value for block in blocks), 4)
         self.assertEqual([block.bpm.value for block in blocks], [138.0, 92.0, 92.0, 92.0])
@@ -240,7 +252,7 @@ class KSFBatchImportTests(unittest.TestCase):
             candidates = load_authoring_import_candidates(path)
 
         chart = candidates[0]
-        blocks = chart.document.splits[0].blocks
+        blocks = self._timeline_blocks(chart.document)
         self.assertEqual(sum(block.row_count.value for block in blocks), 2)
         self.assertTrue(
             any(
