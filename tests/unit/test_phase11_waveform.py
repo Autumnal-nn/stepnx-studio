@@ -14,6 +14,7 @@ try:
     from stepnx.authoring import WaveformEnvelope, create_authoring_snapshot
     from stepnx.codecs.nx20 import parse_bytes
     from stepnx.gui.phase11_waveform import (
+        WaveformRenderData,
         _draw_waveform_field,
         _preferred_song_path,
         _reduce_peaks,
@@ -58,6 +59,9 @@ class Phase11WaveformTests(unittest.TestCase):
         peaks = [0.25] * 30_000
         self.assertEqual(len(_reduce_peaks(peaks)), 30_000)
 
+    def test_reduction_uses_mean_level_instead_of_transient_maximum(self) -> None:
+        self.assertEqual(_reduce_peaks([0.0, 1.0, 0.0, 0.0], 2), (0.5, 0.0))
+
     def test_waveform_is_drawn_across_note_field_not_timing_ruler(self) -> None:
         document = parse_bytes(
             make_large_lightmap(rows=8), source="LM.NX", row_storage="compact"
@@ -81,6 +85,40 @@ class Phase11WaveformTests(unittest.TestCase):
             )
             self.assertGreater(canvas.pixelColor(centre_x, 10).alpha(), 0)
             self.assertEqual(canvas.pixelColor(10, 10).alpha(), 0)
+        finally:
+            widget.close()
+
+    def test_stereo_waveform_draws_two_separate_channel_traces(self) -> None:
+        document = parse_bytes(
+            make_large_lightmap(rows=8), source="LM.NX", row_storage="compact"
+        )
+        widget = TimelineWidget(create_authoring_snapshot(document))
+        try:
+            widget.resize(500, 300)
+            aggregate = WaveformEnvelope(60_000.0, (0.3,) * 6000)
+            waveform = WaveformRenderData(
+                aggregate,
+                ((0.3,) * 6000, (0.3,) * 6000),
+            )
+            widget.set_waveform(waveform)
+            visible = widget._layout.visible_segments(0.0, 250.0, overscan_rows=0)[0]
+            canvas = QImage(600, 400, QImage.Format.Format_ARGB32)
+            canvas.fill(0)
+            painter = QPainter(canvas)
+            try:
+                _draw_waveform_field(widget, painter, visible, waveform)
+            finally:
+                painter.end()
+
+            left = widget._geometry.ruler_width
+            width = widget._layout.lane_area_width
+            left_channel = round(left + width * 0.25)
+            right_channel = round(left + width * 0.75)
+            centre = round(left + width * 0.5)
+
+            self.assertGreater(canvas.pixelColor(left_channel, 10).alpha(), 0)
+            self.assertGreater(canvas.pixelColor(right_channel, 10).alpha(), 0)
+            self.assertEqual(canvas.pixelColor(centre, 10).alpha(), 0)
         finally:
             widget.close()
 
