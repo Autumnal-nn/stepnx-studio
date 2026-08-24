@@ -39,15 +39,15 @@ class Phase11WaveformTests(unittest.TestCase):
             parent = Path(temporary)
             folder = parent / "D123"
             folder.mkdir()
-            sibling = parent / "d123.MP3"
-            fiesta = folder / "A.mp3"
+            nxa = parent / "d123.MP3"
+            fiesta = parent / "a.Mp3"
             ksf = folder / "sOnG.Mp3"
-            sibling.write_bytes(b"nxa")
+            nxa.write_bytes(b"nxa")
             fiesta.write_bytes(b"fiesta")
             ksf.write_bytes(b"ksf")
 
-            self.assertEqual(_preferred_song_path(folder), sibling.resolve())
-            sibling.unlink()
+            self.assertEqual(_preferred_song_path(folder), nxa.resolve())
+            nxa.unlink()
             self.assertEqual(_preferred_song_path(folder), fiesta.resolve())
             fiesta.unlink()
             self.assertEqual(_preferred_song_path(folder), ksf.resolve())
