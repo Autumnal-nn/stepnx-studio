@@ -126,9 +126,6 @@ class QtWaveformDecoder(QObject):
             )
             return
 
-        # A mono 11.025 kHz Int16 projection is ample for a visual amplitude
-        # envelope and keeps Python-side analysis bounded for long songs. The
-        # default Windows Qt backend performs this conversion while decoding.
         desired = QAudioFormat()
         desired.setSampleRate(11025)
         desired.setChannelCount(1)
@@ -230,35 +227,29 @@ def _case_insensitive_file(directory: Path, name: str) -> Path | None:
 
 
 def _preferred_song_path(root: str | Path) -> Path | None:
-    """Resolve the editor's three canonical automatic MP3 conventions.
+    """Resolve the three canonical MP3 conventions inside a chart folder.
 
-    Priority is deliberately historical rather than heuristic:
-    NXA sibling ``<folderName>.mp3``, Fiesta+ ``A.mp3``, then KSF-era
-    ``Song.mp3``. Case-insensitive matching mirrors the Windows environments in
-    which these layouts were authored.
+    Priority is deterministic: ``<folderName>.mp3`` for NXA-era folders,
+    ``A.mp3`` for Fiesta and later, then KSF-era ``Song.mp3``. Matching is
+    case-insensitive to reproduce the Windows authoring environments used by
+    those formats.
     """
 
     folder = Path(root).resolve()
     candidates = (
-        (folder.parent, f"{folder.name}.mp3"),
-        (folder, "A.mp3"),
-        (folder, "Song.mp3"),
+        f"{folder.name}.mp3",
+        "A.mp3",
+        "Song.mp3",
     )
-    for directory, name in candidates:
-        match = _case_insensitive_file(directory, name)
+    for name in candidates:
+        match = _case_insensitive_file(folder, name)
         if match is not None:
             return match
     return None
 
 
 def _draw_waveform_field(widget, painter, visible, waveform: WaveformEnvelope) -> None:
-    """Render an SMEditor-style amplitude field behind the active note lanes.
-
-    Sampling is driven by vertical screen position rather than encoded row
-    identity. Dense Beat Splits therefore do not starve the waveform of visual
-    resolution, while Scroll/zoom still reshape it through the timeline's Y
-    projection.
-    """
+    """Render an SMEditor-style amplitude field behind the active note lanes."""
 
     segment = visible.segment
     block = segment.block
@@ -286,7 +277,9 @@ def _draw_waveform_field(widget, painter, visible, waveform: WaveformEnvelope) -
 
     painter.save()
     try:
-        painter.setClipRect(QRectF(lane_left, first_y, lane_width, last_y - first_y))
+        painter.setClipRect(
+            QRectF(lane_left, first_y, lane_width, last_y - first_y)
+        )
         painter.setPen(QPen(QColor(96, 150, 190, 82), 1.0))
         start = math.floor(first_y)
         stop = math.ceil(last_y)
@@ -324,9 +317,6 @@ def _install_timeline_waveform_renderer() -> None:
         if waveform is not None and enabled:
             _draw_waveform_field(self, painter, visible, waveform)
 
-        # The Phase 8 renderer drew one tiny amplitude stroke in the timing
-        # ruler per encoded row. Suppress that legacy pass while retaining the
-        # same waveform object for the new screen-space renderer above.
         if waveform is None:
             original_draw_segment(self, painter, visible)
             return
@@ -396,15 +386,31 @@ def _replace_audio_picker(window) -> None:
     action.triggered.connect(lambda *_args: _choose_audio_dialog(window))
 
 
+def _clear_audio(window) -> None:
+    decoder = getattr(window, "phase11_waveform_decoder", None)
+    if decoder is not None:
+        decoder.stop()
+    window.audio_transport.load(None)
+    if window.workspace is not None:
+        window.workspace = window.workspace.select_audio(None)
+    window.waveform = None
+    for index in range(window.tabs.count()):
+        widget = window.tabs.widget(index)
+        if hasattr(widget, "set_waveform"):
+            widget.set_waveform(None, window.audio_alignment)
+
+
 def _install_song_autoload(window) -> None:
     original_load_folder = window.load_folder
 
     def load_folder_with_song(path: Path, *, discard_changes: bool = False) -> None:
+        previous_root = None if window.workspace is None else window.workspace.root
         previous_audio = (
             None if window.workspace is None else window.workspace.selected_audio
         )
+        requested = Path(path).resolve()
         original_load_folder(path, discard_changes=discard_changes)
-        if window.workspace is None:
+        if window.workspace is None or window.workspace.root.resolve() != requested:
             return
 
         preferred = _preferred_song_path(window.workspace.root)
@@ -414,9 +420,20 @@ def _install_song_autoload(window) -> None:
                 window._load_audio(preferred)
             return
 
-        # Save All reloads the workspace. Keep a manually selected song alive
-        # across that internal refresh instead of pestering the user again.
-        if previous_audio is not None and previous_audio.is_file():
+        # The base Phase 8 loader historically auto-loaded a sibling
+        # <folderName>.mp3. Phase 11 owns song discovery now, so discard that
+        # legacy selection when none of the three in-folder conventions match.
+        if window.workspace.selected_audio is not None:
+            _clear_audio(window)
+
+        # Save All reloads the same workspace. Preserve a manually selected
+        # song for that internal refresh, but never carry it into another folder.
+        if (
+            previous_root is not None
+            and previous_root.resolve() == window.workspace.root.resolve()
+            and previous_audio is not None
+            and previous_audio.is_file()
+        ):
             window._load_audio(previous_audio)
             return
         if discard_changes:
@@ -440,10 +457,6 @@ def install_phase11_waveform(window) -> None:
         return
     window._phase11_waveform_installed = True
 
-    # Song audio in the target engines may use .MP3 directly or ENC2-wrapped
-    # .AUD/.A. Keep manual session selection compatible with those formats even
-    # though automatic discovery intentionally uses only the three MP3
-    # conventions above.
     extended_suffixes = frozenset((*folder_module.AUDIO_SUFFIXES, ".A"))
     folder_module.AUDIO_SUFFIXES = extended_suffixes
     workspace_package.AUDIO_SUFFIXES = extended_suffixes
@@ -471,8 +484,6 @@ def install_phase11_waveform(window) -> None:
             decoder.stop()
             return
 
-        # Base Phase 8 already provides a synchronous PCM-WAV path. Reuse it
-        # when successful; QAudioDecoder is the compressed/staged fallback.
         if source.suffix.casefold() == ".wav" and window.waveform is not None:
             decoder.stop()
             return
