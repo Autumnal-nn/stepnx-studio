@@ -18,6 +18,9 @@ def main(argv=None) -> int:
     from stepnx.gui.phase10_timing import Phase10BlockTimingDialog
     from stepnx.gui.phase10_preview import Phase10GameplayPreviewWidget
     from stepnx.gui.phase11_import import install_phase11_import
+    from stepnx.gui.phase11_preferences import install_phase11_preferences
+    from stepnx.gui.phase11_state_guard import install_phase11_state_guard
+    from stepnx.gui.phase11_waveform import install_phase11_waveform
     from stepnx.gui.phase11_workspace import install_phase11_workspace_tools
 
     timeline_module.TimelineWidget = Phase10TimelineWidget
@@ -31,6 +34,9 @@ def main(argv=None) -> int:
             install_phase10(self)
             install_phase11_import(self)
             install_phase11_workspace_tools(self)
+            install_phase11_state_guard(self)
+            install_phase11_waveform(self)
+            install_phase11_preferences(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10
