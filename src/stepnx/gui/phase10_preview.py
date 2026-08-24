@@ -5,6 +5,7 @@ from PySide6.QtGui import QColor, QPen
 
 from stepnx.gui.preview_widget import GameplayPreviewWidget as _BaseGameplayPreviewWidget
 from stepnx.preview.geometry import PlayfieldGeometry
+from stepnx.preview.holds import pair_nx20_holds
 
 
 class Phase10GameplayPreviewWidget(_BaseGameplayPreviewWidget):
@@ -25,6 +26,13 @@ class Phase10GameplayPreviewWidget(_BaseGameplayPreviewWidget):
         if self._half_double_backing:
             self.field_mode = "DOUBLE"
             self._refresh_tooltip()
+
+    @staticmethod
+    def _pair_holds(events):
+        # NXA and Prime 2 agree on the NX20-era rule: completely empty rows are
+        # transparent to hold carry, but every globally non-empty row must
+        # contain BODY/TAIL in an already-open lane or that shaft is cancelled.
+        return pair_nx20_holds(events)
 
     def _geometry(self) -> PlayfieldGeometry:
         if getattr(self, "_half_double_backing", False):
@@ -122,10 +130,10 @@ class Phase10GameplayPreviewWidget(_BaseGameplayPreviewWidget):
                 tens_cell = 10 + number // 10
                 units_cell = number % 10
                 units = self._phase10_draw_special_cell(
-                    painter, atlas, units_cell, rect
+                    painter, atlas, units_cell, 0, rect
                 )
                 tens = self._phase10_draw_special_cell(
-                    painter, atlas, tens_cell, rect
+                    painter, atlas, tens_cell, 0, rect
                 )
                 return units or tens
 
