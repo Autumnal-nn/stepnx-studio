@@ -227,22 +227,22 @@ def _case_insensitive_file(directory: Path, name: str) -> Path | None:
 
 
 def _preferred_song_path(root: str | Path) -> Path | None:
-    """Resolve the three canonical MP3 conventions inside a chart folder.
+    """Resolve the three canonical automatic MP3 conventions.
 
-    Priority is deterministic: ``<folderName>.mp3`` for NXA-era folders,
-    ``A.mp3`` for Fiesta and later, then KSF-era ``Song.mp3``. Matching is
-    case-insensitive to reproduce the Windows authoring environments used by
-    those formats.
+    Priority is deterministic: sibling ``<folderName>.mp3`` for NXA-era
+    folders, sibling ``A.mp3`` for Fiesta and later, then in-folder KSF-era
+    ``Song.mp3``. Matching is case-insensitive to reproduce the Windows
+    authoring environments used by those formats.
     """
 
     folder = Path(root).resolve()
     candidates = (
-        f"{folder.name}.mp3",
-        "A.mp3",
-        "Song.mp3",
+        (folder.parent, f"{folder.name}.mp3"),
+        (folder.parent, "A.mp3"),
+        (folder, "Song.mp3"),
     )
-    for name in candidates:
-        match = _case_insensitive_file(folder, name)
+    for directory, name in candidates:
+        match = _case_insensitive_file(directory, name)
         if match is not None:
             return match
     return None
@@ -420,9 +420,6 @@ def _install_song_autoload(window) -> None:
                 window._load_audio(preferred)
             return
 
-        # The base Phase 8 loader historically auto-loaded a sibling
-        # <folderName>.mp3. Phase 11 owns song discovery now, so discard that
-        # legacy selection when none of the three in-folder conventions match.
         if window.workspace.selected_audio is not None:
             _clear_audio(window)
 
