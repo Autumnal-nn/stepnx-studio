@@ -1,3 +1,10 @@
+from stepnx.workspace.chart_files import (
+    create_chart_from_lightmap,
+    delete_nx_chart,
+    normalize_nx_filename,
+    plan_create_nx_chart,
+    plan_duplicate_nx_chart,
+)
 from stepnx.workspace.folder import (
     AUDIO_SUFFIXES,
     AudioCandidate,
@@ -48,10 +55,15 @@ __all__ = [
     "WorkspaceError",
     "compare_mirror",
     "create_blank_lightmap",
+    "create_chart_from_lightmap",
     "default_recovery_root",
+    "delete_nx_chart",
     "discover_audio",
     "execute_save_plan",
+    "normalize_nx_filename",
     "open_folder",
+    "plan_create_nx_chart",
+    "plan_duplicate_nx_chart",
     "plan_individual_save",
     "plan_blank_lightmap",
     "plan_mirror_export",
