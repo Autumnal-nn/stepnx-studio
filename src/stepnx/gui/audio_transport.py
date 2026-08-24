@@ -50,7 +50,7 @@ class AudioTransport(QObject):
     def playback_source(self) -> Path | None:
         """Exact local file currently handed to QMediaPlayer.
 
-        For ordinary formats this is the selected source. ENC2 AUD is decoded
+        For ordinary formats this is the selected source. ENC2 AUD/A is decoded
         and staged as MP3 first, so waveform decoding can consume precisely the
         same bytes as playback instead of independently repeating that pipeline.
         """
@@ -70,7 +70,7 @@ class AudioTransport(QObject):
                 self.cleanup_aud_staging()
             return True
         source = Path(path)
-        if source.suffix.casefold() == ".aud":
+        if source.suffix.casefold() in {".aud", ".a"}:
             try:
                 payload = decode_enc2_aud(source)
             except AudDecodeError as exc:
@@ -84,7 +84,7 @@ class AudioTransport(QObject):
             try:
                 source.write_bytes(payload)
             except OSError as exc:
-                self.errorOccurred.emit(f"cannot stage decoded AUD: {exc}")
+                self.errorOccurred.emit(f"cannot stage decoded ENC2 audio: {exc}")
                 return False
         source = source.resolve()
         self._playback_source = source
@@ -105,9 +105,9 @@ class AudioTransport(QObject):
     def _ensure_aud_directory(self) -> QTemporaryDir | None:
         if self._aud_directory is not None and self._aud_directory.isValid():
             return self._aud_directory
-        directory = QTemporaryDir("stepnx-aud-XXXXXX")
+        directory = QTemporaryDir("stepnx-audio-XXXXXX")
         if not directory.isValid():
-            self.errorOccurred.emit("cannot create temporary directory for decoded AUD")
+            self.errorOccurred.emit("cannot create temporary directory for decoded ENC2 audio")
             return None
         directory.setAutoRemove(True)
         self._aud_directory = directory
