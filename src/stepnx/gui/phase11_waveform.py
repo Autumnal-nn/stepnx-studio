@@ -4,8 +4,12 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtMultimedia import QAudioDecoder, QAudioFormat
+from PySide6.QtWidgets import QFileDialog
 
+import stepnx.workspace as workspace_package
+import stepnx.workspace.folder as folder_module
 from stepnx.authoring.audio import WaveformEnvelope
 
 
@@ -76,7 +80,7 @@ class QtWaveformDecoder(QObject):
     """Asynchronously derive a WaveformEnvelope from Qt-supported audio.
 
     The decoder intentionally consumes the exact local file handed to
-    QMediaPlayer. For ENC2 AUD this is AudioTransport's staged decoded MP3, so
+    QMediaPlayer. For ENC2 AUD/A this is AudioTransport's staged decoded MP3, so
     playback and waveform cannot diverge through two independent decrypt paths.
     """
 
@@ -191,10 +195,42 @@ def _publish_waveform(window, waveform: WaveformEnvelope) -> None:
     )
 
 
+def _replace_audio_picker(window) -> None:
+    action = next(
+        (item for item in window.findChildren(QAction) if item.text() == "Select audio…"),
+        None,
+    )
+    if action is None:
+        return
+    try:
+        action.triggered.disconnect()
+    except (RuntimeError, TypeError):
+        pass
+
+    def choose_audio(*_args) -> None:
+        initial = str(window.workspace.root) if window.workspace is not None else ""
+        selected, _ = QFileDialog.getOpenFileName(
+            window,
+            "Select chart audio",
+            initial,
+            "Audio (*.mp3 *.aud *.a *.wav *.flac *.ogg *.mp2);;All files (*)",
+        )
+        if selected:
+            window._load_audio(Path(selected))
+
+    action.triggered.connect(choose_audio)
+
+
 def install_phase11_waveform(window) -> None:
     if getattr(window, "_phase11_waveform_installed", False):
         return
     window._phase11_waveform_installed = True
+
+    # Song audio in the target engines may use .MP3 directly or ENC2-wrapped
+    # .AUD/.A. Keep the workspace association rules in sync with the GUI path.
+    extended_suffixes = frozenset((*folder_module.AUDIO_SUFFIXES, ".A"))
+    folder_module.AUDIO_SUFFIXES = extended_suffixes
+    workspace_package.AUDIO_SUFFIXES = extended_suffixes
 
     decoder = QtWaveformDecoder(window)
     window.phase11_waveform_decoder = decoder
@@ -226,3 +262,4 @@ def install_phase11_waveform(window) -> None:
         )
 
     window._load_audio = load_audio_with_waveform
+    _replace_audio_picker(window)
