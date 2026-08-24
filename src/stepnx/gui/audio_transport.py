@@ -24,6 +24,7 @@ class AudioTransport(QObject):
         self.metronome.setLoopCount(1)
         self.metronome.setVolume(0.9)
         self._aud_directory: QTemporaryDir | None = None
+        self._playback_source: Path | None = None
         application = QCoreApplication.instance()
         if application is not None:
             application.aboutToQuit.connect(self.cleanup_aud_staging)
@@ -34,7 +35,7 @@ class AudioTransport(QObject):
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(16)
         self._position_timer.timeout.connect(self._poll_position)
-        # QMediaPlayer exposes both values as qlonglong.  PySide 6.11 refuses
+        # QMediaPlayer exposes both values as qlonglong. PySide 6.11 refuses
         # to connect those signals directly to our Python ``Signal(int)``;
         # route them through callables so the values are normalized before
         # they are re-emitted.
@@ -45,9 +46,21 @@ class AudioTransport(QObject):
             lambda error, message: self.errorOccurred.emit(message or str(error))
         )
 
+    @property
+    def playback_source(self) -> Path | None:
+        """Exact local file currently handed to QMediaPlayer.
+
+        For ordinary formats this is the selected source. ENC2 AUD is decoded
+        and staged as MP3 first, so waveform decoding can consume precisely the
+        same bytes as playback instead of independently repeating that pipeline.
+        """
+
+        return self._playback_source
+
     def load(self, path: str | Path | None) -> bool:
         self.player.stop()
         self.player.setSource(QUrl())
+        self._playback_source = None
         self._position_timer.stop()
         self._position_clock.invalidate()
         self._position_anchor = 0
@@ -73,7 +86,9 @@ class AudioTransport(QObject):
             except OSError as exc:
                 self.errorOccurred.emit(f"cannot stage decoded AUD: {exc}")
                 return False
-        self.player.setSource(QUrl.fromLocalFile(str(source.resolve())))
+        source = source.resolve()
+        self._playback_source = source
+        self.player.setSource(QUrl.fromLocalFile(str(source)))
         return True
 
     def toggle(self) -> None:
@@ -104,6 +119,7 @@ class AudioTransport(QObject):
             return True
         self.player.stop()
         self.player.setSource(QUrl())
+        self._playback_source = None
         self._position_timer.stop()
         self._position_clock.invalidate()
         self._aud_directory = None
