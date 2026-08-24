@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMenu,
@@ -321,14 +320,18 @@ def _edit_field(window, document_index: int | None = None) -> None:
         return
 
     entry = window.workspace.documents[document_index]
-    document = window.sessions[document_index].current
-    if entry.path.name.casefold() == "lm.nx" or document.effective_lightmap:
+    if entry.path.name.casefold() == "lm.nx" or entry.document.effective_lightmap:
         QMessageBox.information(
             window,
             "Lightmap field is fixed",
             "LM.NX uses the dedicated 3-channel Lightmap row layout and is not converted by the chart field tool.",
         )
         return
+
+    # A tree context action may target a document that has not yet been opened,
+    # so create/select its CommandStack before reading the editable snapshot.
+    window._open_document(document_index)
+    document = window.sessions[document_index].current
 
     dialog = FieldGeometryDialog(current_field(document), window)
     if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -356,7 +359,6 @@ def _edit_field(window, document_index: int | None = None) -> None:
             return
         allow_note_loss = True
 
-    window._open_document(document_index)
     widget = window.tabs.currentWidget()
     try:
         updated = window.sessions[document_index].execute(
@@ -388,7 +390,7 @@ def _show_tree_context(window, point) -> None:
     menu = QMenu(window.tree)
     if kind == "root":
         menu.addAction("Create NX…", lambda: _create_chart(window))
-    elif document_index >= 0:
+    elif kind == "document" and document_index >= 0:
         entry = window.workspace.documents[document_index] if window.workspace else None
         menu.addAction("Open", lambda: window._open_document(document_index))
         menu.addAction("Edit scope / field…", lambda: _edit_field(window, document_index))
@@ -402,11 +404,9 @@ def _show_tree_context(window, point) -> None:
         protected = bool(entry and entry.path.name.casefold() == "lm.nx")
         duplicate.setEnabled(not protected)
         delete.setEnabled(not protected)
-    else:
-        # Right-clicking empty tree space still provides the folder-level create
-        # action when a workspace is loaded.
-        if window.workspace is not None:
-            menu.addAction("Create NX…", lambda: _create_chart(window))
+    elif item is None and window.workspace is not None:
+        # Empty tree space is a folder-level target, equivalent to the root.
+        menu.addAction("Create NX…", lambda: _create_chart(window))
     if menu.actions():
         menu.exec(window.tree.viewport().mapToGlobal(point))
 
@@ -430,8 +430,8 @@ def install_phase11_workspace_tools(window) -> None:
     window.structure_menu.addAction(edit_field_action)
     window.phase11_edit_field_action = edit_field_action
 
-    # Folder-level Create remains primarily a tree operation, but keeping a
-    # callable on the window makes the feature testable without menu discovery.
+    # These hooks keep the file actions directly testable without reconstructing
+    # a context-menu mouse interaction.
     window.phase11_create_nx = lambda: _create_chart(window)
     window.phase11_duplicate_nx = lambda index: _duplicate_chart(window, index)
     window.phase11_delete_nx = lambda index: _delete_chart(window, index)
