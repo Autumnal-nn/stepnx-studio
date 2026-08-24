@@ -130,10 +130,10 @@ class Phase10GameplayPreviewWidget(_BaseGameplayPreviewWidget):
                 tens_cell = 10 + number // 10
                 units_cell = number % 10
                 units = self._phase10_draw_special_cell(
-                    painter, atlas, units_cell, 0, rect
+                    painter, atlas, units_cell, rect
                 )
                 tens = self._phase10_draw_special_cell(
-                    painter, atlas, tens_cell, 0, rect
+                    painter, atlas, tens_cell, rect
                 )
                 return units or tens
 
