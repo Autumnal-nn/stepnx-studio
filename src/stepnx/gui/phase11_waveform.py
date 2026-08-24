@@ -3,10 +3,10 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QObject, QPointF, QRectF, QUrl, Signal
+from PySide6.QtGui import QAction, QColor, QPen
 from PySide6.QtMultimedia import QAudioDecoder, QAudioFormat
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 import stepnx.workspace as workspace_package
 import stepnx.workspace.folder as folder_module
@@ -14,10 +14,12 @@ from stepnx.authoring.audio import WaveformEnvelope
 
 
 _TARGET_PEAKS_PER_SECOND = 100
-_MAX_WAVEFORM_POINTS = 4096
+_MAX_WAVEFORM_POINTS = 120_000
 
 
-def _reduce_peaks(peaks: list[float], maximum: int = _MAX_WAVEFORM_POINTS) -> tuple[float, ...]:
+def _reduce_peaks(
+    peaks: list[float], maximum: int = _MAX_WAVEFORM_POINTS
+) -> tuple[float, ...]:
     if not peaks:
         return ()
     if len(peaks) <= maximum:
@@ -27,7 +29,7 @@ def _reduce_peaks(peaks: list[float], maximum: int = _MAX_WAVEFORM_POINTS) -> tu
     for bucket in range(maximum):
         start = int(bucket * width)
         end = max(start + 1, int((bucket + 1) * width))
-        reduced.append(max(peaks[start:min(len(peaks), end)]))
+        reduced.append(max(peaks[start : min(len(peaks), end)]))
     return tuple(reduced)
 
 
@@ -37,7 +39,10 @@ def _chunk_peak(samples, sample_format) -> float:
     low = min(samples)
     high = max(samples)
     if sample_format == QAudioFormat.SampleFormat.UInt8:
-        return min(1.0, max(abs(float(low) - 128.0), abs(float(high) - 128.0)) / 128.0)
+        return min(
+            1.0,
+            max(abs(float(low) - 128.0), abs(float(high) - 128.0)) / 128.0,
+        )
     if sample_format == QAudioFormat.SampleFormat.Int16:
         return min(1.0, max(abs(int(low)), abs(int(high))) / 32768.0)
     if sample_format == QAudioFormat.SampleFormat.Int32:
@@ -69,10 +74,14 @@ def _buffer_peaks(buffer) -> list[float]:
     else:
         raise ValueError(f"unsupported decoded sample format: {sample_format}")
 
-    samples_per_bucket = max(1, round(rate * channels / _TARGET_PEAKS_PER_SECOND))
+    samples_per_bucket = max(
+        1, round(rate * channels / _TARGET_PEAKS_PER_SECOND)
+    )
     result: list[float] = []
     for start in range(0, len(samples), samples_per_bucket):
-        result.append(_chunk_peak(samples[start : start + samples_per_bucket], sample_format))
+        result.append(
+            _chunk_peak(samples[start : start + samples_per_bucket], sample_format)
+        )
     return result
 
 
@@ -112,7 +121,9 @@ class QtWaveformDecoder(QObject):
             self.failed.emit(f"waveform source does not exist: {source}")
             return
         if not self.decoder.isSupported():
-            self.failed.emit("Qt Multimedia audio decoding is not supported on this system")
+            self.failed.emit(
+                "Qt Multimedia audio decoding is not supported on this system"
+            )
             return
 
         # A mono 11.025 kHz Int16 projection is ample for a visual amplitude
@@ -195,9 +206,185 @@ def _publish_waveform(window, waveform: WaveformEnvelope) -> None:
     )
 
 
+def _case_insensitive_file(directory: Path, name: str) -> Path | None:
+    """Return a regular file matching *name* with Windows-like case handling."""
+
+    exact = directory / name
+    if exact.is_file() and not exact.is_symlink():
+        return exact.resolve()
+    wanted = name.casefold()
+    try:
+        candidates = sorted(
+            (
+                item
+                for item in directory.iterdir()
+                if item.is_file()
+                and not item.is_symlink()
+                and item.name.casefold() == wanted
+            ),
+            key=lambda item: (item.name.casefold(), item.name),
+        )
+    except OSError:
+        return None
+    return candidates[0].resolve() if candidates else None
+
+
+def _preferred_song_path(root: str | Path) -> Path | None:
+    """Resolve the editor's three canonical automatic MP3 conventions.
+
+    Priority is deliberately historical rather than heuristic:
+    NXA sibling ``<folderName>.mp3``, Fiesta+ ``A.mp3``, then KSF-era
+    ``Song.mp3``. Case-insensitive matching mirrors the Windows environments in
+    which these layouts were authored.
+    """
+
+    folder = Path(root).resolve()
+    candidates = (
+        (folder.parent, f"{folder.name}.mp3"),
+        (folder, "A.mp3"),
+        (folder, "Song.mp3"),
+    )
+    for directory, name in candidates:
+        match = _case_insensitive_file(directory, name)
+        if match is not None:
+            return match
+    return None
+
+
+def _draw_waveform_field(widget, painter, visible, waveform: WaveformEnvelope) -> None:
+    """Render an SMEditor-style amplitude field behind the active note lanes.
+
+    Sampling is driven by vertical screen position rather than encoded row
+    identity. Dense Beat Splits therefore do not starve the waveform of visual
+    resolution, while Scroll/zoom still reshape it through the timeline's Y
+    projection.
+    """
+
+    segment = visible.segment
+    block = segment.block
+    if (
+        segment.row_height <= 0.0
+        or block.bpm <= 0.0
+        or block.beat_split <= 0
+        or waveform.duration_ms <= 0.0
+    ):
+        return
+
+    first_y = max(segment.rows_top, segment.y_for_row(visible.first_row))
+    last_y = min(segment.bottom, segment.y_for_row(visible.last_row))
+    if last_y <= first_y:
+        return
+
+    geometry = widget._geometry
+    lane_width = widget._layout.lane_area_width
+    if lane_width <= 0.0:
+        return
+    lane_left = geometry.ruler_width
+    centre = lane_left + lane_width / 2.0
+    maximum_half = max(1.0, lane_width / 2.0 - 4.0)
+    row_duration = 60_000.0 / (block.bpm * block.beat_split)
+
+    painter.save()
+    try:
+        painter.setClipRect(QRectF(lane_left, first_y, lane_width, last_y - first_y))
+        painter.setPen(QPen(QColor(96, 150, 190, 82), 1.0))
+        start = math.floor(first_y)
+        stop = math.ceil(last_y)
+        for y in range(start, stop):
+            row = (y + 0.5 - segment.rows_top) / segment.row_height
+            chart_time = block.start_time + row * row_duration
+            audio_time = widget._audio_alignment.chart_to_audio(chart_time)
+            amplitude = waveform.amplitude_at(audio_time)
+            if amplitude <= 0.0:
+                continue
+            half = amplitude * maximum_half
+            painter.drawLine(
+                QPointF(centre - half, y + 0.5),
+                QPointF(centre + half, y + 0.5),
+            )
+    finally:
+        painter.restore()
+
+
+def _install_timeline_waveform_renderer() -> None:
+    """Replace the old ruler-only waveform with a full notefield projection."""
+
+    import stepnx.gui.timeline_widget as timeline_module
+
+    timeline_class = timeline_module.TimelineWidget
+    if getattr(timeline_class, "_phase11_waveform_renderer_installed", False):
+        return
+    original_draw_segment = timeline_class._draw_segment
+
+    def draw_segment_with_waveform(self, painter, visible) -> None:
+        waveform = getattr(self, "_waveform", None)
+        host = self.window()
+        action = getattr(host, "phase11_waveform_action", None)
+        enabled = action is None or action.isChecked()
+        if waveform is not None and enabled:
+            _draw_waveform_field(self, painter, visible, waveform)
+
+        # The Phase 8 renderer drew one tiny amplitude stroke in the timing
+        # ruler per encoded row. Suppress that legacy pass while retaining the
+        # same waveform object for the new screen-space renderer above.
+        if waveform is None:
+            original_draw_segment(self, painter, visible)
+            return
+        self._waveform = None
+        try:
+            original_draw_segment(self, painter, visible)
+        finally:
+            self._waveform = waveform
+
+    timeline_class._phase11_waveform_renderer_installed = True
+    timeline_class._phase11_original_draw_segment = original_draw_segment
+    timeline_class._draw_segment = draw_segment_with_waveform
+
+
+def _install_waveform_view_action(window) -> None:
+    view_menu = None
+    for menu_action in window.menuBar().actions():
+        if menu_action.text().replace("&", "").casefold() == "view":
+            view_menu = menu_action.menu()
+            break
+    if view_menu is None:
+        view_menu = window.menuBar().addMenu("&View")
+
+    action = QAction("Show waveform", window)
+    action.setCheckable(True)
+    action.setChecked(True)
+
+    def refresh(_checked: bool) -> None:
+        for index in range(window.tabs.count()):
+            widget = window.tabs.widget(index)
+            viewport = getattr(widget, "viewport", None)
+            if callable(viewport):
+                viewport().update()
+
+    action.toggled.connect(refresh)
+    view_menu.addAction(action)
+    window.phase11_waveform_action = action
+
+
+def _choose_audio_dialog(window) -> None:
+    initial = str(window.workspace.root) if window.workspace is not None else ""
+    selected, _ = QFileDialog.getOpenFileName(
+        window,
+        "Select chart audio",
+        initial,
+        "Audio (*.mp3 *.aud *.a *.wav *.flac *.ogg *.mp2);;All files (*)",
+    )
+    if selected:
+        window._load_audio(Path(selected))
+
+
 def _replace_audio_picker(window) -> None:
     action = next(
-        (item for item in window.findChildren(QAction) if item.text() == "Select audio…"),
+        (
+            item
+            for item in window.findChildren(QAction)
+            if item.text() == "Select audio…"
+        ),
         None,
     )
     if action is None:
@@ -206,19 +393,46 @@ def _replace_audio_picker(window) -> None:
         action.triggered.disconnect()
     except (RuntimeError, TypeError):
         pass
+    action.triggered.connect(lambda *_args: _choose_audio_dialog(window))
 
-    def choose_audio(*_args) -> None:
-        initial = str(window.workspace.root) if window.workspace is not None else ""
-        selected, _ = QFileDialog.getOpenFileName(
-            window,
-            "Select chart audio",
-            initial,
-            "Audio (*.mp3 *.aud *.a *.wav *.flac *.ogg *.mp2);;All files (*)",
+
+def _install_song_autoload(window) -> None:
+    original_load_folder = window.load_folder
+
+    def load_folder_with_song(path: Path, *, discard_changes: bool = False) -> None:
+        previous_audio = (
+            None if window.workspace is None else window.workspace.selected_audio
         )
-        if selected:
-            window._load_audio(Path(selected))
+        original_load_folder(path, discard_changes=discard_changes)
+        if window.workspace is None:
+            return
 
-    action.triggered.connect(choose_audio)
+        preferred = _preferred_song_path(window.workspace.root)
+        if preferred is not None:
+            selected = window.workspace.selected_audio
+            if selected is None or selected.resolve() != preferred.resolve():
+                window._load_audio(preferred)
+            return
+
+        # Save All reloads the workspace. Keep a manually selected song alive
+        # across that internal refresh instead of pestering the user again.
+        if previous_audio is not None and previous_audio.is_file():
+            window._load_audio(previous_audio)
+            return
+        if discard_changes:
+            return
+
+        answer = QMessageBox.question(
+            window,
+            "Song audio not found",
+            "Do you want to load a song?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            _choose_audio_dialog(window)
+
+    window.load_folder = load_folder_with_song
 
 
 def install_phase11_waveform(window) -> None:
@@ -227,14 +441,21 @@ def install_phase11_waveform(window) -> None:
     window._phase11_waveform_installed = True
 
     # Song audio in the target engines may use .MP3 directly or ENC2-wrapped
-    # .AUD/.A. Keep the workspace association rules in sync with the GUI path.
+    # .AUD/.A. Keep manual session selection compatible with those formats even
+    # though automatic discovery intentionally uses only the three MP3
+    # conventions above.
     extended_suffixes = frozenset((*folder_module.AUDIO_SUFFIXES, ".A"))
     folder_module.AUDIO_SUFFIXES = extended_suffixes
     workspace_package.AUDIO_SUFFIXES = extended_suffixes
 
+    _install_timeline_waveform_renderer()
+    _install_waveform_view_action(window)
+
     decoder = QtWaveformDecoder(window)
     window.phase11_waveform_decoder = decoder
-    decoder.waveformReady.connect(lambda waveform: _publish_waveform(window, waveform))
+    decoder.waveformReady.connect(
+        lambda waveform: _publish_waveform(window, waveform)
+    )
     decoder.failed.connect(
         lambda message: window.statusBar().showMessage(
             f"Waveform unavailable: {message}", 8000
@@ -262,4 +483,5 @@ def install_phase11_waveform(window) -> None:
         )
 
     window._load_audio = load_audio_with_waveform
+    _install_song_autoload(window)
     _replace_audio_picker(window)
