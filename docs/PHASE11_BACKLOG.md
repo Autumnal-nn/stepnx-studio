@@ -13,6 +13,13 @@ branch is still under active validation.
   changes refuse to reload over unsaved in-memory chart edits. A stale-document
   UI guard also absorbs the transient tree/tab callback observed after deleting
   the currently selected chart.
+- **Explicit NX10 materialization on Save All**: imported NX10 `.NX` files remain
+  provenance and are never overwritten implicitly. If one or more imports still
+  lack a native output target, Save All presents one explicit confirmation that
+  lists them and offers in-place NX20 materialization. Cancel leaves every NX10
+  source untouched; approval assigns each source path as its explicit target,
+  then the normal atomic Save All preflight/confirmation runs and reloads the
+  folder as native NX20 after the write.
 - **Explicit scope / field authoring tools**: standard Single `(0,5)`, Double
   `(0,10)`, and Half Double `(2,6)` presets plus an explicit custom Start Column
   / Columns path. Existing notes are remapped by absolute physical panel; a
