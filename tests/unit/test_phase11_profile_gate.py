@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from stepnx.gui.phase11_profile_gate import (
+    available_profiles,
+    default_profile,
     executable_enables_patched_profile,
     install_phase11_profile_gate,
 )
@@ -50,6 +52,22 @@ class Phase11ProfileGateTests(unittest.TestCase):
         self.assertFalse(executable_enables_patched_profile("stepmx studio.exe"))
         self.assertFalse(executable_enables_patched_profile("StepMX-Studio.exe"))
         self.assertFalse(executable_enables_patched_profile("StepNX Studio.exe"))
+
+    def test_normal_profile_catalog_contains_only_public_choices(self) -> None:
+        self.assertEqual(
+            available_profiles("StepNX Studio.exe"),
+            ("nxa-native", "fiesta2", "prime2"),
+        )
+        self.assertEqual(default_profile("StepNX Studio.exe"), "nxa-native")
+
+    def test_stepmx_catalog_replaces_native_nxa_with_patched(self) -> None:
+        self.assertEqual(
+            available_profiles("StepMX Studio.exe"),
+            ("nxa-step5-patched", "fiesta2", "prime2"),
+        )
+        self.assertEqual(
+            default_profile("StepMX Studio.exe"), "nxa-step5-patched"
+        )
 
     def test_normal_executable_hides_patched_and_keeps_native(self) -> None:
         window = _FakeWindow()
