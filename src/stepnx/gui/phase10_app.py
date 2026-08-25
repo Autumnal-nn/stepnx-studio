@@ -20,7 +20,9 @@ def main(argv=None) -> int:
     from stepnx.gui.phase11_authoring_polish import install_phase11_authoring_polish
     from stepnx.gui.phase11_import import install_phase11_import
     from stepnx.gui.phase11_preferences import install_phase11_preferences
+    from stepnx.gui.phase11_profile_gate import install_phase11_profile_gate
     from stepnx.gui.phase11_state_guard import install_phase11_state_guard
+    from stepnx.gui.phase11_trailer_edit import install_phase11_trailer_edit
     from stepnx.gui.phase11_waveform import install_phase11_waveform
     from stepnx.gui.phase11_waveform_precision import install_phase11_waveform_precision
     from stepnx.gui.phase11_workspace import install_phase11_workspace_tools
@@ -34,12 +36,14 @@ def main(argv=None) -> int:
     def show_with_phase10(self, *args, **kwargs):
         if self.windowTitle() == "StepNX Studio":
             install_phase10(self)
+            install_phase11_profile_gate(self)
             install_phase11_import(self)
             install_phase11_workspace_tools(self)
             install_phase11_state_guard(self)
             install_phase11_waveform(self)
             install_phase11_waveform_precision(self)
             install_phase11_authoring_polish(self)
+            install_phase11_trailer_edit(self)
             install_phase11_preferences(self)
         return original_show(self, *args, **kwargs)
 
