@@ -129,6 +129,7 @@ def pack_dm120(mode: int, weight: int) -> int:
 
 _HEADER = frozenset((MetadataScope.HEADER,))
 _HEADER_SPLIT = frozenset((MetadataScope.HEADER, MetadataScope.SPLIT))
+_SPLIT = frozenset((MetadataScope.SPLIT,))
 _DIVISION = frozenset((MetadataScope.DIVISION,))
 
 
@@ -166,6 +167,65 @@ def _direct_noteskin_metadata(
             )
             for player in range(1, 6)
         ),
+    )
+
+
+def _unidentified_metadata(
+    meta_ids: tuple[int, ...],
+    scopes: frozenset[MetadataScope],
+    family: str,
+) -> tuple[MetadataDefinition, ...]:
+    scope_label = "/".join(scope.value for scope in sorted(scopes, key=lambda item: item.value))
+    return tuple(
+        MetadataDefinition(
+            meta_id,
+            f"Unidentified {family} {scope_label} field {meta_id}",
+            scopes,
+            evidence=Evidence.UNIDENTIFIED,
+            description=(
+                "Observed in the supplied official corpus but not assigned a safe "
+                "authoring meaning. The raw value is preserved without normalization."
+            ),
+            authorable=False,
+        )
+        for meta_id in meta_ids
+    )
+
+
+def _later_trailer_metadata() -> tuple[MetadataDefinition, ...]:
+    fields = (
+        (20, "V resource override", Evidence.RUNTIME_CONFIRMED),
+        (1003, "Resource/reference string", Evidence.RUNTIME_CONFIRMED),
+        (1100, "Trailer string field 1100", Evidence.OFFICIAL_CORPUS),
+        (1102, "Trailer string field 1102", Evidence.OFFICIAL_CORPUS),
+        (1103, "Localized mission text", Evidence.RUNTIME_CONFIRMED),
+        (1150, "Mission condition string", Evidence.OFFICIAL_CORPUS),
+        (1151, "Trailer string field 1151", Evidence.OFFICIAL_CORPUS),
+        (1199, "Trailer string field 1199", Evidence.OFFICIAL_CORPUS),
+        (1203, "Localized mission text", Evidence.RUNTIME_CONFIRMED),
+        (1250, "Mission condition string", Evidence.OFFICIAL_CORPUS),
+        (1299, "Trailer string field 1299", Evidence.OFFICIAL_CORPUS),
+        (1303, "Localized mission text", Evidence.RUNTIME_CONFIRMED),
+        (1350, "Mission condition string", Evidence.OFFICIAL_CORPUS),
+        (1399, "Trailer string field 1399", Evidence.OFFICIAL_CORPUS),
+        (1403, "Localized mission text", Evidence.RUNTIME_CONFIRMED),
+        (1450, "Mission condition string", Evidence.OFFICIAL_CORPUS),
+    )
+    return tuple(
+        MetadataDefinition(
+            meta_id,
+            label,
+            _HEADER,
+            ValueKind.TRAILER_OFFSET,
+            evidence,
+            description=(
+                "Offset relative to the later-generation sized trailer. Typed string "
+                "editing is handled by the guarded trailer editor rather than the "
+                "generic metadata-value editor."
+            ),
+            authorable=False,
+        )
+        for meta_id, label, evidence in fields
     )
 
 
@@ -218,6 +278,7 @@ NATIVE_METADATA = (
     MetadataDefinition(
         35, "Zigzag", _HEADER_SPLIT, ValueKind.BITMASK, bits=(BitChoice(1, "Zigzag"),)
     ),
+    *_unidentified_metadata((49, 64), _HEADER, "NXA"),
     MetadataDefinition(900, "Default noteskin", _HEADER_SPLIT, minimum=0, maximum=5),
     *(
         MetadataDefinition(
@@ -432,6 +493,19 @@ NATIVE_METADATA = (
 
 FIESTA2_METADATA = (
     *_direct_noteskin_metadata(31, "Fiesta 2"),
+    *_later_trailer_metadata(),
+    *_unidentified_metadata(
+        (19, 21, 22, 48, 50, 65, 66, 67, 68, 80, 81, 82, 83, 84),
+        _HEADER,
+        "Fiesta 2",
+    ),
+    *_unidentified_metadata(
+        (1101, 1110, 1111, 1201, 1301, 1401),
+        _HEADER,
+        "Fiesta 2",
+    ),
+    *_unidentified_metadata((11, 12), _SPLIT, "Fiesta 2"),
+    *_unidentified_metadata((1000,), _DIVISION, "Fiesta 2"),
     MetadataDefinition(
         1004,
         "Reset gameplay options",
@@ -488,6 +562,7 @@ FIESTA2_METADATA = (
 
 PRIME2_METADATA = (
     *_direct_noteskin_metadata(32, "Prime 2"),
+    *_unidentified_metadata((3, 4), _SPLIT, "Prime 2"),
     MetadataDefinition(
         1005,
         "Auto Velocity",
@@ -683,7 +758,20 @@ def metadata_definition(
         for definition in profile_metadata(profile_name)
         if definition.meta_id == meta_id and definition.supports(scope)
     ]
-    return matches[-1] if matches else None
+    if matches:
+        return matches[-1]
+    if scope is MetadataScope.HEADER and meta_id > 0xFFFF:
+        base_id = meta_id & 0xFFFF
+        base_matches = [
+            definition
+            for definition in profile_metadata(profile_name)
+            if definition.meta_id == base_id
+            and definition.supports(scope)
+            and definition.kind is ValueKind.TRAILER_OFFSET
+        ]
+        if base_matches:
+            return base_matches[-1]
+    return None
 
 
 def authorable_metadata(
