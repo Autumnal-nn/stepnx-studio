@@ -13,10 +13,12 @@ from stepnx.codecs.nx20 import parse_bytes
 from stepnx.core.commands import InsertMetadata
 from stepnx.core.model import NoteCell, NoteRow
 from stepnx.core.profiles import (
+    Evidence,
     MetadataScope,
     ValueKind,
     authorable_metadata,
     metadata_definition,
+    metadata_variant_label,
     pack_dm120,
     pack_u16_range,
     profile_capabilities,
@@ -27,23 +29,29 @@ from tests.fixture_factory import make_implicit_lightmap, make_normal_nx20
 
 
 class ProfileRegistryTests(unittest.TestCase):
-    def test_same_id_resolves_by_scope(self) -> None:
-        header = metadata_definition("nxa-native", MetadataScope.HEADER, 0)
-        division = metadata_definition("nxa-native", MetadataScope.DIVISION, 0)
-        self.assertEqual(header.label, "Speed")
-        self.assertEqual(header.kind, ValueKind.FLOAT32_BITS)
-        self.assertEqual(division.label, "Perfect count")
-        self.assertEqual(division.kind, ValueKind.PACKED_U16_RANGE)
+    def test_same_id_resolves_by_scope_and_profile(self) -> None:
+        native_header = metadata_definition("nxa-native", MetadataScope.HEADER, 0)
+        native_division = metadata_definition("nxa-native", MetadataScope.DIVISION, 0)
+        fiesta_header = metadata_definition("fiesta2", MetadataScope.HEADER, 0)
+        self.assertEqual(native_header.label, "Speed")
+        self.assertEqual(native_header.kind, ValueKind.INT32)
+        self.assertEqual(native_division.label, "Perfect count")
+        self.assertEqual(native_division.kind, ValueKind.PACKED_U16_RANGE)
+        self.assertEqual(fiesta_header.label, "Speed multiplier")
+        self.assertEqual(fiesta_header.kind, ValueKind.FLOAT32_BITS)
 
-    def test_patched_profile_inherits_native_and_adds_only_extensions(self) -> None:
+    def test_patched_profile_overrides_native_gm65_and_adds_extensions(self) -> None:
         self.assertIsNotNone(
             metadata_definition("nxa-step5-patched", MetadataScope.HEADER, 900)
         )
-        self.assertEqual(
-            metadata_definition("nxa-step5-patched", MetadataScope.HEADER, 65).label,
-            "VJ timing-window parameter",
+        native_65 = metadata_definition("nxa-native", MetadataScope.HEADER, 65)
+        patched_65 = metadata_definition(
+            "nxa-step5-patched", MetadataScope.HEADER, 65
         )
-        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 65))
+        self.assertEqual(native_65.label, "Judgment-window parameter")
+        self.assertIn("A=(750-value)/100.0", native_65.description)
+        self.assertEqual(patched_65.label, "VJ timing-window parameter")
+        self.assertIn("Fiesta-style", patched_65.description)
         capabilities = profile_capabilities("nxa-step5-patched")
         self.assertIn("brain-shower", capabilities)
         self.assertIn("condition-minlife", capabilities)
@@ -53,6 +61,42 @@ class ProfileRegistryTests(unittest.TestCase):
         self.assertEqual(
             metadata_definition("nxa-step5-patched", MetadataScope.HEADER, 900).maximum,
             31,
+        )
+
+    def test_native_registry_excludes_unproven_later_ids(self) -> None:
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 35))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1000))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1001))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1002))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.DIVISION, 11))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.DIVISION, 12))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.DIVISION, 200))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.DIVISION, 1001))
+
+        native_16 = metadata_definition("nxa-native", MetadataScope.DIVISION, 16)
+        self.assertEqual(native_16.label, "Cheer Level / performance state override")
+        self.assertEqual(native_16.minimum, 1)
+        self.assertEqual(native_16.maximum, 5)
+
+    def test_patched_division_registry_matches_step5_consumers(self) -> None:
+        for meta_id in (11, 12, *range(101, 110), 110, 111, 120, 200):
+            with self.subTest(meta_id=meta_id):
+                self.assertIsNotNone(
+                    metadata_definition(
+                        "nxa-step5-patched", MetadataScope.DIVISION, meta_id
+                    )
+                )
+        self.assertEqual(
+            metadata_definition(
+                "nxa-step5-patched", MetadataScope.DIVISION, 111
+            ).label,
+            "End Song",
+        )
+        self.assertEqual(
+            metadata_definition(
+                "nxa-step5-patched", MetadataScope.DIVISION, 200
+            ).label,
+            "Style override",
         )
 
     def test_native_noteskin_slot_payload_is_not_clamped_to_slot_number(self) -> None:
@@ -100,13 +144,15 @@ class ProfileRegistryTests(unittest.TestCase):
 
         fiesta_1005 = metadata_definition("fiesta2", MetadataScope.HEADER, 1005)
         self.assertFalse(fiesta_1005.authorable)
-        self.assertIn("Unidentified", fiesta_1005.label)
+        self.assertEqual(fiesta_1005.label, "Auto Velocity flag (Fiesta-era)")
+        self.assertEqual(fiesta_1005.evidence, Evidence.STRONGLY_INFERRED)
 
         auto_velocity = metadata_definition("prime2", MetadataScope.HEADER, 1005)
         self.assertEqual(auto_velocity.label, "Auto Velocity")
         self.assertTrue(auto_velocity.authorable)
         self.assertEqual(auto_velocity.minimum, 1)
-        self.assertEqual(auto_velocity.maximum, 1)
+        self.assertIsNone(auto_velocity.maximum)
+        self.assertIn("absolute target scroll velocity", auto_velocity.description)
 
         fiesta_1006 = metadata_definition("fiesta2", MetadataScope.HEADER, 1006)
         self.assertFalse(fiesta_1006.authorable)
@@ -129,6 +175,45 @@ class ProfileRegistryTests(unittest.TestCase):
         self.assertIn("auto-velocity", capabilities)
         self.assertIn("ampass-card-only", capabilities)
 
+    def test_fiesta_brain_and_other_player_condition_families(self) -> None:
+        correct = metadata_definition("fiesta2", MetadataScope.DIVISION, 11)
+        wrong = metadata_definition("fiesta2", MetadataScope.DIVISION, 12)
+        self.assertTrue(correct.brain_shower)
+        self.assertTrue(correct.condition)
+        self.assertTrue(wrong.brain_shower)
+        self.assertTrue(wrong.condition)
+
+        other_perfect = metadata_definition("fiesta2", MetadataScope.DIVISION, 1000)
+        other_step_w = metadata_definition("fiesta2", MetadataScope.DIVISION, 1006)
+        self.assertEqual(other_perfect.label, "Other-player Perfect count")
+        self.assertEqual(other_step_w.label, "Other-player Step W count")
+        self.assertEqual(other_perfect.kind, ValueKind.PACKED_U16_RANGE)
+        self.assertTrue(other_perfect.condition)
+        self.assertEqual(other_perfect.evidence, Evidence.STRONGLY_INFERRED)
+
+        prime_correct = metadata_definition("prime2", MetadataScope.DIVISION, 11)
+        prime_wrong = metadata_definition("prime2", MetadataScope.DIVISION, 12)
+        self.assertFalse(prime_correct.authorable)
+        self.assertFalse(prime_wrong.authorable)
+        prime_authorable = {
+            item.meta_id
+            for item in authorable_metadata("prime2", MetadataScope.DIVISION)
+        }
+        self.assertNotIn(11, prime_authorable)
+        self.assertNotIn(12, prime_authorable)
+
+    def test_composite_trailer_ids_preserve_base_and_historical_language_label(self) -> None:
+        definition = metadata_definition("fiesta2", MetadataScope.HEADER, 0x0003044F)
+        self.assertIsNotNone(definition)
+        self.assertEqual(definition.meta_id, 1103)
+        self.assertEqual(definition.kind, ValueKind.TRAILER_OFFSET)
+        self.assertEqual(metadata_variant_label(0x0001044F), "Korean")
+        self.assertEqual(metadata_variant_label(0x0002044F), "Spanish")
+        self.assertEqual(metadata_variant_label(0x0003044F), "Portuguese")
+        self.assertEqual(metadata_variant_label(0x0004044F), "Chinese")
+        self.assertEqual(metadata_variant_label(0x0005044F), "Japanese")
+        self.assertIsNone(metadata_variant_label(1103))
+
     def test_official_corpus_metadata_gaps_are_registered_raw_or_typed(self) -> None:
         coverage = {
             ("nxa-native", MetadataScope.HEADER): (49, 64),
@@ -149,7 +234,13 @@ class ProfileRegistryTests(unittest.TestCase):
                 82,
                 83,
                 84,
+                1000,
+                1001,
+                1002,
                 1003,
+                1004,
+                1005,
+                1006,
                 1100,
                 1101,
                 1102,
@@ -161,14 +252,20 @@ class ProfileRegistryTests(unittest.TestCase):
                 1199,
                 1201,
                 1203,
+                1210,
+                1211,
                 1250,
                 1299,
                 1301,
                 1303,
+                1310,
+                1311,
                 1350,
                 1399,
                 1401,
                 1403,
+                1410,
+                1411,
                 1450,
                 66638,
                 66639,
@@ -192,7 +289,7 @@ class ProfileRegistryTests(unittest.TestCase):
                 263547,
             ),
             ("fiesta2", MetadataScope.SPLIT): (11, 12),
-            ("fiesta2", MetadataScope.DIVISION): (1000,),
+            ("fiesta2", MetadataScope.DIVISION): (1000, 1006),
             ("prime2", MetadataScope.HEADER): (
                 19,
                 20,
@@ -208,6 +305,12 @@ class ProfileRegistryTests(unittest.TestCase):
                 82,
                 83,
                 84,
+                1000,
+                1001,
+                1002,
+                1004,
+                1005,
+                1007,
                 1100,
                 1101,
                 1103,
@@ -223,7 +326,7 @@ class ProfileRegistryTests(unittest.TestCase):
                 328780,
                 328783,
             ),
-            ("prime2", MetadataScope.SPLIT): (3, 4),
+            ("prime2", MetadataScope.SPLIT): (0, 1, 2, 3, 4),
         }
         for (profile, scope), meta_ids in coverage.items():
             for meta_id in meta_ids:
@@ -323,7 +426,9 @@ class SemanticProjectionTests(unittest.TestCase):
         )
 
     def test_brain_projection_reports_fields_duplicates_and_unknowns(self) -> None:
-        document = parse_bytes(make_normal_nx20())
+        document = replace(
+            parse_bytes(make_normal_nx20()), profile="nxa-step5-patched"
+        )
         block = document.splits[0].blocks[0]
         owner_id = block.stable_id
         for meta_id, value in (
@@ -384,11 +489,12 @@ class SemanticProjectionTests(unittest.TestCase):
         self,
     ) -> None:
         base = parse_bytes(make_normal_nx20())
-        native = InsertMetadata.from_ints(base.stable_id, 1002, 6).apply(base)
+        native = InsertMetadata.from_ints(base.stable_id, 81, 0).apply(base)
+        native = InsertMetadata.from_ints(native.stable_id, 1002, 6).apply(native)
         report = validate_authoring(native)
         self.assertFalse(report.is_valid)
         self.assertTrue(
-            any(issue.code == "metadata.value-high" for issue in report.errors)
+            any(issue.code == "metadata.value-low" for issue in report.errors)
         )
         self.assertTrue(
             any(issue.code == "metadata.unknown" for issue in report.warnings)
