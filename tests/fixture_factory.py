@@ -3,6 +3,10 @@ from __future__ import annotations
 import struct
 
 
+SYNTHETIC_UNKNOWN_DIVISION_ID = 0x4111
+SYNTHETIC_UNKNOWN_DIVISION_ID_2 = 0x4001
+
+
 def u32(value: int) -> bytes:
     return struct.pack("<I", value)
 
@@ -36,7 +40,10 @@ def make_normal_nx20(*, sized_trailer: bool = True, opaque_tail: bool = False) -
     # Deliberately unregistered Division IDs exercise lossless preservation and
     # warning-only authoring validation across every installed engine profile.
     # Keep these outside known profile families as the registry grows.
-    data += metadata((0x4111, 0xDEADBEEF), (0x4001, 0x00020001))
+    data += metadata(
+        (SYNTHETIC_UNKNOWN_DIVISION_ID, 0xDEADBEEF),
+        (SYNTHETIC_UNKNOWN_DIVISION_ID_2, 0x00020001),
+    )
     data += u32(2)
     data += bytes((0x03, 0x04, 0x05, 0x06))
     data += bytes((0x01, 0xF0, 0x10, 0x20))
