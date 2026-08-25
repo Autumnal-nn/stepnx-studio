@@ -5,13 +5,15 @@ from pathlib import Path
 
 
 _PATCHED_EXECUTABLE_NAME = "StepMX Studio.exe"
+_STANDARD_PROFILES = ("nxa-native", "fiesta2", "prime2")
+_PATCHED_PROFILES = ("nxa-step5-patched", "fiesta2", "prime2")
 
 
 def executable_enables_patched_profile(executable_name: str | None = None) -> bool:
     """Return whether the deliberately hidden patched-NXA profile is exposed.
 
-    The comparison is intentionally exact.  Normal StepNX Studio builds expose
-    only native NXA, Fiesta 2, and Prime 2.  Renaming the Windows executable to
+    The comparison is intentionally exact. Normal StepNX Studio builds expose
+    only native NXA, Fiesta 2, and Prime 2. Renaming the Windows executable to
     the easter-egg name replaces native NXA with the patched profile.
     """
 
@@ -20,6 +22,18 @@ def executable_enables_patched_profile(executable_name: str | None = None) -> bo
     else:
         executable_name = Path(executable_name).name
     return executable_name == _PATCHED_EXECUTABLE_NAME
+
+
+def available_profiles(executable_name: str | None = None) -> tuple[str, ...]:
+    return (
+        _PATCHED_PROFILES
+        if executable_enables_patched_profile(executable_name)
+        else _STANDARD_PROFILES
+    )
+
+
+def default_profile(executable_name: str | None = None) -> str:
+    return available_profiles(executable_name)[0]
 
 
 def install_phase11_profile_gate(window, *, executable_name: str | None = None) -> None:
