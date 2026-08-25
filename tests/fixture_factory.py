@@ -33,7 +33,10 @@ def make_normal_nx20(*, sized_trailer: bool = True, opaque_tail: bool = False) -
     data += f32(-0.25)
     data += f32(-1.5)
     data += bytes((4, 4, 3, 0xA5))
-    data += metadata((111, 0xDEADBEEF), (0x4001, 0x00020001))
+    # Deliberately unregistered Division IDs exercise lossless preservation and
+    # warning-only authoring validation across every installed engine profile.
+    # Keep these outside known profile families as the registry grows.
+    data += metadata((0x4111, 0xDEADBEEF), (0x4001, 0x00020001))
     data += u32(2)
     data += bytes((0x03, 0x04, 0x05, 0x06))
     data += bytes((0x01, 0xF0, 0x10, 0x20))
