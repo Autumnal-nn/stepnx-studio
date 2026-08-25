@@ -812,9 +812,7 @@ FIESTA2_METADATA = (
     _bool_metadata(
         67,
         "Judge Hide",
-        description=(
-            "Fiesta 2 Header ID 67 maps to the runtime Judge Hide option state."
-        ),
+        description="Fiesta 2 Header ID 67 maps to the runtime Judge Hide option state.",
     ),
     _bool_metadata(
         68,
@@ -831,9 +829,7 @@ FIESTA2_METADATA = (
         _HEADER,
         ValueKind.ENUM,
         Evidence.RUNTIME_CONFIRMED,
-        description=(
-            "Boolean Break ON/OFF override stored beside the forced-break threshold."
-        ),
+        description="Boolean Break ON/OFF override stored beside the forced-break threshold.",
         choices=(ValueChoice(0, "Off"), ValueChoice(1, "On")),
     ),
     MetadataDefinition(
@@ -912,10 +908,7 @@ FIESTA2_METADATA = (
         "Unidentified Fiesta 2 header flag 1006",
         _HEADER,
         evidence=Evidence.UNIDENTIFIED,
-        description=(
-            "Observed in the official Fiesta 2 corpus with value 1, without a safe "
-            "runtime meaning. Preserved raw."
-        ),
+        description="Observed with value 1 without a safe runtime meaning; preserved raw.",
         authorable=False,
     ),
     MetadataDefinition(
@@ -950,8 +943,7 @@ FIESTA2_METADATA = (
     ),
     _style_override_metadata(
         Evidence.RUNTIME_CONFIRMED,
-        "Fiesta 2 style override. This later-engine behavior is the implementation "
-        "copied by the NXA Step5 patched profile.",
+        "Fiesta 2 style override. This later-engine behavior is the implementation copied by the NXA Step5 patched profile.",
     ),
     *_other_player_condition_metadata(),
 )
@@ -959,7 +951,7 @@ FIESTA2_METADATA = (
 
 PRIME2_METADATA = (
     *_direct_noteskin_metadata(32, "Prime 2"),
-    *_unidentified_metadata((3, 4), _SPLIT, "Prime 2 discarded-mission"),
+    *_unidentified_metadata((0, 1, 2, 3, 4), _SPLIT, "Prime 2 discarded-mission"),
     *_prime_mission_difficulty_metadata(),
     MetadataDefinition(
         1005,
@@ -1177,8 +1169,7 @@ PATCHED_METADATA = (
     ),
     _style_override_metadata(
         Evidence.RUNTIME_CONFIRMED,
-        "Patch-only style override copied from Fiesta 2: 0 preserve, 1 Versus, "
-        "2 Double, 3 Single/collapsed.",
+        "Patch-only style override copied from Fiesta 2: 0 preserve, 1 Versus, 2 Double, 3 Single/collapsed.",
     ),
     MetadataDefinition(900, "Default noteskin", _HEADER_SPLIT, minimum=0, maximum=31),
     *(
