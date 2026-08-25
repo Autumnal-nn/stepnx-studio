@@ -46,6 +46,7 @@ def install_phase11_profile_gate(window, *, executable_name: str | None = None) 
     if native is None or patched is None:
         return
 
+    native.setText("NXA")
     patched.setText("NXA-patched")
     enabled = executable_enables_patched_profile(executable_name)
 
