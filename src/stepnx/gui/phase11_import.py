@@ -195,6 +195,14 @@ def _close_workspace(window) -> bool:
     if hasattr(window, "note_metronome_clock"):
         window.note_metronome_clock = None
 
+    # load_folder() brands the window with the open folder and locks the
+    # profile selector so one workspace cannot silently mix engine semantics.
+    # Closing must restore the true application-level state, not merely clear
+    # the document widgets.
+    window.setWindowTitle("StepNX Studio")
+    for action in getattr(window, "profile_actions", {}).values():
+        action.setEnabled(True)
+
     for name in ("_refresh_edit_actions", "_refresh_structure_actions"):
         callback = getattr(window, name, None)
         if callable(callback):
