@@ -68,6 +68,16 @@ branch is still under active validation.
   Fiesta 2, and Prime 2. The hidden patched capability replaces native NXA only
   when the startup executable identity explicitly enables it; its UI label is
   `NXA-patched` while the internal registry key remains stable for compatibility.
+- **Final engine-profile authoring coverage**: the NXA, Fiesta 2, Prime 2, and
+  patched-NXA registries now cover every metadata ID observed in the supplied
+  official corpora without guessing unknown semantics. Later-engine noteskins
+  use direct typed choices with official Random value 254; Header 1004 is the
+  proven gameplay-option reset; Prime 2 Header 1005 is Auto Velocity and Header
+  1007 is the AM.PASS card-only marker. Corpus-known fields without sufficient
+  runtime meaning, including the discarded EF2166 Division 1005–1007 family,
+  remain visible and raw-only. Localized high-word trailer IDs resolve through
+  their proven base trailer fields. Authoring validation now runs for every
+  installed engine profile instead of a stale two-profile whitelist.
 
 ## Pending implementation
 
@@ -85,5 +95,7 @@ None inside the agreed Phase 11 scope.
 - `README.md`, `docs/STATUS.md`, and `docs/ROADMAP.md` have been refreshed to
   reflect SEE import, compressed/staged waveform generation, guarded trailer
   relocation, workspace tools, and the completed Phase 11 implementation scope.
+- Version-profile authoring semantics and official-corpus ID coverage are closed;
+  no additional Phase 11 profile implementation remains.
 - Run the strict Windows test gate on the final Phase 11 HEAD and perform the
   final manual smoke tests before merging Phase 11.
