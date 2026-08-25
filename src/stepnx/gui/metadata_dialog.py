@@ -237,6 +237,17 @@ class MetadataCollectionDialog(QDialog):
             except (ValueError, TypeError) as exc:
                 QMessageBox.critical(self, "Invalid DM120 value", str(exc))
                 return None
+        if definition.kind is ValueKind.INT32:
+            value = struct.unpack("<i", struct.pack("<I", current))[0]
+            result, accepted = QInputDialog.getInt(
+                self,
+                definition.label,
+                "Signed 32-bit value:",
+                value,
+                -0x80000000,
+                0x7FFFFFFF,
+            )
+            return result & 0xFFFFFFFF if accepted else None
         if definition.kind is ValueKind.FLOAT32_BITS:
             value = struct.unpack("<f", struct.pack("<I", current))[0]
             result, accepted = QInputDialog.getDouble(
