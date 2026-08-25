@@ -2,10 +2,41 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QElapsedTimer, QObject, QTemporaryDir, QTimer, QUrl, Signal
+from PySide6.QtCore import (
+    QCoreApplication,
+    QElapsedTimer,
+    QObject,
+    QTemporaryDir,
+    QTimer,
+    QUrl,
+    Signal,
+)
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QSoundEffect
 
 from stepnx.authoring.audio import AudDecodeError, decode_enc2_aud
+
+
+_METRONOME_VOICES = 8
+
+
+def _accept_transport_position(
+    previous: int,
+    candidate: int,
+    *,
+    playing: bool,
+    explicit: bool = False,
+) -> bool:
+    """Reject backend jitter that would make live transport run backwards.
+
+    QMediaPlayer positionChanged updates can lag the 16 ms monotonic poll used by
+    the editor. Without this gate a sequence such as 1008 -> 995 -> 1012 ms can
+    make the note metronome observe event N, event N-1, then event N again.
+    Explicit seeks are allowed to move in either direction.
+    """
+
+    if explicit or previous < 0 or not playing:
+        return True
+    return candidate >= previous
 
 
 class AudioTransport(QObject):
@@ -20,9 +51,21 @@ class AudioTransport(QObject):
         self.output.setVolume(0.8)
         self.player = QMediaPlayer(self)
         self.player.setAudioOutput(self.output)
-        self.metronome = QSoundEffect(self)
-        self.metronome.setLoopCount(1)
-        self.metronome.setVolume(0.9)
+
+        # Use several independent one-shot voices. A single QSoundEffect with
+        # stop()+play() truncates the previous BEAT.WAV whenever two legitimate
+        # notes are closer together than the sample duration, which itself can
+        # create an audible click. Eight voices comfortably cover dense chart
+        # passages while keeping the implementation lightweight.
+        self._metronome_voices = tuple(
+            QSoundEffect(self) for _ in range(_METRONOME_VOICES)
+        )
+        for voice in self._metronome_voices:
+            voice.setLoopCount(1)
+            voice.setVolume(0.9)
+        # Preserve the old public attribute for callers/tests that inspect it.
+        self.metronome = self._metronome_voices[0]
+
         self._aud_directory: QTemporaryDir | None = None
         self._playback_source: Path | None = None
         application = QCoreApplication.instance()
@@ -99,15 +142,21 @@ class AudioTransport(QObject):
 
     def seek(self, milliseconds: int) -> None:
         position = max(0, milliseconds)
+        # Publish an explicit seek immediately, including backwards seeks, then
+        # let subsequent backend callbacks pass through the monotonic live gate.
+        self._position_anchor = position
+        self._position_clock.restart()
+        self._emit_position(position, explicit=True)
         self.player.setPosition(position)
-        self._position_changed(position)
 
     def _ensure_aud_directory(self) -> QTemporaryDir | None:
         if self._aud_directory is not None and self._aud_directory.isValid():
             return self._aud_directory
         directory = QTemporaryDir("stepnx-audio-XXXXXX")
         if not directory.isValid():
-            self.errorOccurred.emit("cannot create temporary directory for decoded ENC2 audio")
+            self.errorOccurred.emit(
+                "cannot create temporary directory for decoded ENC2 audio"
+            )
             return None
         directory.setAutoRemove(True)
         self._aud_directory = directory
@@ -126,25 +175,47 @@ class AudioTransport(QObject):
         return bool(directory.remove())
 
     def load_metronome(self, path: str | Path | None) -> None:
-        self.metronome.stop()
-        self.metronome.setSource(
-            QUrl() if path is None else QUrl.fromLocalFile(str(Path(path).resolve()))
+        source = (
+            QUrl()
+            if path is None
+            else QUrl.fromLocalFile(str(Path(path).resolve()))
         )
+        for voice in self._metronome_voices:
+            voice.stop()
+            voice.setSource(source)
 
     def play_metronome(self) -> bool:
-        if self.metronome.source().isEmpty() or not self.metronome.isLoaded():
-            return False
-        self.metronome.stop()
-        self.metronome.play()
-        return True
+        for voice in self._metronome_voices:
+            if (
+                not voice.source().isEmpty()
+                and voice.isLoaded()
+                and not voice.isPlaying()
+            ):
+                voice.play()
+                return True
+        # Do not cut/restart an existing voice just to force another tick. If
+        # every voice is busy, dropping a pathological ultra-dense event is less
+        # destructive than introducing a discontinuity into the audio stream.
+        return False
 
     def _position_changed(self, milliseconds: int) -> None:
         self._position_anchor = int(milliseconds)
         self._position_clock.restart()
         self._emit_position(self._position_anchor)
 
-    def _emit_position(self, milliseconds: int) -> None:
+    def _emit_position(self, milliseconds: int, *, explicit: bool = False) -> None:
         milliseconds = int(milliseconds)
+        playing = (
+            self.player.playbackState()
+            == QMediaPlayer.PlaybackState.PlayingState
+        )
+        if not _accept_transport_position(
+            self._last_emitted_position,
+            milliseconds,
+            playing=playing,
+            explicit=explicit,
+        ):
+            return
         if milliseconds != self._last_emitted_position:
             self._last_emitted_position = milliseconds
             self.positionChanged.emit(milliseconds)
