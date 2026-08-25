@@ -27,6 +27,7 @@ class Evidence(str, Enum):
     RUNTIME_CONFIRMED = "runtime-confirmed"
     EXECUTABLE = "executable"
     OFFICIAL_CORPUS = "official-corpus"
+    STRONGLY_INFERRED = "strongly-inferred"
     REFERENCE_ONLY = "reference-only"
     UNIDENTIFIED = "unidentified"
 
@@ -136,6 +137,29 @@ _HEADER_SPLIT = frozenset((MetadataScope.HEADER, MetadataScope.SPLIT))
 _SPLIT = frozenset((MetadataScope.SPLIT,))
 _DIVISION = frozenset((MetadataScope.DIVISION,))
 
+_TRAILER_VARIANT_LABELS = {
+    1: "Korean",
+    2: "Spanish",
+    3: "Portuguese",
+    4: "Chinese",
+    5: "Japanese",
+}
+
+
+def metadata_variant_label(meta_id: int) -> str | None:
+    """Return the historical localization label for a composite Header ID.
+
+    Later engines retain the full 32-bit metadata ID. The low word selects the
+    semantic field and the high word selects a variant/localization slot. Slot 3
+    is intentionally called Portuguese because that is the historical Setup
+    label even where supplied content is not actually Portuguese.
+    """
+
+    if meta_id <= 0xFFFF:
+        return None
+    variant = meta_id >> 16
+    return _TRAILER_VARIANT_LABELS.get(variant, f"Variant {variant}")
+
 
 def _bool_metadata(
     meta_id: int,
@@ -241,9 +265,10 @@ def _later_trailer_metadata() -> tuple[MetadataDefinition, ...]:
             ValueKind.TRAILER_OFFSET,
             evidence,
             description=(
-                "Offset relative to the later-generation sized trailer. Typed string "
-                "editing is handled by the guarded trailer editor rather than the "
-                "generic metadata-value editor."
+                "Offset relative to the later-generation sized trailer. Composite IDs "
+                "retain the full 32-bit ID; low16 is this base field and high16 is a "
+                "localization/variant slot. Typed string editing is handled by the "
+                "guarded trailer editor rather than the generic metadata-value editor."
             ),
             authorable=False,
         )
@@ -285,6 +310,95 @@ def _prime_mission_difficulty_metadata() -> tuple[MetadataDefinition, ...]:
             minimum=1,
         )
         for floor in range(1, 5)
+    )
+
+
+def _fiesta_floor_runtime_metadata() -> tuple[MetadataDefinition, ...]:
+    fields: list[MetadataDefinition] = []
+    for floor in range(1, 5):
+        prefix = 1000 + floor * 100
+        fields.extend(
+            (
+                MetadataDefinition(
+                    prefix + 10,
+                    f"Rush / playback-rate scalar — floor {floor}",
+                    _HEADER,
+                    ValueKind.FLOAT32_BITS,
+                    Evidence.STRONGLY_INFERRED,
+                    description=(
+                        "Fiesta 2 mission runtime selects x110 by floor. The consumer "
+                        "scales the runtime timing state and official missions use "
+                        "values matching the Rush option family (for example 0.8, "
+                        "1.2 and 1.5)."
+                    ),
+                ),
+                MetadataDefinition(
+                    prefix + 11,
+                    f"Scroll-speed multiplier — floor {floor}",
+                    _HEADER,
+                    ValueKind.FLOAT32_BITS,
+                    Evidence.RUNTIME_CONFIRMED,
+                    description=(
+                        "Fiesta 2 mission runtime selects x111 by floor and multiplies "
+                        "the player's scroll-speed scalar by this IEEE-754 value."
+                    ),
+                ),
+            )
+        )
+    return tuple(fields)
+
+
+def _style_override_metadata(
+    evidence: Evidence,
+    description: str,
+) -> MetadataDefinition:
+    return MetadataDefinition(
+        200,
+        "Style override",
+        _DIVISION,
+        ValueKind.ENUM,
+        evidence,
+        choices=tuple(
+            ValueChoice(value, label)
+            for value, label in enumerate(
+                ("Default", "Versus", "Double", "Single (collapsed)")
+            )
+        ),
+        description=description,
+    )
+
+
+def _other_player_condition_metadata() -> tuple[MetadataDefinition, ...]:
+    labels = (
+        "Perfect count",
+        "Great count",
+        "Good count",
+        "Bad count",
+        "Miss count",
+        "Step G count",
+        "Step W count",
+        "Step A count",
+        "Step B count",
+        "Step C count",
+    )
+    return tuple(
+        MetadataDefinition(
+            1000 + index,
+            f"Other-player {label}",
+            _DIVISION,
+            ValueKind.PACKED_U16_RANGE,
+            Evidence.STRONGLY_INFERRED,
+            description=(
+                "Fiesta 2 co-op family inferred as Division 1000+n = the other "
+                "player's counterpart of Division n. Division 1000 is supported by "
+                "Winter S_CO1 targets 40/125 while S_CO2 performs rolls; Division "
+                "1006 has one official Chimera occurrence duplicating Division 6 "
+                "with the same range and is likely an accidental authoring duplicate."
+            ),
+            condition=True,
+            repeatable=True,
+        )
+        for index, label in enumerate(labels)
     )
 
 
@@ -379,17 +493,6 @@ NATIVE_METADATA = (
         description="Native NXA uses exact values 1 and 2.",
     ),
     _bool_metadata(34, "Snake", _HEADER_SPLIT),
-    MetadataDefinition(
-        35,
-        "Unidentified NXA header/split field 35",
-        _HEADER_SPLIT,
-        evidence=Evidence.UNIDENTIFIED,
-        description=(
-            "Zigzag appears in generic NX20 references, but no direct NXA Global "
-            "Metadata consumer was demonstrated in the supplied native executable."
-        ),
-        authorable=False,
-    ),
     _bool_metadata(
         48,
         "Decalcomanie",
@@ -421,12 +524,13 @@ NATIVE_METADATA = (
     ),
     MetadataDefinition(
         65,
-        "Judgment-window / VJ parameter",
+        "Judgment-window parameter",
         _HEADER,
         evidence=Evidence.RUNTIME_CONFIRMED,
         description=(
-            "Native NXA computes A = (750 - value) / 100.0. The patched profile "
-            "extends the decoder while preserving native multiples-of-10 behavior."
+            "Native NXA uses its simplified decoder A=(750-value)/100.0. This is the "
+            "native EJ/NJ/HJ-family behavior and is deliberately distinct from the "
+            "Fiesta-style decimal decoder copied by the Step5 patched profile."
         ),
     ),
     _bool_metadata(
@@ -471,19 +575,6 @@ NATIVE_METADATA = (
         )
         for player in range(1, 6)
     ),
-    MetadataDefinition(1000, "Section", _HEADER_SPLIT),
-    MetadataDefinition(1001, "Difficulty", _HEADER_SPLIT),
-    MetadataDefinition(1002, "Co-op players", _HEADER_SPLIT, minimum=1, maximum=5),
-    *(
-        MetadataDefinition(
-            meta_id,
-            f"Float parameter {meta_id}",
-            _HEADER_SPLIT,
-            ValueKind.FLOAT32_BITS,
-            Evidence.REFERENCE_ONLY,
-        )
-        for meta_id in (1210, 1211, 1310, 1311, 1410, 1411)
-    ),
     *(
         MetadataDefinition(
             meta_id,
@@ -511,39 +602,29 @@ NATIVE_METADATA = (
     ),
     MetadataDefinition(
         10,
-        "Cheer / applause level",
-        _DIVISION,
-        ValueKind.PACKED_U16_RANGE,
-        Evidence.EXECUTABLE,
-        condition=True,
-        repeatable=True,
-    ),
-    MetadataDefinition(
-        11,
-        "Brain Shower correct count",
+        "Cheer Level / performance state",
         _DIVISION,
         ValueKind.PACKED_U16_RANGE,
         Evidence.RUNTIME_CONFIRMED,
-        brain_shower=True,
-        condition=True,
-        repeatable=True,
-    ),
-    MetadataDefinition(
-        12,
-        "Brain Shower wrong / timeout count",
-        _DIVISION,
-        ValueKind.PACKED_U16_RANGE,
-        Evidence.RUNTIME_CONFIRMED,
-        brain_shower=True,
+        description=(
+            "Conditional range against the same native performance state written by "
+            "Division 16 and maintained by Split 900."
+        ),
         condition=True,
         repeatable=True,
     ),
     MetadataDefinition(
         16,
-        "Visual mode override",
+        "Cheer Level / performance state override",
         _DIVISION,
-        evidence=Evidence.REFERENCE_ONLY,
-        authorable=False,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Native NXA writes the performance/Cheer Level state directly. The state "
+            "starts at 3; canonical authored values are 1..5 and Division 10 tests "
+            "the same state."
+        ),
+        minimum=1,
+        maximum=5,
     ),
     MetadataDefinition(
         21,
@@ -636,19 +717,6 @@ NATIVE_METADATA = (
         for meta_id in range(43, 50)
     ),
     MetadataDefinition(
-        200,
-        "Style override",
-        _DIVISION,
-        ValueKind.ENUM,
-        Evidence.RUNTIME_CONFIRMED,
-        choices=tuple(
-            ValueChoice(value, label)
-            for value, label in enumerate(
-                ("Default", "Versus", "Double", "Single (collapsed)")
-            )
-        ),
-    ),
-    MetadataDefinition(
         221,
         "Snake path segment length",
         _DIVISION,
@@ -672,24 +740,49 @@ NATIVE_METADATA = (
             "Global 900 is the default noteskin, Split 900 is Cheer update."
         ),
     ),
-    MetadataDefinition(999, "Auto judge", _DIVISION, evidence=Evidence.EXECUTABLE),
     MetadataDefinition(
-        1001,
-        "Difficulty filter",
+        999,
+        "Auto judgment",
         _DIVISION,
-        evidence=Evidence.REFERENCE_ONLY,
-        authorable=False,
+        evidence=Evidence.EXECUTABLE,
+        description=(
+            "Native 1-based auto-judgment target. Payload zero underflows the runtime "
+            "selection and is therefore rejected by typed authoring."
+        ),
+        minimum=1,
     ),
 )
 
 
 FIESTA2_METADATA = (
+    MetadataDefinition(
+        0,
+        "Speed multiplier",
+        _HEADER_SPLIT,
+        ValueKind.FLOAT32_BITS,
+        Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Fiesta-era Header/Split speed is stored as IEEE-754 float bits. This "
+            "overrides NXA's integer value/4 interpretation."
+        ),
+    ),
     *_direct_noteskin_metadata(31, "Fiesta 2"),
     *_later_trailer_metadata(),
-    *_unidentified_metadata((19,), _HEADER, "Fiesta 2"),
-    *_unidentified_metadata((1110, 1111), _HEADER, "Fiesta 2"),
-    *_unidentified_metadata((11, 12), _SPLIT, "Fiesta 2"),
-    *_unidentified_metadata((1000,), _DIVISION, "Fiesta 2"),
+    MetadataDefinition(
+        19,
+        "Random Skin selector",
+        _HEADER,
+        evidence=Evidence.EXECUTABLE,
+        description=(
+            "Fiesta 2 stores this state separately from GM900..905. When active, the "
+            "noteskin loader fills unspecified slots with 254/Random. The runtime "
+            "distinguishes values 1..6; the supplied Fiesta 2 and Prime 2 corpora use "
+            "value 6. Exact per-number naming is intentionally not guessed."
+        ),
+        minimum=1,
+        maximum=6,
+    ),
+    *_unidentified_metadata((11, 12), _SPLIT, "Fiesta 2 Brain"),
     _bool_metadata(
         35,
         "Zigzag",
@@ -712,15 +805,15 @@ FIESTA2_METADATA = (
         evidence=Evidence.RUNTIME_CONFIRMED,
         description=(
             "Fiesta-style decimal decoder: x=value+5; q=x//10; r=x%10; "
-            "A=(75-q)/10.0 and B=(10-r)*0.5."
+            "A=(75-q)/10.0 and B=(10-r)*0.5. This is not the native NXA GM65 "
+            "decoder."
         ),
     ),
     _bool_metadata(
         67,
         "Judge Hide",
         description=(
-            "Fiesta 2 Header ID 67 maps to the runtime Judge Hide option state. "
-            "Do not conflate it with NXA IDs."
+            "Fiesta 2 Header ID 67 maps to the runtime Judge Hide option state."
         ),
     ),
     _bool_metadata(
@@ -728,7 +821,8 @@ FIESTA2_METADATA = (
         "Judge by Note",
         description=(
             "Fiesta 2 Header ID 68 enables the later-engine note bank/slot rewrite "
-            "path; this is distinct from the inherited legacy NXA GM64 path."
+            "path. Executable/corpus evidence overrides the conflicting legacy note "
+            "that called this Judge Hide."
         ),
     ),
     MetadataDefinition(
@@ -753,7 +847,34 @@ FIESTA2_METADATA = (
             "as 0, 50, 500 and 30000. No artificial maximum is imposed."
         ),
     ),
+    MetadataDefinition(
+        1000,
+        "Section",
+        _HEADER_SPLIT,
+        evidence=Evidence.OFFICIAL_CORPUS,
+        description="Later-generation section field; not part of native NXA metadata.",
+    ),
+    MetadataDefinition(
+        1001,
+        "Difficulty",
+        _HEADER_SPLIT,
+        evidence=Evidence.OFFICIAL_CORPUS,
+        description="Later-generation chart/mission difficulty field; not native NXA.",
+    ),
+    MetadataDefinition(
+        1002,
+        "Co-op players",
+        _HEADER_SPLIT,
+        evidence=Evidence.OFFICIAL_CORPUS,
+        description=(
+            "Later-generation co-op player count. Official Fiesta 2/Prime 2 values "
+            "use the multiplayer range; this field is not native NXA."
+        ),
+        minimum=1,
+        maximum=5,
+    ),
     *_fiesta_mission_difficulty_metadata(),
+    *_fiesta_floor_runtime_metadata(),
     MetadataDefinition(
         1004,
         "Reset gameplay options",
@@ -772,14 +893,18 @@ FIESTA2_METADATA = (
     ),
     MetadataDefinition(
         1005,
-        "Unidentified Fiesta 2 header flag 1005",
+        "Auto Velocity flag (Fiesta-era)",
         _HEADER,
-        evidence=Evidence.UNIDENTIFIED,
+        evidence=Evidence.STRONGLY_INFERRED,
         description=(
-            "Observed in the official Fiesta 2 corpus with value 1. The supplied "
-            "Fiesta 2 executable has no dedicated Header-1005 handler; Prime 2 "
-            "reuses this ID with proven Auto Velocity semantics."
+            "Official Fiesta 2 charts use value 1, almost mutually exclusive with an "
+            "explicit Header 0 speed, and the runtime exposes speed_auto_velocity. "
+            "This is treated as the Fiesta EX~Prime 1 style AV enable flag, but no "
+            "direct Header-1005 dispatcher xref was recovered, so typed creation is "
+            "kept disabled."
         ),
+        minimum=1,
+        maximum=1,
         authorable=False,
     ),
     MetadataDefinition(
@@ -788,44 +913,65 @@ FIESTA2_METADATA = (
         _HEADER,
         evidence=Evidence.UNIDENTIFIED,
         description=(
-            "Observed in the official Fiesta 2 corpus with value 1, without a "
-            "dedicated handler in the supplied executable. Preserved raw."
+            "Observed in the official Fiesta 2 corpus with value 1, without a safe "
+            "runtime meaning. Preserved raw."
         ),
         authorable=False,
     ),
     MetadataDefinition(
-        1006,
-        "Unidentified Fiesta 2 Division field 1006",
+        11,
+        "Brain Shower correct / O count",
         _DIVISION,
-        evidence=Evidence.UNIDENTIFIED,
+        ValueKind.PACKED_U16_RANGE,
+        Evidence.STRONGLY_INFERRED,
         description=(
-            "Rare official-corpus Division field. The observed Fiesta 2 instance "
-            "duplicates the value of Division 6; no dedicated runtime meaning is "
-            "proven, so it remains raw-only."
+            "Fiesta 2 Brain mission condition family. Division 11 occurs in the "
+            "official Brain corpus and the NXA Step5 port intentionally copies this "
+            "later-engine O/X condition numbering."
         ),
-        authorable=False,
+        brain_shower=True,
+        condition=True,
+        repeatable=True,
     ),
+    MetadataDefinition(
+        12,
+        "Brain Shower wrong / timeout / X count",
+        _DIVISION,
+        ValueKind.PACKED_U16_RANGE,
+        Evidence.STRONGLY_INFERRED,
+        description=(
+            "Fiesta 2 counterpart to Division 11. No supplied Fiesta 2 chart happens "
+            "to use Division 12, but the paired O/X family is the source copied by "
+            "the NXA Step5 patch."
+        ),
+        brain_shower=True,
+        condition=True,
+        repeatable=True,
+    ),
+    _style_override_metadata(
+        Evidence.RUNTIME_CONFIRMED,
+        "Fiesta 2 style override. This later-engine behavior is the implementation "
+        "copied by the NXA Step5 patched profile.",
+    ),
+    *_other_player_condition_metadata(),
 )
 
 
 PRIME2_METADATA = (
     *_direct_noteskin_metadata(32, "Prime 2"),
-    *_unidentified_metadata((3, 4), _SPLIT, "Prime 2"),
+    *_unidentified_metadata((3, 4), _SPLIT, "Prime 2 discarded-mission"),
     *_prime_mission_difficulty_metadata(),
     MetadataDefinition(
         1005,
         "Auto Velocity",
         _HEADER,
-        ValueKind.ENUM,
-        Evidence.RUNTIME_CONFIRMED,
+        evidence=Evidence.RUNTIME_CONFIRMED,
         description=(
-            "Enables Prime-era Auto Velocity semantics: scroll velocity targets an "
-            "absolute final speed rather than selecting a BPM multiplier. Official "
-            "Prime 2 charts encode the flag as value 1."
+            "Prime-era Auto Velocity stores the absolute target scroll velocity rather "
+            "than a BPM multiplier (for example a target such as 600). It overrides "
+            "the Fiesta-era value-1 AV enable-flag interpretation."
         ),
         minimum=1,
-        maximum=1,
-        choices=(ValueChoice(1, "Enabled"),),
     ),
     MetadataDefinition(
         1007,
@@ -842,6 +988,33 @@ PRIME2_METADATA = (
         minimum=1,
         maximum=1,
         choices=(ValueChoice(1, "Card-only"),),
+    ),
+    MetadataDefinition(
+        11,
+        "Legacy Fiesta Brain correct / O condition",
+        _DIVISION,
+        ValueKind.PACKED_U16_RANGE,
+        Evidence.UNIDENTIFIED,
+        description=(
+            "Fiesta 2 uses this O/X condition family, but no supplied Prime 2 Brain "
+            "chart uses Division 11 and Prime 2 mission results omit the O/X counter. "
+            "Preserved if encountered, not offered for Prime 2 authoring."
+        ),
+        authorable=False,
+        brain_shower=True,
+    ),
+    MetadataDefinition(
+        12,
+        "Legacy Fiesta Brain wrong / X condition",
+        _DIVISION,
+        ValueKind.PACKED_U16_RANGE,
+        Evidence.UNIDENTIFIED,
+        description=(
+            "Fiesta 2 counterpart to Division 11; not demonstrated in Prime 2. "
+            "Preserved if encountered, not offered for Prime 2 authoring."
+        ),
+        authorable=False,
+        brain_shower=True,
     ),
     *(
         MetadataDefinition(
@@ -882,8 +1055,9 @@ PATCHED_METADATA = (
         _HEADER,
         evidence=Evidence.RUNTIME_CONFIRMED,
         description=(
-            "Step5 decoder: x=value+5; q=x//10; r=x%10; "
-            "A=(75-q)/10.0 and B=(10-r)*0.5 frames."
+            "Step5 deliberately replaces native NXA GM65 with the Fiesta-style "
+            "decimal decoder: x=value+5; q=x//10; r=x%10; A=(75-q)/10.0 and "
+            "B=(10-r)*0.5 frames. This enables the extended VJ/XJ/UJ family."
         ),
     ),
     MetadataDefinition(
@@ -927,13 +1101,68 @@ PATCHED_METADATA = (
         )
     ),
     MetadataDefinition(
+        11,
+        "Brain Shower correct / O count",
+        _DIVISION,
+        ValueKind.PACKED_U16_RANGE,
+        Evidence.RUNTIME_CONFIRMED,
+        description="Patch-only port of the Fiesta 2 Brain O-count condition.",
+        brain_shower=True,
+        condition=True,
+        repeatable=True,
+    ),
+    MetadataDefinition(
+        12,
+        "Brain Shower wrong / timeout / X count",
+        _DIVISION,
+        ValueKind.PACKED_U16_RANGE,
+        Evidence.RUNTIME_CONFIRMED,
+        description="Patch-only port of the Fiesta 2 Brain X-count condition.",
+        brain_shower=True,
+        condition=True,
+        repeatable=True,
+    ),
+    *(
+        MetadataDefinition(
+            meta_id,
+            label,
+            _DIVISION,
+            ValueKind.PACKED_U16_RANGE,
+            Evidence.RUNTIME_CONFIRMED,
+            description="Patch-only mission-condition range.",
+            condition=True,
+            repeatable=True,
+        )
+        for meta_id, label in (
+            (101, "Current Combo"),
+            (102, "Aggregate MaxCombo"),
+            (103, "MissCombo"),
+            (104, "Life / Gauge"),
+            (105, "Item count"),
+            (106, "Heart count"),
+            (107, "Mine count"),
+            (108, "Potion count"),
+            (109, "Velocity count"),
+        )
+    ),
+    MetadataDefinition(
+        110,
+        "Cheer2 event",
+        _DIVISION,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description="Patch-only Cheer2 event/control metadata copied from the later behavior.",
+    ),
+    MetadataDefinition(
         111,
-        "Cheer control",
+        "End Song",
         _DIVISION,
         evidence=Evidence.RUNTIME_CONFIRMED,
         description=(
-            "Patched full-range Division metadata; values are not collapsed to boolean."
+            "Patch-only end-song event: 0 = normal/no forced end, 1 = immediate, "
+            "2..255 = fade duration in frames."
         ),
+        minimum=0,
+        maximum=255,
     ),
     MetadataDefinition(
         120,
@@ -945,6 +1174,11 @@ PATCHED_METADATA = (
             "low16 mode (0=non-Miss adds Perfect, 1=repeats the same judgment); "
             "signed high16 y. Mode 0 accepts -1..255 and mode 1 accepts -2..255."
         ),
+    ),
+    _style_override_metadata(
+        Evidence.RUNTIME_CONFIRMED,
+        "Patch-only style override copied from Fiesta 2: 0 preserve, 1 Versus, "
+        "2 Double, 3 Single/collapsed.",
     ),
     MetadataDefinition(900, "Default noteskin", _HEADER_SPLIT, minimum=0, maximum=31),
     *(
@@ -989,6 +1223,7 @@ PROFILES = {
                 "items-21-23",
                 "direct-noteskin-index",
                 "header-reset-options",
+                "other-player-conditions",
             }
         ),
     ),
@@ -1018,8 +1253,10 @@ PROFILES = {
                 "condition-accuracy",
                 "condition-minlife",
                 "gm65-vj-window",
-                "division-111-cheer",
+                "division-110-cheer2",
+                "division-111-end-song",
                 "division-120-judgment-weight",
+                "division-200-style-override",
                 "items-21-23",
                 "noteskins-0-31",
                 "command-jh",
@@ -1087,6 +1324,11 @@ def authorable_metadata(
 ) -> tuple[MetadataDefinition, ...]:
     resolved: dict[int, MetadataDefinition] = {}
     for definition in profile_metadata(profile_name):
-        if definition.authorable and definition.supports(scope):
+        if definition.supports(scope):
             resolved[definition.meta_id] = definition
-    return tuple(sorted(resolved.values(), key=lambda item: item.meta_id))
+    return tuple(
+        sorted(
+            (item for item in resolved.values() if item.authorable),
+            key=lambda item: item.meta_id,
+        )
+    )
