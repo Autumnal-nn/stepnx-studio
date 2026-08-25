@@ -1,6 +1,6 @@
 # StepNX Studio technical roadmap
 
-Revision: 2026-08-24
+Revision: 2026-08-25
 
 Target: a lossless native NX20 desktop editor, not another converter wrapped in
 a brittle GUI
@@ -127,14 +127,17 @@ Remaining gates:
 
 - deeper malformed-model and writer fuzzing as an ongoing hardening gate.
 
-### Phase 3 — Importers and profile semantics (implemented; precision gates remain)
+### Phase 3 — Importers and profile semantics (implemented)
 
 Delivered:
 
-1. NX10 importer with a conversion report; official NX2 corpus/runtime
-   equivalence remains a validation gate.
+1. NX10 importer with a conversion report, now validated against the complete
+   supplied 2,125-file NX2 NX10 corpus and 2,111 same-path official NXA NX20
+   successor conversions. The observed official NX2 conversion domain is
+   frozen; see `NX2_NXA_CONVERSION_ANALYSIS.md`.
 2. `nxa-native`, Fiesta 2, Prime 2, and patched-NXA metadata/capability
-   registries with structural versus authoring validation.
+   registries with structural versus authoring validation and complete
+   official-corpus ID coverage without guessed semantics.
 3. Startup capability gating keeps the patched NXA profile out of normal editor
    profile choices while retaining its stable internal registry key.
 4. Typed trailer views where evidence is sufficient, including guarded
@@ -144,7 +147,9 @@ Delivered:
    with structured diagnostics and explicit materialization.
 
 Importer acceptance requires source preservation, a deterministic NX20 result,
-and an explicit list of approximations or unsupported concepts.
+and an explicit list of approximations or unsupported concepts. Inputs outside
+an importer's proven corpus domain remain guarded rather than generalized from
+unsupported assumptions.
 
 ### Phase 4 — Folder layer (implemented)
 
@@ -339,17 +344,24 @@ closed the legacy-import GUI flow, SEE/UCS authoring import, workspace NX file
 management, field geometry tools, sparse NX20 hold behavior, compressed/staged
 precision waveform rendering, persistent external rendering preferences,
 guarded trailer relocation in the Qt UI, patched-profile startup gating, timing
-Inspector polish, and metronome transport jitter/cutoff fixes.
+Inspector polish, metronome transport jitter/cutoff fixes, complete versioned
+authoring-profile coverage, and the official NX2->NXA importer audit/corrections.
 
 The remaining Phase 11 work is validation and integration rather than feature
 implementation: run the strict Windows gate on the final HEAD, perform the final
 manual smoke tests, record the result, and merge the branch.
 
-### Separate track — mission text and World Max
+### Explicit non-goals — World Max mission text and cabinet Lightmap UI
 
-`mission.txt` tooling may share registries and condition parsers, but it must not
-contaminate NX20's binary model. It remains a separate codec/document type and
-may ship after the minimum visual editor.
+`mission.txt` is World Max game/configuration data rather than an NX/NFO chart
+document. StepNX Studio may use supplied mission files as reference evidence for
+condition syntax, but it does not own a `mission.txt` codec, document model, or
+visual mission-map editor.
+
+Likewise, `LM.NX` remains a native NX document because it is part of folder
+publication, but a dedicated cabinet-light visualizer is not required by the
+editor. Hardware-level NXA light-output research may be useful independently;
+it is not an authoring or release blocker.
 
 ## Test strategy
 
@@ -368,17 +380,22 @@ may ship after the minimum visual editor.
 ### Corpus gates
 
 - 12,909 known NX20/NFO files remain byte-exact;
-- 12 NX10 files remain classified outside the NX20 codec;
+- 12 NXA NX10 files remain classified outside the NX20 codec;
+- all 2,125 supplied NX2 NX10 charts remain within the frozen observed importer
+  domain, with successor evidence recorded separately from repository payloads;
 - rich mode stays available as a reference;
 - compact mode is the required performance/default gate;
 - corpus payloads never enter the repository.
 
 ### Runtime gates
 
-- NXA validates generated/edited native charts and blank Lightmaps;
+- NXA validates generated/edited native charts where suitable cabinet/runtime
+  hardware is available;
 - later-engine fixtures validate sized trailers and NFO deployment;
 - patched-engine behavior is tested only under its explicit profile;
-- every runtime test records executable identity and exact input artifact.
+- every runtime test records executable identity and exact input artifact;
+- physical Lightmap lamp actuation is external hardware research, not a release
+  gate for the editor's structurally validated `LM.NX` workflow.
 
 ## Current priority queue
 
@@ -389,15 +406,16 @@ P0:
 
 P1:
 
-1. validate the NX10 importer against the official NX2 corpus and runtime;
-2. continue runtime evidence work for exact preview semantics.
+1. continue runtime evidence work for exact preview semantics.
 
 P2:
 
 1. deeper hardening/fuzzing and performance regression budgets;
 2. remaining typed later-generation trailer fields where evidence becomes
    sufficient;
-3. packaging, accessibility, keyboard-only editing, high-DPI, and localization
+3. optional reverse-engineering of NXA cabinet-light output/I/O behavior, kept
+   separate from the editor unless it yields a concrete authoring requirement;
+4. packaging, accessibility, keyboard-only editing, high-DPI, and localization
    work on the road to 1.0.
 
 ## Quality metrics
