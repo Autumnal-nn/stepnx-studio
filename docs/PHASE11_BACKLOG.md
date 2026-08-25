@@ -75,9 +75,8 @@ None inside the agreed Phase 11 scope.
 
 ## Phase close-out
 
-- Update `README.md`, `docs/STATUS.md`, and `docs/ROADMAP.md` so they no longer
-  describe SEE decoding, compressed waveform generation, or trailer relocation
-  as unimplemented and accurately summarize the Phase 11 import/workspace/audio
-  features.
+- `README.md`, `docs/STATUS.md`, and `docs/ROADMAP.md` have been refreshed to
+  reflect SEE import, compressed/staged waveform generation, guarded trailer
+  relocation, workspace tools, and the completed Phase 11 implementation scope.
 - Run the strict Windows test gate on the final Phase 11 HEAD and perform the
   final manual smoke tests before merging Phase 11.
