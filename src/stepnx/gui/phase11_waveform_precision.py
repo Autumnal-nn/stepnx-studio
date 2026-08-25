@@ -33,8 +33,16 @@ class AdaptiveWaveformChannelSummary:
     def __init__(self, minima, maxima) -> None:
         if len(minima) != len(maxima):
             raise ValueError("waveform min/max series must have the same length")
-        self.minima = minima if isinstance(minima, array) and minima.typecode == "f" else array("f", minima)
-        self.maxima = maxima if isinstance(maxima, array) and maxima.typecode == "f" else array("f", maxima)
+        self.minima = (
+            minima
+            if isinstance(minima, array) and minima.typecode == "f"
+            else array("f", minima)
+        )
+        self.maxima = (
+            maxima
+            if isinstance(maxima, array) and maxima.typecode == "f"
+            else array("f", maxima)
+        )
 
         levels: list[tuple[array, array]] = [(self.minima, self.maxima)]
         current_min = self.minima
@@ -175,7 +183,9 @@ def install_phase11_waveform_precision(window) -> None:
 
         def report_cost(waveform) -> None:
             started = getattr(decoder, "_phase11_precision_started", None)
-            elapsed_ms = 0.0 if started is None else (perf_counter() - started) * 1000.0
+            elapsed_ms = (
+                0.0 if started is None else (perf_counter() - started) * 1000.0
+            )
             rate = decoder._summaries.sample_rate
             resolution_ms = (
                 0.0 if rate <= 0 else BASE_SUMMARY_FRAMES * 1000.0 / rate
@@ -188,6 +198,11 @@ def install_phase11_waveform_precision(window) -> None:
                 f"{elapsed_ms:.0f} ms build",
                 8000,
             )
+            # _finished() has copied the float32 base arrays into the final
+            # multiresolution summaries. Release the builder's raw arrays now;
+            # the same builder object is reused and clear() preserves its
+            # 16-frame configuration for the next song.
+            decoder._summaries.clear()
 
         decoder.waveformReady.connect(report_cost)
 
