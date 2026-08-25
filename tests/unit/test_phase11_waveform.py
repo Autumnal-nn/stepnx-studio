@@ -14,6 +14,7 @@ try:
     from stepnx.authoring import WaveformEnvelope, create_authoring_snapshot
     from stepnx.codecs.nx20 import parse_bytes
     from stepnx.gui.phase11_waveform import (
+        WaveformChannelSummary,
         WaveformRenderData,
         _draw_waveform_field,
         _preferred_song_path,
@@ -59,8 +60,15 @@ class Phase11WaveformTests(unittest.TestCase):
         peaks = [0.25] * 30_000
         self.assertEqual(len(_reduce_peaks(peaks)), 30_000)
 
-    def test_reduction_uses_mean_level_instead_of_transient_maximum(self) -> None:
-        self.assertEqual(_reduce_peaks([0.0, 1.0, 0.0, 0.0], 2), (0.5, 0.0))
+    def test_bpm_reduction_preserves_transient_maximum(self) -> None:
+        self.assertEqual(_reduce_peaks([0.0, 1.0, 0.0, 0.0], 2), (1.0, 0.0))
+
+    def test_channel_range_aggregates_every_summary_touched_by_pixel(self) -> None:
+        channel = WaveformChannelSummary(
+            (-0.1, -0.8, -0.2, -0.4),
+            (0.2, 0.3, 0.9, 0.5),
+        )
+        self.assertEqual(channel.range_at(40.0, 9.0, 31.0), (-0.8, 0.9))
 
     def test_waveform_is_drawn_across_note_field_not_timing_ruler(self) -> None:
         document = parse_bytes(
@@ -88,7 +96,7 @@ class Phase11WaveformTests(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_stereo_waveform_draws_two_separate_channel_traces(self) -> None:
+    def test_stereo_waveform_draws_two_separate_signed_channel_traces(self) -> None:
         document = parse_bytes(
             make_large_lightmap(rows=8), source="LM.NX", row_storage="compact"
         )
@@ -96,10 +104,11 @@ class Phase11WaveformTests(unittest.TestCase):
         try:
             widget.resize(500, 300)
             aggregate = WaveformEnvelope(60_000.0, (0.3,) * 6000)
-            waveform = WaveformRenderData(
-                aggregate,
-                ((0.3,) * 6000, (0.3,) * 6000),
+            channel = WaveformChannelSummary(
+                (-0.3,) * 6000,
+                (0.3,) * 6000,
             )
+            waveform = WaveformRenderData(aggregate, (channel, channel))
             widget.set_waveform(waveform)
             visible = widget._layout.visible_segments(0.0, 250.0, overscan_rows=0)[0]
             canvas = QImage(600, 400, QImage.Format.Format_ARGB32)
