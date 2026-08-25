@@ -201,9 +201,23 @@ class AudioTransport(QObject):
         return loaded
 
     def _position_changed(self, milliseconds: int) -> None:
-        self._position_anchor = int(milliseconds)
+        candidate = int(milliseconds)
+        playing = (
+            self.player.playbackState()
+            == QMediaPlayer.PlaybackState.PlayingState
+        )
+        if not _accept_transport_position(
+            self._last_emitted_position,
+            candidate,
+            playing=playing,
+        ):
+            # Keep both the visible position and the extrapolation anchor
+            # monotonic. Re-anchoring to an old backend timestamp would replace
+            # the duplicate tick with a short 10-20 ms transport stall.
+            return
+        self._position_anchor = candidate
         self._position_clock.restart()
-        self._emit_position(self._position_anchor)
+        self._emit_position(candidate)
 
     def _emit_position(self, milliseconds: int, *, explicit: bool = False) -> None:
         milliseconds = int(milliseconds)
