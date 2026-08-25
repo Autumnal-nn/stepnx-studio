@@ -21,6 +21,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase11_preferences import install_phase11_preferences
     from stepnx.gui.phase11_state_guard import install_phase11_state_guard
     from stepnx.gui.phase11_waveform import install_phase11_waveform
+    from stepnx.gui.phase11_waveform_precision import install_phase11_waveform_precision
     from stepnx.gui.phase11_workspace import install_phase11_workspace_tools
 
     timeline_module.TimelineWidget = Phase10TimelineWidget
@@ -36,6 +37,7 @@ def main(argv=None) -> int:
             install_phase11_workspace_tools(self)
             install_phase11_state_guard(self)
             install_phase11_waveform(self)
+            install_phase11_waveform_precision(self)
             install_phase11_preferences(self)
         return original_show(self, *args, **kwargs)
 
