@@ -185,18 +185,20 @@ class AudioTransport(QObject):
             voice.setSource(source)
 
     def play_metronome(self) -> bool:
+        loaded = False
         for voice in self._metronome_voices:
-            if (
-                not voice.source().isEmpty()
-                and voice.isLoaded()
-                and not voice.isPlaying()
-            ):
+            if voice.source().isEmpty() or not voice.isLoaded():
+                continue
+            loaded = True
+            if not voice.isPlaying():
                 voice.play()
                 return True
         # Do not cut/restart an existing voice just to force another tick. If
-        # every voice is busy, dropping a pathological ultra-dense event is less
-        # destructive than introducing a discontinuity into the audio stream.
-        return False
+        # every loaded voice is busy, silently drop a pathological ultra-dense
+        # event instead of introducing a discontinuity. Returning True means
+        # the sample is ready, so callers do not misreport saturation as an
+        # unloaded BEAT.WAV.
+        return loaded
 
     def _position_changed(self, milliseconds: int) -> None:
         self._position_anchor = int(milliseconds)
