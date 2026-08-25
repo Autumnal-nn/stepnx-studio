@@ -14,6 +14,7 @@ class MetadataScope(str, Enum):
 
 class ValueKind(str, Enum):
     UINT32 = "uint32"
+    INT32 = "int32"
     FLOAT32_BITS = "float32-bits"
     BITMASK = "bitmask"
     PACKED_U16_RANGE = "packed-u16-range"
@@ -63,6 +64,9 @@ class MetadataDefinition:
         return scope in self.scopes
 
     def display_value(self, raw_value: int) -> str:
+        if self.kind is ValueKind.INT32:
+            value = struct.unpack("<i", struct.pack("<I", raw_value))[0]
+            return f"{value} (0x{raw_value:08X})"
         if self.kind is ValueKind.FLOAT32_BITS:
             value = struct.unpack("<f", struct.pack("<I", raw_value))[0]
             return f"{value:g} (0x{raw_value:08X})"
@@ -133,6 +137,24 @@ _SPLIT = frozenset((MetadataScope.SPLIT,))
 _DIVISION = frozenset((MetadataScope.DIVISION,))
 
 
+def _bool_metadata(
+    meta_id: int,
+    label: str,
+    scopes: frozenset[MetadataScope] = _HEADER,
+    *,
+    evidence: Evidence = Evidence.RUNTIME_CONFIRMED,
+    description: str = "",
+) -> MetadataDefinition:
+    suffix = " Runtime treats zero as off and any nonzero payload as on."
+    return MetadataDefinition(
+        meta_id,
+        label,
+        scopes,
+        evidence=evidence,
+        description=(description + suffix).strip(),
+    )
+
+
 def _direct_noteskin_metadata(
     maximum: int, engine_label: str
 ) -> tuple[MetadataDefinition, ...]:
@@ -194,7 +216,7 @@ def _unidentified_metadata(
 
 def _later_trailer_metadata() -> tuple[MetadataDefinition, ...]:
     fields = (
-        (20, "V resource override", Evidence.RUNTIME_CONFIRMED),
+        (20, "BGA video resource (.V)", Evidence.RUNTIME_CONFIRMED),
         (1003, "Resource/reference string", Evidence.RUNTIME_CONFIRMED),
         (1100, "Trailer string field 1100", Evidence.OFFICIAL_CORPUS),
         (1102, "Trailer string field 1102", Evidence.OFFICIAL_CORPUS),
@@ -229,6 +251,43 @@ def _later_trailer_metadata() -> tuple[MetadataDefinition, ...]:
     )
 
 
+def _fiesta_mission_difficulty_metadata() -> tuple[MetadataDefinition, ...]:
+    return tuple(
+        MetadataDefinition(
+            1000 + floor * 100 + 1,
+            f"Mission difficulty — floor {floor}",
+            _HEADER,
+            evidence=Evidence.RUNTIME_CONFIRMED,
+            description=(
+                "Fiesta/Fiesta EX/Fiesta 2 mission difficulty uses the native 1..8 "
+                "mission scale. The x in 1x01 identifies the mission Step/Floor; "
+                "the number of floors is variable in this generation."
+            ),
+            minimum=1,
+            maximum=8,
+        )
+        for floor in range(1, 5)
+    )
+
+
+def _prime_mission_difficulty_metadata() -> tuple[MetadataDefinition, ...]:
+    return tuple(
+        MetadataDefinition(
+            1000 + floor * 100 + 1,
+            f"Mission difficulty — floor {floor}",
+            _HEADER,
+            evidence=Evidence.RUNTIME_CONFIRMED,
+            description=(
+                "Prime-era mission difficulty uses Arcade-comparable chart levels. "
+                "Prime/Prime 2 missions use four Step/Floor slots, represented by "
+                "1101, 1201, 1301 and 1401."
+            ),
+            minimum=1,
+        )
+        for floor in range(1, 5)
+    )
+
+
 _NXA_NOTESKIN_REFERENCE = (
     "NXA metadata IDs 900..905 select the six noteskin slots, but their payload "
     "is an external skin reference/index rather than the slot number itself. "
@@ -238,33 +297,70 @@ _NXA_NOTESKIN_REFERENCE = (
 
 
 NATIVE_METADATA = (
-    MetadataDefinition(0, "Speed", _HEADER_SPLIT, ValueKind.FLOAT32_BITS),
+    MetadataDefinition(
+        0,
+        "Speed",
+        _HEADER_SPLIT,
+        ValueKind.INT32,
+        description=(
+            "Native NXA Global Metadata consumes this as an integer scalar and "
+            "computes value / 4.0. It is not an IEEE-754 float bit pattern."
+        ),
+    ),
     MetadataDefinition(
         1,
         "Earthworm / Random Velocity",
         _HEADER_SPLIT,
-        ValueKind.BITMASK,
-        bits=(BitChoice(0x01, "Earthworm"), BitChoice(0x02, "Random Velocity")),
+        ValueKind.ENUM,
+        choices=(
+            ValueChoice(1, "Earthworm"),
+            ValueChoice(2, "Random Velocity"),
+        ),
+        description="Native NXA uses exact values 1 and 2; value 3 is not a composition.",
     ),
     MetadataDefinition(
         2,
         "Acceleration / Deceleration",
         _HEADER_SPLIT,
-        ValueKind.BITMASK,
-        bits=(BitChoice(0x01, "Acceleration"), BitChoice(0x02, "Deceleration")),
+        ValueKind.ENUM,
+        choices=(
+            ValueChoice(1, "Acceleration"),
+            ValueChoice(2, "Deceleration"),
+        ),
+        description="Native NXA uses exact values 1 and 2.",
     ),
     MetadataDefinition(
         16,
         "Vanish / Appear",
         _HEADER_SPLIT,
-        ValueKind.BITMASK,
-        bits=(BitChoice(0x01, "Vanish"), BitChoice(0x02, "Appear")),
+        ValueKind.ENUM,
+        choices=(
+            ValueChoice(1, "Vanish"),
+            ValueChoice(2, "Appear"),
+            ValueChoice(3, "Vanish + Appear"),
+        ),
     ),
-    MetadataDefinition(
-        17, "Freedom", _HEADER_SPLIT, ValueKind.BITMASK, bits=(BitChoice(1, "Freedom"),)
+    _bool_metadata(17, "Freedom", _HEADER_SPLIT),
+    _bool_metadata(18, "Flash", _HEADER_SPLIT),
+    _bool_metadata(
+        19,
+        "Random Skin",
+        description="World Max COMMAND equivalent: i.",
     ),
-    MetadataDefinition(
-        18, "Flash", _HEADER_SPLIT, ValueKind.BITMASK, bits=(BitChoice(1, "Flash"),)
+    _bool_metadata(
+        20,
+        "BGA OFF / COSMOS",
+        description="World Max COMMAND equivalent: *.",
+    ),
+    _bool_metadata(
+        21,
+        "X Mode / EXCEED",
+        description="World Max COMMAND equivalent: x.",
+    ),
+    _bool_metadata(
+        22,
+        "NX Mode",
+        description="World Max COMMAND equivalent: ^.",
     ),
     MetadataDefinition(
         32,
@@ -272,21 +368,97 @@ NATIVE_METADATA = (
         _HEADER_SPLIT,
         ValueKind.BITMASK,
         bits=(BitChoice(0x01, "Under Attack"), BitChoice(0x02, "Drop")),
+        description="Native NXA consumes bits 0..1; the patched profile additionally defines bit 2 as Mid.",
     ),
     MetadataDefinition(
         33,
         "Sink / Rise",
         _HEADER_SPLIT,
-        ValueKind.BITMASK,
-        bits=(BitChoice(0x01, "Sink"), BitChoice(0x02, "Rise")),
+        ValueKind.ENUM,
+        choices=(ValueChoice(1, "Sink"), ValueChoice(2, "Rise")),
+        description="Native NXA uses exact values 1 and 2.",
+    ),
+    _bool_metadata(34, "Snake", _HEADER_SPLIT),
+    MetadataDefinition(
+        35,
+        "Unidentified NXA header/split field 35",
+        _HEADER_SPLIT,
+        evidence=Evidence.UNIDENTIFIED,
+        description=(
+            "Zigzag appears in generic NX20 references, but no direct NXA Global "
+            "Metadata consumer was demonstrated in the supplied native executable."
+        ),
+        authorable=False,
+    ),
+    _bool_metadata(
+        48,
+        "Decalcomanie",
+        description="Native NXA deterministic lane permutation.",
+    ),
+    _bool_metadata(
+        49,
+        "Mirror",
+        description=(
+            "Native NXA mirror permutation. Fiesta 2 reuses this ID with different "
+            "Alternate Random semantics."
+        ),
+    ),
+    _bool_metadata(
+        50,
+        "Runner",
+        description=(
+            "Native NXA persistent randomized lane map; hold body/tail rows do not "
+            "reshuffle the carried mapping."
+        ),
+    ),
+    _bool_metadata(
+        64,
+        "Judge by Note",
+        description=(
+            "World Max COMMAND equivalent: b. Native processing derives bank/slot "
+            "from the note payload (low14 % 3), matching per-bank conditions."
+        ),
     ),
     MetadataDefinition(
-        34, "Snake", _HEADER_SPLIT, ValueKind.BITMASK, bits=(BitChoice(1, "Snake"),)
+        65,
+        "Judgment-window / VJ parameter",
+        _HEADER,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Native NXA computes A = (750 - value) / 100.0. The patched profile "
+            "extends the decoder while preserving native multiples-of-10 behavior."
+        ),
+    ),
+    _bool_metadata(
+        66,
+        "Reverse Grade",
+        description="World Max COMMAND equivalent: j.",
     ),
     MetadataDefinition(
-        35, "Zigzag", _HEADER_SPLIT, ValueKind.BITMASK, bits=(BitChoice(1, "Zigzag"),)
+        80,
+        "Maximum Lifebar",
+        _HEADER,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description="World Max COMMAND equivalent: #.",
     ),
-    *_unidentified_metadata((49, 64), _HEADER, "NXA"),
+    MetadataDefinition(
+        81,
+        "Lifebar Display",
+        _HEADER,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "World Max COMMAND equivalent: %. A native display consumer divides "
+            "by this value, so typed authoring rejects zero."
+        ),
+        minimum=1,
+    ),
+    MetadataDefinition(
+        82,
+        "Starting Lifebar",
+        _HEADER,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description="World Max COMMAND equivalent: @.",
+    ),
     MetadataDefinition(
         900, "Default noteskin", _HEADER_SPLIT, description=_NXA_NOTESKIN_REFERENCE
     ),
@@ -491,7 +663,14 @@ NATIVE_METADATA = (
         Evidence.RUNTIME_CONFIRMED,
     ),
     MetadataDefinition(
-        900, "Cheer update", _DIVISION, evidence=Evidence.RUNTIME_CONFIRMED
+        900,
+        "Cheer update",
+        _SPLIT,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Performance-driven split activation updater. This is a scope collision: "
+            "Global 900 is the default noteskin, Split 900 is Cheer update."
+        ),
     ),
     MetadataDefinition(999, "Auto judge", _DIVISION, evidence=Evidence.EXECUTABLE),
     MetadataDefinition(
@@ -507,18 +686,74 @@ NATIVE_METADATA = (
 FIESTA2_METADATA = (
     *_direct_noteskin_metadata(31, "Fiesta 2"),
     *_later_trailer_metadata(),
-    *_unidentified_metadata(
-        (19, 21, 22, 48, 50, 65, 66, 67, 68, 80, 81, 82, 83, 84),
-        _HEADER,
-        "Fiesta 2",
-    ),
-    *_unidentified_metadata(
-        (1101, 1110, 1111, 1201, 1301, 1401),
-        _HEADER,
-        "Fiesta 2",
-    ),
+    *_unidentified_metadata((19,), _HEADER, "Fiesta 2"),
+    *_unidentified_metadata((1110, 1111), _HEADER, "Fiesta 2"),
     *_unidentified_metadata((11, 12), _SPLIT, "Fiesta 2"),
     *_unidentified_metadata((1000,), _DIVISION, "Fiesta 2"),
+    _bool_metadata(
+        35,
+        "Zigzag",
+        description="Fiesta-era runtime consumer for the Zigzag path modifier.",
+    ),
+    _bool_metadata(
+        48,
+        "Mirror",
+        description="Fiesta-era ID 48; this overrides NXA ID 48 Decalcomanie.",
+    ),
+    _bool_metadata(
+        49,
+        "Alternate Random",
+        description="Fiesta-era ID 49; this overrides NXA ID 49 Mirror.",
+    ),
+    MetadataDefinition(
+        65,
+        "Judgment-window / VJ parameter",
+        _HEADER,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Fiesta-style decimal decoder: x=value+5; q=x//10; r=x%10; "
+            "A=(75-q)/10.0 and B=(10-r)*0.5."
+        ),
+    ),
+    _bool_metadata(
+        67,
+        "Judge Hide",
+        description=(
+            "Fiesta 2 Header ID 67 maps to the runtime Judge Hide option state. "
+            "Do not conflate it with NXA IDs."
+        ),
+    ),
+    _bool_metadata(
+        68,
+        "Judge by Note",
+        description=(
+            "Fiesta 2 Header ID 68 enables the later-engine note bank/slot rewrite "
+            "path; this is distinct from the inherited legacy NXA GM64 path."
+        ),
+    ),
+    MetadataDefinition(
+        83,
+        "Stage Break",
+        _HEADER,
+        ValueKind.ENUM,
+        Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Boolean Break ON/OFF override stored beside the forced-break threshold."
+        ),
+        choices=(ValueChoice(0, "Off"), ValueChoice(1, "On")),
+    ),
+    MetadataDefinition(
+        84,
+        "Forced Stage Break MissCombo threshold",
+        _HEADER,
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Overrides the forced Stage Break MissCombo threshold. Runtime initializes "
+            "this field to 51; official Fiesta 2 content also uses raw overrides such "
+            "as 0, 50, 500 and 30000. No artificial maximum is imposed."
+        ),
+    ),
+    *_fiesta_mission_difficulty_metadata(),
     MetadataDefinition(
         1004,
         "Reset gameplay options",
@@ -576,6 +811,7 @@ FIESTA2_METADATA = (
 PRIME2_METADATA = (
     *_direct_noteskin_metadata(32, "Prime 2"),
     *_unidentified_metadata((3, 4), _SPLIT, "Prime 2"),
+    *_prime_mission_difficulty_metadata(),
     MetadataDefinition(
         1005,
         "Auto Velocity",
@@ -628,18 +864,76 @@ PRIME2_METADATA = (
 
 PATCHED_METADATA = (
     MetadataDefinition(
+        32,
+        "Under Attack / Drop / Mid",
+        _HEADER_SPLIT,
+        ValueKind.BITMASK,
+        Evidence.RUNTIME_CONFIRMED,
+        description="Step5 extends native GM32 with bit 2 = Mid.",
+        bits=(
+            BitChoice(0x01, "Under Attack"),
+            BitChoice(0x02, "Drop"),
+            BitChoice(0x04, "Mid"),
+        ),
+    ),
+    MetadataDefinition(
         65,
         "VJ timing-window parameter",
-        frozenset((MetadataScope.HEADER,)),
+        _HEADER,
         evidence=Evidence.RUNTIME_CONFIRMED,
-        description="Step5 patched NXA formula input for VJ/XJ/UJ timing windows.",
+        description=(
+            "Step5 decoder: x=value+5; q=x//10; r=x%10; "
+            "A=(75-q)/10.0 and B=(10-r)*0.5 frames."
+        ),
+    ),
+    MetadataDefinition(
+        70,
+        "Score weighting",
+        _HEADER,
+        ValueKind.FLOAT32_BITS,
+        Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Patch-only Fiesta2-style score-delta weighting. 1.0 is neutral; "
+            "typical finite values include 0.5, 1.0, 1.5 and 2.0."
+        ),
+    ),
+    _bool_metadata(
+        71,
+        "Free Performance / cross-pad input fusion",
+        evidence=Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Patch-only. COMMAND q activates the same cross-pad input-mask fusion, "
+            "allowing corresponding P1/P2 panel inputs to be used interchangeably."
+        ),
+    ),
+    *(
+        MetadataDefinition(
+            meta_id,
+            label,
+            _HEADER,
+            ValueKind.INT32,
+            Evidence.RUNTIME_CONFIRMED,
+            description=(
+                f"Patch-only signed int32 lifebar base override. Native-equivalent "
+                f"neutral value: {neutral}. Zero remains a valid explicit override."
+            ),
+        )
+        for meta_id, label, neutral in (
+            (86, "Perfect lifebar base override", 20),
+            (87, "Great lifebar base override", 16),
+            (88, "Good lifebar base override", 0),
+            (89, "Bad lifebar base override", -50),
+            (90, "Miss lifebar base override", -20),
+        )
     ),
     MetadataDefinition(
         111,
         "Cheer control",
         _DIVISION,
         evidence=Evidence.RUNTIME_CONFIRMED,
-        description="Patched full-range Division metadata; values are not collapsed to boolean.",
+        description=(
+            "Patched full-range Division metadata; values are not collapsed to boolean."
+        ),
     ),
     MetadataDefinition(
         120,
