@@ -76,6 +76,7 @@ class Phase11ProfileGateTests(unittest.TestCase):
         patched = window.profile_actions["nxa-step5-patched"]
         self.assertTrue(native.visible)
         self.assertTrue(native.isChecked())
+        self.assertEqual(native.text, "NXA")
         self.assertFalse(patched.visible)
         self.assertFalse(patched.isChecked())
         self.assertEqual(patched.text, "NXA-patched")
@@ -86,6 +87,7 @@ class Phase11ProfileGateTests(unittest.TestCase):
         install_phase11_profile_gate(window, executable_name="StepMX Studio.exe")
         native = window.profile_actions["nxa-native"]
         patched = window.profile_actions["nxa-step5-patched"]
+        self.assertEqual(native.text, "NXA")
         self.assertFalse(native.visible)
         self.assertFalse(native.isChecked())
         self.assertTrue(patched.visible)
