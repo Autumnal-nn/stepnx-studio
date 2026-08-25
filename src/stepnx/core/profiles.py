@@ -229,6 +229,14 @@ def _later_trailer_metadata() -> tuple[MetadataDefinition, ...]:
     )
 
 
+_NXA_NOTESKIN_REFERENCE = (
+    "NXA metadata IDs 900..905 select the six noteskin slots, but their payload "
+    "is an external skin reference/index rather than the slot number itself. "
+    "Official NXA charts use payload values above 5, so the authoring registry "
+    "must preserve the full unsigned value instead of clamping it to 0..5."
+)
+
+
 NATIVE_METADATA = (
     MetadataDefinition(0, "Speed", _HEADER_SPLIT, ValueKind.FLOAT32_BITS),
     MetadataDefinition(
@@ -279,10 +287,15 @@ NATIVE_METADATA = (
         35, "Zigzag", _HEADER_SPLIT, ValueKind.BITMASK, bits=(BitChoice(1, "Zigzag"),)
     ),
     *_unidentified_metadata((49, 64), _HEADER, "NXA"),
-    MetadataDefinition(900, "Default noteskin", _HEADER_SPLIT, minimum=0, maximum=5),
+    MetadataDefinition(
+        900, "Default noteskin", _HEADER_SPLIT, description=_NXA_NOTESKIN_REFERENCE
+    ),
     *(
         MetadataDefinition(
-            900 + player, f"P{player} noteskin", _HEADER_SPLIT, minimum=0, maximum=5
+            900 + player,
+            f"P{player} noteskin",
+            _HEADER_SPLIT,
+            description=_NXA_NOTESKIN_REFERENCE,
         )
         for player in range(1, 6)
     ),
