@@ -70,14 +70,20 @@ branch is still under active validation.
   `NXA-patched` while the internal registry key remains stable for compatibility.
 - **Final engine-profile authoring coverage**: the NXA, Fiesta 2, Prime 2, and
   patched-NXA registries now cover every metadata ID observed in the supplied
-  official corpora without guessing unknown semantics. Later-engine noteskins
-  use direct typed choices with official Random value 254; Header 1004 is the
-  proven gameplay-option reset; Prime 2 Header 1005 is Auto Velocity and Header
-  1007 is the AM.PASS card-only marker. Corpus-known fields without sufficient
-  runtime meaning, including the discarded EF2166 Division 1005–1007 family,
-  remain visible and raw-only. Localized high-word trailer IDs resolve through
-  their proven base trailer fields. Authoring validation now runs for every
-  installed engine profile instead of a stale two-profile whitelist.
+  official corpora without inventing semantics for unresolved raw fields. The
+  final audit separates NXA GM65's native simplified decoder from the Fiesta-
+  style decoder deliberately copied by the Step5 patch; removes later-only
+  Header 1000/1001/1002, GM35, Div11/12, and Div200 semantics from native NXA;
+  types native Div10/16 as the Cheer Level state pair; maps Fiesta GM67/68 to
+  Judge Hide/Judge by Note; records Fiesta-era H1005 Auto Velocity as strongly
+  inferred and H1006 as raw-only; types per-floor x110/x111 Rush/scroll values;
+  records the Fiesta Brain Div11/12 family and the co-op `1000+n = other-player
+  Div n` condition family; suppresses that O/X authoring in Prime 2; and isolates
+  all discarded `EF2166_D18_MINAMI` Split 0..4 / Division 1005..1007 placeholders
+  from inherited semantics. Composite trailer IDs preserve their full 32-bit ID,
+  resolve only through registered trailer base IDs, and expose the historical
+  language labels Korean/Spanish/Portuguese/Chinese/Japanese. The complete
+  decision record is `docs/PHASE11_METADATA_CLOSEOUT.md`.
 - **Official NX2 -> NXA importer audit**: all 2,125 supplied NX2 charts fall
   inside the supported NX10 source domain, and 2,111 same-path official NXA NX20
   successors provide conversion evidence. The comparison corrected Half Double
@@ -92,6 +98,13 @@ None inside the agreed Phase 11 scope.
 
 ## Deferred research, not a validation blocker
 
+- **NXA Brain Div43..49**: direct native consumers exist, but the supplied
+  official NXA corpus does not exercise these IDs. They remain explicitly
+  unknown/raw and non-authorable until a concrete editor/runtime need justifies
+  another executable pass.
+- **Fiesta 2 Brain Split11/12 and Header1006**: the corpus establishes their
+  presence and scope but not a safe typed meaning. They remain raw-only; this is
+  an intentional preservation state, not unfinished Phase 11 implementation.
 - **Matched independent KSF ↔ NOT originals**: the current KSF and NOT importers
   already have an implemented conservative model. The unavailable 13-column KSF
   material is expected to be downstream conversion material rather than an
@@ -110,9 +123,13 @@ None inside the agreed Phase 11 scope.
 
 ## Phase close-out
 
-- `README.md`, `docs/STATUS.md`, and `docs/ROADMAP.md` reflect SEE import,
-  compressed/staged waveform generation, guarded trailer relocation, workspace
-  tools, completed version profiles, and the frozen official NX2 import domain.
+- `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, and
+  `docs/PHASE11_METADATA_CLOSEOUT.md` reflect SEE import, compressed/staged
+  waveform generation, guarded trailer relocation, workspace tools, completed
+  version profiles, the final metadata registry, and the frozen official NX2
+  import domain.
 - No additional Phase 11 implementation or research dependency remains.
-- Run the strict Windows test gate on the final Phase 11 HEAD and perform the
-  final manual smoke tests before merging Phase 11.
+- The branch is ready to become a merge candidate after the strict Windows test
+  gate and manual closed-alpha smoke test are run on the final Phase 11 HEAD.
+- Do not merge solely from documentation state; the Windows gate remains the
+  final release/merge guard.
