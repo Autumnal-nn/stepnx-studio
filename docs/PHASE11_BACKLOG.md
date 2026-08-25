@@ -78,24 +78,41 @@ branch is still under active validation.
   remain visible and raw-only. Localized high-word trailer IDs resolve through
   their proven base trailer fields. Authoring validation now runs for every
   installed engine profile instead of a stale two-profile whitelist.
+- **Official NX2 -> NXA importer audit**: all 2,125 supplied NX2 charts fall
+  inside the supported NX10 source domain, and 2,111 same-path official NXA NX20
+  successors provide conversion evidence. The comparison corrected Half Double
+  row addressing, NX20 bank high bits, the no-register long-note family, and the
+  leading zero-BPM fallback. All 110 observed source note codes now have matching
+  successor evidence; Division projection is exact across 18,769 aligned blocks.
+  The full evidence record is in `docs/NX2_NXA_CONVERSION_ANALYSIS.md`.
 
 ## Pending implementation
 
 None inside the agreed Phase 11 scope.
 
-## Deferred validation, not an implementation blocker
+## Deferred research, not a validation blocker
 
-- **Matched KSF ↔ NOT pairs**: when equivalent originals become available,
-  compare row cuts, BUNKI boundaries, STARTTIME re-anchoring, and any historical
-  rounding/padding adjustments. The current KSF and NOT importers already have
-  an implemented model; this is a precision/equivalence gate.
+- **Matched independent KSF ↔ NOT originals**: the current KSF and NOT importers
+  already have an implemented conservative model. The unavailable 13-column KSF
+  material is expected to be downstream conversion material rather than an
+  independent authoring source, so it cannot serve as a stronger equivalence
+  oracle. If genuinely independent matched originals become available later,
+  they may still refine historical row cuts, BUNKI boundaries, STARTTIME
+  re-anchoring, or rounding/padding behavior; Phase 11 does not wait for them.
+- **Physical Lightmap output**: validating actual cabinet-lamp actuation requires
+  hardware not currently available. `LM.NX` structural generation/publication is
+  covered by the editor; reverse-engineering NXA's cabinet-light I/O can remain a
+  separate hardware research task and does not imply a dedicated Lightmap UI.
+- **World Max `mission.txt`**: supplied mission files remain useful reference
+  evidence for condition syntax, but mission topology/configuration is outside
+  the StepNX Studio document scope. NFO remains in scope because it is native
+  NX20 chart data.
 
 ## Phase close-out
 
-- `README.md`, `docs/STATUS.md`, and `docs/ROADMAP.md` have been refreshed to
-  reflect SEE import, compressed/staged waveform generation, guarded trailer
-  relocation, workspace tools, and the completed Phase 11 implementation scope.
-- Version-profile authoring semantics and official-corpus ID coverage are closed;
-  no additional Phase 11 profile implementation remains.
+- `README.md`, `docs/STATUS.md`, and `docs/ROADMAP.md` reflect SEE import,
+  compressed/staged waveform generation, guarded trailer relocation, workspace
+  tools, completed version profiles, and the frozen official NX2 import domain.
+- No additional Phase 11 implementation or research dependency remains.
 - Run the strict Windows test gate on the final Phase 11 HEAD and perform the
   final manual smoke tests before merging Phase 11.
