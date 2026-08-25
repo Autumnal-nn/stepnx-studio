@@ -55,6 +55,64 @@ class ProfileRegistryTests(unittest.TestCase):
             31,
         )
 
+    def test_later_profiles_override_direct_noteskins_and_version_flags(self) -> None:
+        fiesta_skin = metadata_definition("fiesta2", MetadataScope.HEADER, 900)
+        self.assertEqual(fiesta_skin.kind, ValueKind.ENUM)
+        self.assertIn(31, {choice.value for choice in fiesta_skin.choices})
+        self.assertEqual(
+            next(choice.label for choice in fiesta_skin.choices if choice.value == 254),
+            "Random",
+        )
+
+        prime_skin = metadata_definition("prime2", MetadataScope.HEADER, 900)
+        self.assertEqual(prime_skin.kind, ValueKind.ENUM)
+        self.assertIn(32, {choice.value for choice in prime_skin.choices})
+        self.assertEqual(
+            next(choice.label for choice in prime_skin.choices if choice.value == 254),
+            "Random",
+        )
+
+        reset = metadata_definition("fiesta2", MetadataScope.HEADER, 1004)
+        self.assertEqual(reset.label, "Reset gameplay options")
+        self.assertTrue(reset.authorable)
+        self.assertEqual(reset.minimum, 1)
+        self.assertEqual(reset.maximum, 1)
+        self.assertEqual(
+            metadata_definition("prime2", MetadataScope.HEADER, 1004).label,
+            "Reset gameplay options",
+        )
+
+        fiesta_1005 = metadata_definition("fiesta2", MetadataScope.HEADER, 1005)
+        self.assertFalse(fiesta_1005.authorable)
+        self.assertIn("Unidentified", fiesta_1005.label)
+
+        auto_velocity = metadata_definition("prime2", MetadataScope.HEADER, 1005)
+        self.assertEqual(auto_velocity.label, "Auto Velocity")
+        self.assertTrue(auto_velocity.authorable)
+        self.assertEqual(auto_velocity.minimum, 1)
+        self.assertEqual(auto_velocity.maximum, 1)
+
+        fiesta_1006 = metadata_definition("fiesta2", MetadataScope.HEADER, 1006)
+        self.assertFalse(fiesta_1006.authorable)
+        self.assertIn("Unidentified", fiesta_1006.label)
+
+        card_only = metadata_definition("prime2", MetadataScope.HEADER, 1007)
+        self.assertEqual(card_only.label, "Card-only (AM.PASS)")
+        self.assertTrue(card_only.authorable)
+        self.assertIsNone(metadata_definition("fiesta2", MetadataScope.HEADER, 1007))
+
+        for meta_id in (1005, 1006, 1007):
+            discarded = metadata_definition(
+                "prime2", MetadataScope.DIVISION, meta_id
+            )
+            self.assertFalse(discarded.authorable)
+            self.assertIn("discarded-mission", discarded.label)
+
+        capabilities = profile_capabilities("prime2")
+        self.assertIn("direct-noteskin-index", capabilities)
+        self.assertIn("auto-velocity", capabilities)
+        self.assertIn("ampass-card-only", capabilities)
+
     def test_unknown_brain_parameters_are_visible_but_not_authorable(self) -> None:
         definition = metadata_definition("nxa-native", MetadataScope.DIVISION, 43)
         self.assertFalse(definition.authorable)
@@ -220,6 +278,37 @@ class SemanticProjectionTests(unittest.TestCase):
             any(
                 issue.path == gm65_path and issue.code == "metadata.unknown"
                 for issue in report.issues
+            )
+        )
+
+    def test_fiesta2_and_prime2_run_full_authoring_validation(self) -> None:
+        base = parse_bytes(make_normal_nx20())
+
+        fiesta = replace(base, profile="fiesta2")
+        fiesta = InsertMetadata.from_ints(fiesta.stable_id, 1005, 1).apply(fiesta)
+        report = validate_authoring(fiesta)
+        self.assertFalse(any(issue.code == "profile.unknown" for issue in report.issues))
+        self.assertFalse(any(issue.code == "metadata.value-high" for issue in report.errors))
+        fiesta_1005_path = next(
+            item.path
+            for item in semantic_metadata(fiesta)
+            if item.scope is MetadataScope.HEADER and item.meta_id == 1005
+        )
+        self.assertFalse(
+            any(
+                issue.path == fiesta_1005_path and issue.code == "metadata.unknown"
+                for issue in report.issues
+            )
+        )
+
+        prime = replace(base, profile="prime2")
+        prime = InsertMetadata.from_ints(prime.stable_id, 1007, 2).apply(prime)
+        report = validate_authoring(prime)
+        self.assertFalse(any(issue.code == "profile.unknown" for issue in report.issues))
+        self.assertTrue(
+            any(
+                issue.code == "metadata.value-high" and "Card-only" in issue.message
+                for issue in report.errors
             )
         )
 
