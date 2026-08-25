@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-19
+Date: 2026-08-24
 
 Version: 0.1.0.dev0
 
@@ -93,7 +93,9 @@ Version: 0.1.0.dev0
 - Brain Shower field projection/editing and conditional-route visualization;
 - mission-condition parsing validated against all supplied NX2/NXA mission
   conditions, including profile-gated patched variables;
-- safe fixed-byte-length UTF-8 trailer-string editing for proven offset fields;
+- guarded UTF-8 trailer-string editing for proven offset fields, including
+  conservative length-changing relocation with downstream typed-offset and size-
+  marker repair;
 - previewed folder batches and explicit Qt NX/NFO mirror deployment workflow;
 - read-only `PreviewSnapshot` export with all route alternatives retained;
 - manual, internally randomized, and profile-aware all-perfect route resolution
@@ -144,14 +146,12 @@ without abandoning compact row storage.
 
 - structural row insertion/removal/move currently materializes the affected
   compact row collection; point edits remain sparse;
-- trailer string relocation remains disabled; only proven offsets containing
-  valid UTF-8 may be edited, and only at the same encoded byte length;
+- trailer fields whose offsets or encodings remain untyped are still raw-only;
+  length-changing edits are refused whenever an untyped value plausibly points
+  into the region that would move;
 - NX10 importer awaits validation against the complete official NX2 dump;
-- Phase 8 has passed its iterative Windows manual preview gate; its 19 automated
-  Qt tests still require the packaged Windows/PySide6 workflow before the
-  Windows artifact is accepted;
-- waveform extraction is intentionally limited to PCM WAV; Qt transport still
-  plays supported compressed formats without fabricating waveform data;
+- Phase 8 has passed its iterative Windows manual preview gate; its packaged
+  Windows/PySide6 artifact gate remains separate from the Phase 11 close-out;
 - ENC2 AUD support currently accepts the profile proven by `732.AUD`; the
   distinct profiles in `D91.AUD` and `508.AUD` remain unsupported;
 - cross-Split Block moves remain outside the current structural UI;
@@ -163,9 +163,10 @@ without abandoning compact row storage.
 
 ## Next gate
 
-1. validate the NX10 importer against the official NX2 corpus and NXA runtime;
-2. execute the generated blank `LM.NX` in NXA as an independent runtime gate;
-3. keep public release packaging disabled until the project is ready for a public build.
+1. run the strict Windows test gate and final Phase 11 manual smoke tests;
+2. validate the NX10 importer against the official NX2 corpus and NXA runtime;
+3. execute the generated blank `LM.NX` in NXA as an independent runtime gate;
+4. keep public release packaging disabled until the project is ready for a public build.
 
 The viewer audit accepts STEPEdit-pixi as a conditional layout reference and
 WebPrime as a behavioral reference only. Phase 8 uses a native Qt projection;
@@ -186,7 +187,30 @@ Additional delivered behavior includes:
 - patched-NXA SPECIAL/Number Block authoring and raw Source Slot/Brain fields;
 - fixed 640x480 external Gameplay Preview with arcade-calibrated scroll pitch;
 - Space Play/Pause with silent transport when chart audio is absent;
-- lazy AUD staging and strict sibling `<FolderName>.mp3` auto-load;
+- lazy AUD staging and sibling `<FolderName>.mp3` auto-load.
 
-SEE import remains deliberately disabled pending a verified decryption
-profile.
+## Phase 11 active branch
+
+Additional delivered behavior includes:
+
+- one-way STF/ST2, NOT/NOT5, STX, SEE, KSF, and UCS authoring import through a
+  reviewed multi-chart materialization flow that never overwrites existing NX;
+- NX file create/duplicate/delete tools and explicit Single/Double/Half Double
+  or custom field geometry editing;
+- corpus/runtime-backed NX20 sparse-hold behavior in the preview and timing-line-
+  aligned hold terminals in authoring;
+- sibling `<FolderName>.mp3`, sibling `A.mp3`, and case-insensitive in-folder
+  `Song.mp3` discovery with a manual-selection fallback;
+- asynchronous compressed/staged waveform decoding with stereo signed min/max,
+  a 16-frame base summary, and multiresolution viewport queries;
+- persistent local visual and noteskin preferences outside chart folders;
+- guarded length-changing trailer relocation exposed by the Qt editor;
+- profile capability gating that hides patched NXA from normal startup and uses
+  the concise `NXA-patched` UI label when the hidden capability is enabled;
+- optional all-Block Start Time delta editing, direct typed Inspector timing
+  edits, and authoring hold-head shaft underlay;
+- monotonic live audio position filtering plus a metronome voice pool, removing
+  duplicate ~one-poll ticks and sample-cutoff clicks observed during validation.
+
+No Phase 11 implementation item remains open in `PHASE11_BACKLOG.md`; the branch
+is awaiting its final strict Windows gate, manual smoke test, and merge close-out.
