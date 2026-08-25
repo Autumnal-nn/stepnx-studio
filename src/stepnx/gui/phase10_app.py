@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+import argparse
+from pathlib import Path
+
 
 def main(argv=None) -> int:
+    from stepnx.gui.phase11_profile_gate import available_profiles, default_profile
+
+    parser = argparse.ArgumentParser(description="Launch the StepNX Studio NX20 editor")
+    parser.add_argument("folder", nargs="?", type=Path, help="chart folder to open")
+    parser.add_argument(
+        "--profile",
+        choices=available_profiles(),
+        default=default_profile(),
+        help="engine semantics used for typed authoring and validation",
+    )
+    args = parser.parse_args(argv)
+
     # app._run imports these classes lazily. Install the extended authoring
-    # adapters before delegating to the base application entry point.
+    # adapters before delegating to the base application runtime.
     try:
         from PySide6.QtWidgets import QMainWindow
     except ImportError:
-        from stepnx.gui.app import main as base_main
-        return base_main(argv)
+        from stepnx.gui.app import _run as base_run
+        return base_run(args.folder, args.profile)
 
     import stepnx.gui.timeline_widget as timeline_module
     import stepnx.gui.timing_dialog as timing_module
@@ -49,7 +64,7 @@ def main(argv=None) -> int:
 
     QMainWindow.show = show_with_phase10
     try:
-        from stepnx.gui.app import main as base_main
-        return base_main(argv)
+        from stepnx.gui.app import _run as base_run
+        return base_run(args.folder, args.profile)
     finally:
         QMainWindow.show = original_show
