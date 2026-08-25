@@ -47,12 +47,28 @@ class ProfileRegistryTests(unittest.TestCase):
         capabilities = profile_capabilities("nxa-step5-patched")
         self.assertIn("brain-shower", capabilities)
         self.assertIn("condition-minlife", capabilities)
-        self.assertEqual(
-            metadata_definition("nxa-native", MetadataScope.HEADER, 900).maximum, 5
+        self.assertIsNone(
+            metadata_definition("nxa-native", MetadataScope.HEADER, 900).maximum
         )
         self.assertEqual(
             metadata_definition("nxa-step5-patched", MetadataScope.HEADER, 900).maximum,
             31,
+        )
+
+    def test_native_noteskin_slot_payload_is_not_clamped_to_slot_number(self) -> None:
+        document = parse_bytes(make_normal_nx20())
+        report = validate_authoring(document)
+        header_900_paths = {
+            item.path
+            for item in semantic_metadata(document)
+            if item.scope is MetadataScope.HEADER and item.meta_id == 900
+        }
+        self.assertTrue(header_900_paths)
+        self.assertFalse(
+            any(
+                issue.path in header_900_paths and issue.code == "metadata.value-high"
+                for issue in report.issues
+            )
         )
 
     def test_later_profiles_override_direct_noteskins_and_version_flags(self) -> None:
@@ -367,7 +383,8 @@ class SemanticProjectionTests(unittest.TestCase):
     def test_authoring_validation_is_profile_aware_without_rejecting_unknown_data(
         self,
     ) -> None:
-        native = parse_bytes(make_normal_nx20())
+        base = parse_bytes(make_normal_nx20())
+        native = InsertMetadata.from_ints(base.stable_id, 1002, 6).apply(base)
         report = validate_authoring(native)
         self.assertFalse(report.is_valid)
         self.assertTrue(
@@ -377,7 +394,7 @@ class SemanticProjectionTests(unittest.TestCase):
             any(issue.code == "metadata.unknown" for issue in report.warnings)
         )
 
-        patched = replace(native, profile="nxa-step5-patched")
+        patched = replace(base, profile="nxa-step5-patched")
         patched = InsertMetadata.from_ints(patched.stable_id, 65, 400).apply(patched)
         report = validate_authoring(patched)
         self.assertTrue(report.is_valid)
