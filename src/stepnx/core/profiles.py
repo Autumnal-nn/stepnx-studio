@@ -127,8 +127,46 @@ def pack_dm120(mode: int, weight: int) -> int:
     return mode | ((weight & 0xFFFF) << 16)
 
 
+_HEADER = frozenset((MetadataScope.HEADER,))
 _HEADER_SPLIT = frozenset((MetadataScope.HEADER, MetadataScope.SPLIT))
 _DIVISION = frozenset((MetadataScope.DIVISION,))
+
+
+def _direct_noteskin_metadata(
+    maximum: int, engine_label: str
+) -> tuple[MetadataDefinition, ...]:
+    choices = tuple(ValueChoice(value, f"{value:02d}") for value in range(maximum + 1)) + (
+        ValueChoice(254, "Random"),
+    )
+    description = (
+        f"{engine_label} uses direct noteskin IDs 00..{maximum:02d}; "
+        "254 is the Random noteskin value used by official charts. Unknown raw "
+        "values remain preservable even though the typed editor exposes only the "
+        "proven choices."
+    )
+    return (
+        MetadataDefinition(
+            900,
+            "Default noteskin",
+            _HEADER_SPLIT,
+            ValueKind.ENUM,
+            Evidence.RUNTIME_CONFIRMED,
+            description=description,
+            choices=choices,
+        ),
+        *(
+            MetadataDefinition(
+                900 + player,
+                f"P{player} noteskin",
+                _HEADER_SPLIT,
+                ValueKind.ENUM,
+                Evidence.RUNTIME_CONFIRMED,
+                description=description,
+                choices=choices,
+            )
+            for player in range(1, 6)
+        ),
+    )
 
 
 NATIVE_METADATA = (
@@ -392,6 +430,114 @@ NATIVE_METADATA = (
 )
 
 
+FIESTA2_METADATA = (
+    *_direct_noteskin_metadata(31, "Fiesta 2"),
+    MetadataDefinition(
+        1004,
+        "Reset gameplay options",
+        _HEADER,
+        ValueKind.ENUM,
+        Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Presence resets the proven option state to the Fiesta-era baseline: "
+            "Rush off, speed x2, noteskin 0, local modifier bits cleared, and the "
+            "propagated Under Attack/BGA Off/Exceed/NX/Drop/Runner bits cleared. "
+            "Official charts encode the flag as value 1."
+        ),
+        minimum=1,
+        maximum=1,
+        choices=(ValueChoice(1, "Reset"),),
+    ),
+    MetadataDefinition(
+        1005,
+        "Unidentified Fiesta 2 header flag 1005",
+        _HEADER,
+        evidence=Evidence.UNIDENTIFIED,
+        description=(
+            "Observed in the official Fiesta 2 corpus with value 1. The supplied "
+            "Fiesta 2 executable has no dedicated Header-1005 handler; Prime 2 "
+            "reuses this ID with proven Auto Velocity semantics."
+        ),
+        authorable=False,
+    ),
+    MetadataDefinition(
+        1006,
+        "Unidentified Fiesta 2 header flag 1006",
+        _HEADER,
+        evidence=Evidence.UNIDENTIFIED,
+        description=(
+            "Observed in the official Fiesta 2 corpus with value 1, without a "
+            "dedicated handler in the supplied executable. Preserved raw."
+        ),
+        authorable=False,
+    ),
+    MetadataDefinition(
+        1006,
+        "Unidentified Fiesta 2 Division field 1006",
+        _DIVISION,
+        evidence=Evidence.UNIDENTIFIED,
+        description=(
+            "Rare official-corpus Division field. The observed Fiesta 2 instance "
+            "duplicates the value of Division 6; no dedicated runtime meaning is "
+            "proven, so it remains raw-only."
+        ),
+        authorable=False,
+    ),
+)
+
+
+PRIME2_METADATA = (
+    *_direct_noteskin_metadata(32, "Prime 2"),
+    MetadataDefinition(
+        1005,
+        "Auto Velocity",
+        _HEADER,
+        ValueKind.ENUM,
+        Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Enables Prime-era Auto Velocity semantics: scroll velocity targets an "
+            "absolute final speed rather than selecting a BPM multiplier. Official "
+            "Prime 2 charts encode the flag as value 1."
+        ),
+        minimum=1,
+        maximum=1,
+        choices=(ValueChoice(1, "Enabled"),),
+    ),
+    MetadataDefinition(
+        1007,
+        "Card-only (AM.PASS)",
+        _HEADER,
+        ValueKind.ENUM,
+        Evidence.OFFICIAL_CORPUS,
+        description=(
+            "Marks Prime 2 charts that were card-exclusive through AM.PASS rather "
+            "than ordinary AM.PASS item-shop unlocks. The 83 official NX instances "
+            "correlate 1:1 with LIST chart-record bit 0x00000100; official update "
+            "history independently identifies the same charts as card-only."
+        ),
+        minimum=1,
+        maximum=1,
+        choices=(ValueChoice(1, "Card-only"),),
+    ),
+    *(
+        MetadataDefinition(
+            meta_id,
+            f"Unidentified discarded-mission Division field {meta_id}",
+            _DIVISION,
+            evidence=Evidence.UNIDENTIFIED,
+            description=(
+                "Observed only in discarded EF2166_D18_MINAMI.NFO content that is "
+                "absent from the published Prime 2 Quest Zone/LIST. This Division "
+                "field is deliberately not assigned the semantics of a same-number "
+                "Header field."
+            ),
+            authorable=False,
+        )
+        for meta_id in (1005, 1006, 1007)
+    ),
+)
+
+
 PATCHED_METADATA = (
     MetadataDefinition(
         65,
@@ -454,11 +600,13 @@ PROFILES = {
         "fiesta2",
         "Pump It Up Fiesta 2",
         "nxa-native",
-        (),
+        FIESTA2_METADATA,
         frozenset(
             {
                 "later-nx20-trailer",
                 "items-21-23",
+                "direct-noteskin-index",
+                "header-reset-options",
             }
         ),
     ),
@@ -466,8 +614,13 @@ PROFILES = {
         "prime2",
         "Pump It Up Prime 2",
         "fiesta2",
-        (),
-        frozenset(),
+        PRIME2_METADATA,
+        frozenset(
+            {
+                "auto-velocity",
+                "ampass-card-only",
+            }
+        ),
     ),
     "nxa-step5-patched": EngineProfile(
         "nxa-step5-patched",
