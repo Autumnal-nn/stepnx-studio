@@ -37,6 +37,13 @@ def default_profile(executable_name: str | None = None) -> str:
     return available_profiles(executable_name)[0]
 
 
+def _present(action, text: str, tooltip: str) -> None:
+    action.setText(text)
+    set_tooltip = getattr(action, "setToolTip", None)
+    if callable(set_tooltip):
+        set_tooltip(tooltip)
+
+
 def install_phase11_profile_gate(window, *, executable_name: str | None = None) -> None:
     actions = getattr(window, "profile_actions", None)
     if not isinstance(actions, dict):
@@ -49,16 +56,14 @@ def install_phase11_profile_gate(window, *, executable_name: str | None = None) 
     if native is None or fiesta is None or prime is None or patched is None:
         return
 
-    native.setText("NXA")
-    native.setToolTip("NX Absolute native engine semantics.")
-    fiesta.setText("Fiesta")
-    fiesta.setToolTip("Fiesta / Fiesta EX / Fiesta 2 engine family.")
-    prime.setText("Prime+")
-    prime.setToolTip(
-        "Modern engine family: Prime / Prime 2 / XX / Phoenix / R!SE and compatible successors."
+    _present(native, "NXA", "NX Absolute native engine semantics.")
+    _present(fiesta, "Fiesta", "Fiesta / Fiesta EX / Fiesta 2 engine family.")
+    _present(
+        prime,
+        "Prime+",
+        "Modern engine family: Prime / Prime 2 / XX / Phoenix / R!SE and compatible successors.",
     )
-    patched.setText("NXA-patched")
-    patched.setToolTip("NXA with the Step5 patch extensions enabled.")
+    _present(patched, "NXA-patched", "NXA with the Step5 patch extensions enabled.")
 
     enabled = executable_enables_patched_profile(executable_name)
 
