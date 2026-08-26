@@ -7,6 +7,7 @@ from PySide6.QtGui import QAction, QColor, QKeySequence, QPen
 
 from stepnx.authoring.audio import AudioAlignment
 from stepnx.authoring.selection import CellSelection
+from stepnx.gui.phase11_fast_notes import _row_index
 
 
 def _menu_by_name(window, name: str):
@@ -32,6 +33,82 @@ def _selection_rect(geometry, lane: int, row_y: float, row_height: float) -> QRe
 
     rect = QRectF(*geometry.note_rect(lane, row_y, row_height))
     return rect.adjusted(-1.0, -1.0, 1.0, 1.0)
+
+
+def _selection_outline_rects(
+    geometry, segment, selection: CellSelection
+) -> tuple[QRectF, ...]:
+    """Collapse a complete rectangular selection to its external border.
+
+    Shift selection creates every row/lane pair inside its rectangle. Drawing a
+    box for every cell produces a dense ladder at small row heights. A complete
+    rectangle therefore becomes one outline. Sparse Ctrl selections remain
+    individual targets so the drawing never implies unselected cells are part
+    of the selection.
+    """
+
+    if not selection.targets:
+        return ()
+
+    rows = segment.block.rows
+    row_indexes: dict[int, int] = {}
+    mapped: list[tuple[int, int]] = []
+    for target in selection.targets:
+        row_id = int(target.row_id)
+        index = row_indexes.get(row_id)
+        if index is None:
+            found = _row_index(rows, row_id)
+            if found is None:
+                continue
+            index = int(found)
+            row_indexes[row_id] = index
+        mapped.append((index, int(target.lane)))
+
+    if not mapped:
+        return ()
+
+    selected_rows = sorted({index for index, _lane in mapped})
+    selected_lanes = sorted({lane for _index, lane in mapped})
+    rows_contiguous = selected_rows == list(
+        range(selected_rows[0], selected_rows[-1] + 1)
+    )
+    lanes_contiguous = selected_lanes == list(
+        range(selected_lanes[0], selected_lanes[-1] + 1)
+    )
+    complete_rectangle = (
+        rows_contiguous
+        and lanes_contiguous
+        and len(mapped) == len(selected_rows) * len(selected_lanes)
+    )
+
+    if complete_rectangle:
+        first = _selection_rect(
+            geometry,
+            selected_lanes[0],
+            segment.y_for_row(selected_rows[0]),
+            segment.row_height,
+        )
+        last = _selection_rect(
+            geometry,
+            selected_lanes[-1],
+            segment.y_for_row(selected_rows[-1]),
+            segment.row_height,
+        )
+        left = min(first.left(), last.left())
+        top = min(first.top(), last.top())
+        right = max(first.right(), last.right())
+        bottom = max(first.bottom(), last.bottom())
+        return (QRectF(left, top, right - left, bottom - top),)
+
+    return tuple(
+        _selection_rect(
+            geometry,
+            lane,
+            segment.y_for_row(row_index),
+            segment.row_height,
+        )
+        for row_index, lane in sorted(mapped)
+    )
 
 
 def _timing_line_row_hit(layout, content_y: float):
@@ -131,32 +208,24 @@ def _install_timing_line_selection() -> None:
             original_draw_segment(self, painter, visible)
             return
 
-        # Suppress the legacy row-cell rectangle while the normal segment is
-        # painted, then draw the selection against the same note_rect geometry
-        # used by timing-line-centered arrows. Empty cells still get the same
-        # visible target, so selection remains meaningful without note artwork.
+        # Suppress the legacy row-cell rectangles while the normal segment is
+        # painted, then draw only the external selection outline against the
+        # timing-line-centered note geometry. Empty cells use the same target.
         self._selection = CellSelection()
         try:
             original_draw_segment(self, painter, visible)
         finally:
             self._selection = selection
 
-        segment = visible.segment
-        geometry = self._geometry
-        lanes_by_row: dict[int, list[int]] = {}
-        for target in selection.targets:
-            lanes_by_row.setdefault(int(target.row_id), []).append(int(target.lane))
-
+        outlines = _selection_outline_rects(
+            self._geometry, visible.segment, selection
+        )
+        if not outlines:
+            return
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor("#f4d35e"), 2.0))
-        for row_index in range(visible.first_row, visible.last_row):
-            row = segment.block.rows[row_index]
-            lanes = lanes_by_row.get(int(row.stable_id))
-            if not lanes:
-                continue
-            y = segment.y_for_row(row_index)
-            for lane in sorted(lanes):
-                painter.drawRect(_selection_rect(geometry, lane, y, segment.row_height))
+        for rect in outlines:
+            painter.drawRect(rect)
 
     timeline_class._draw_segment = draw_segment_with_centered_selection
     timeline_class._phase11_timing_line_selection = True
