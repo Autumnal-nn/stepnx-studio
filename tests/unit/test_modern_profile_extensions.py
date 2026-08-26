@@ -35,18 +35,16 @@ class ModernProfileExtensionTests(unittest.TestCase):
     def test_step_artist_projects_and_edits_through_trailer_editor(self) -> None:
         document = parse_bytes(make_normal_nx20(), profile="prime2")
         first = document.header_metadata[0]
-        document = replace(
-            document,
-            header_metadata=(
-                replace(
-                    first,
-                    meta_id=RawU32.from_value(1008),
-                    value=RawU32.from_value(0),
-                    span=None,
-                ),
-                *document.header_metadata[1:],
-            ),
+        step_artist = replace(
+            first,
+            meta_id=RawU32.from_value(1008),
+            value=RawU32.from_value(0),
+            span=None,
         )
+        # Keep this relocation fixture free of unrelated raw values that could
+        # legitimately trigger the conservative ambiguous-pointer guard.
+        document = replace(document, header_metadata=(step_artist,))
+
         field = trailer_field_definition("prime2", 1008)
         self.assertIsNotNone(field)
         self.assertEqual(field.label, "Step Artist (XX and beyond)")
