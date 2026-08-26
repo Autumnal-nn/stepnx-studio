@@ -10,8 +10,9 @@ try:
 
     from stepnx.authoring.snapshot import create_authoring_snapshot
     from stepnx.authoring.structure import StructureTarget, insert_empty_split_after
-    from stepnx.codecs.nx20 import parse_bytes
+    from stepnx.codecs.nx20 import parse_bytes, serialize
     from stepnx.core.commands import SetNoteAt
+    from stepnx.gui.phase11_fast_notes import _FastSetNoteAt
     from stepnx.gui.phase11_feedback import (
         _minimum_reference_rows,
         _resize_split_boundary_document,
@@ -41,6 +42,20 @@ class Phase11FeedbackTests(unittest.TestCase):
         )
         document = command.apply(document)
         return document, upper.stable_id, reference.stable_id
+
+    def test_indexed_note_edit_is_byte_equivalent_to_core_command(self) -> None:
+        source = parse_bytes(make_normal_nx20(), row_storage="rich")
+        block = source.splits[0].blocks[0]
+        for row in block.rows:
+            with self.subTest(row=row.stable_id):
+                core = SetNoteAt(
+                    row.stable_id, 0, b"\x03\x03\x09\x00"
+                ).apply(source)
+                fast = _FastSetNoteAt(
+                    row.stable_id, 0, b"\x03\x03\x09\x00"
+                ).apply(source)
+                self.assertEqual(serialize(fast), serialize(core))
+                self.assertEqual(fast.next_stable_id, core.next_stable_id)
 
     def test_fast_snapshot_patch_replaces_only_changed_block_rows(self) -> None:
         document = parse_bytes(make_normal_nx20(), row_storage="rich")
