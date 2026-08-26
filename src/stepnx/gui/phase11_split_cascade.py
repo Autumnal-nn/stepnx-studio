@@ -95,11 +95,23 @@ def install_phase11_split_cascade(window) -> None:
         return
 
     def commit_with_suffix_message(widget, split_id: int, block_id: int, rows: int):
-        result = original_commit(widget, split_id, block_id, rows)
-        window.statusBar().showMessage(
-            "Moved Split boundary; all downstream Block Start Times were shifted equally",
-            5000,
+        document_index = window.widget_documents.get(widget)
+        before = (
+            None
+            if document_index is None
+            else window.sessions[document_index].current
         )
+        result = original_commit(widget, split_id, block_id, rows)
+        after = (
+            None
+            if document_index is None
+            else window.sessions[document_index].current
+        )
+        if before is not None and after is not before:
+            window.statusBar().showMessage(
+                "Moved Split boundary; all downstream Block Start Times were shifted equally",
+                5000,
+            )
         return result
 
     window._phase11_commit_split_boundary = commit_with_suffix_message
