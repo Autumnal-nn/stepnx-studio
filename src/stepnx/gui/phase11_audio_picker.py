@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PySide6.QtGui import QAction
@@ -15,8 +16,17 @@ _AUDIO_DIALOG_FILTER = (
     "*.flac *.FLAC "
     "*.ogg *.OGG "
     "*.mp2 *.MP2"
-    ");;All files (*)"
+    ");;AUD (*.aud *.AUD *.a *.A);;All files (*)"
 )
+
+
+def _audio_dialog_options(platform: str | None = None):
+    """Use Qt's own file dialog on Linux so name globs stay deterministic."""
+
+    selected = sys.platform if platform is None else platform
+    if selected.startswith("linux"):
+        return QFileDialog.Option.DontUseNativeDialog
+    return QFileDialog.Option(0)
 
 
 def _choose_audio(window) -> None:
@@ -26,6 +36,7 @@ def _choose_audio(window) -> None:
         "Select chart audio",
         initial,
         _AUDIO_DIALOG_FILTER,
+        options=_audio_dialog_options(),
     )
     if selected:
         window._load_audio(Path(selected))
