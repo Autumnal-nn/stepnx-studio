@@ -33,6 +33,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase10_timing import Phase10BlockTimingDialog
     from stepnx.gui.phase10_preview import Phase10GameplayPreviewWidget
     from stepnx.gui.phase11_authoring_polish import install_phase11_authoring_polish
+    from stepnx.gui.phase11_feedback import install_phase11_feedback
     from stepnx.gui.phase11_import import install_phase11_import
     from stepnx.gui.phase11_nx10_materialization import install_phase11_nx10_materialization
     from stepnx.gui.phase11_preferences import install_phase11_preferences
@@ -62,6 +63,7 @@ def main(argv=None) -> int:
             install_phase11_trailer_edit(self)
             install_phase11_nx10_materialization(self)
             install_phase11_preferences(self)
+            install_phase11_feedback(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10
