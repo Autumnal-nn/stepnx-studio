@@ -3,9 +3,13 @@ from __future__ import annotations
 import unittest
 
 try:
-    from stepnx.gui.audio_transport import _accept_transport_position
+    from stepnx.gui.audio_transport import (
+        _accept_transport_position,
+        _metronome_voice_count,
+    )
 except ImportError as exc:
     _accept_transport_position = None
+    _metronome_voice_count = None
     QT_UNAVAILABLE = str(exc)
 else:
     QT_UNAVAILABLE = ""
@@ -44,6 +48,13 @@ class AudioTransportJitterTests(unittest.TestCase):
                 previous = candidate
                 accepted.append(candidate)
         self.assertEqual(accepted, [1008, 1012])
+
+    def test_linux_limits_qsoundeffect_voice_pool(self) -> None:
+        self.assertEqual(_metronome_voice_count("linux"), 2)
+        self.assertEqual(_metronome_voice_count("linux2"), 2)
+
+    def test_windows_keeps_existing_voice_pool(self) -> None:
+        self.assertEqual(_metronome_voice_count("win32"), 8)
 
 
 if __name__ == "__main__":
