@@ -352,12 +352,16 @@ def _boundary_hit(widget, event):
         return None
     content_x = event.position().x() + widget.horizontalScrollBar().value()
     content_y = event.position().y() + widget.verticalScrollBar().value()
-    # Restrict the resize affordance to the actual note grid. The right-side
-    # timing gutter retains its existing click/double-click/context behavior.
-    grid_width = widget.snapshot.columns * widget._layout.lane_width
-    if content_x < 0 or content_x > grid_width:
+    # Restrict the resize affordance to the actual note grid. TimelineLayout
+    # owns its dimensions through ``geometry``; using a non-existent direct
+    # ``lane_width`` attribute here used to raise AttributeError before every
+    # ordinary left-click could reach Phase10TimelineWidget.mousePressEvent.
+    layout = widget._layout
+    grid_left = layout.geometry.ruler_width
+    grid_right = layout.chart_width
+    if content_x < grid_left or content_x > grid_right:
         return None
-    for segment in widget._layout.segments[:-1]:
+    for segment in layout.segments[:-1]:
         if abs(content_y - segment.bottom) <= _BOUNDARY_TOLERANCE_PX:
             return segment, content_y
     return None
