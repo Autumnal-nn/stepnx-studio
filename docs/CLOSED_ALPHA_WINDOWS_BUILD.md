@@ -148,9 +148,10 @@ Run the packaged executable, not the editable Python checkout. At minimum verify
 4. inspect Header, Split, and Division metadata and confirm unknown/raw entries remain visible but disabled;
 5. inspect a later-generation composite Header ID and confirm its field label includes the historical language slot while the full numeric ID is retained;
 6. edit a disposable copy, save it, reopen it, and confirm expected round-trip behavior;
-7. exercise waveform/playback with WAV, MP3, and a real uppercase `.AUD` song. Confirm `.AUD` appears in both the manual `Select audio…` picker and the `Song audio not found` prompt path without switching to `All files`, then confirm the staged AUD playback/waveform path works. The transport calls the generic ENC1/ENC2 decoder directly; NXA song coverage is primarily ENC2, but the packaged path must not depend on the legacy ENC2-only alias;
-8. exercise one NX10/legacy import and one Save All workflow;
-9. close/reopen the app to verify persisted local rendering preferences do not alter chart data.
+7. exercise waveform/playback with WAV, MP3, and a real uppercase `.AUD` song through both audio-picker paths; staged `.AUD` playback must use the generic ENC1/ENC2 decoder path;
+8. after the `.AUD` waveform is ready, switch audio or close the app and confirm no new persistent `stepnx-audio-*` temporary directory remains;
+9. exercise one NX10/legacy import and one Save All workflow;
+10. close/reopen the app to verify persisted local rendering preferences do not alter chart data.
 
 Do not perform release smoke tests on irreplaceable corpus files. Use disposable copies.
 
