@@ -120,6 +120,32 @@ class AudWrapperTests(unittest.TestCase):
             path.write_bytes(_enc2_fixture(payload, unknown))
             self.assertEqual(decode_enc2_aud(path), payload)
 
+    def test_uniform_tail_padding_recovers_unknown_enc2_profile(self) -> None:
+        payload = (
+            b"ID3\x04\x00\x00\x00\x00\x00\x10"
+            b"TXXX\x00\x00\x00\x06\x00\x00other"
+            + bytes(range(1, 97))
+            + b"\xaa" * 160
+        )
+        unknown = bytes.fromhex("31415926535897932384626433832795")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "uniform-tail.AUD"
+            path.write_bytes(_enc2_fixture(payload, unknown))
+            self.assertEqual(decode_enc2_aud(path), payload)
+
+    def test_leading_zero_frame_padding_is_preserved_and_accepted(self) -> None:
+        payload = (
+            b"\x00" * 576
+            + b"\xff\xfb\xb4\x04"
+            + bytes(range(1, 97))
+            + b"\x55" * 160
+        )
+        unknown = bytes.fromhex("27182818284590452353602874713526")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "zero-prefix.AUD"
+            path.write_bytes(_enc2_fixture(payload, unknown))
+            self.assertEqual(decode_enc2_aud(path), payload)
+
     def test_unknown_profile_without_recovery_evidence_remains_rejected(self) -> None:
         payload = (
             b"ID3\x04\x00\x00\x00\x00\x00\x10"
