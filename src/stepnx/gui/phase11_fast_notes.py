@@ -1,59 +1,71 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import replace
 
 from stepnx.core.errors import ModelInvariantError
-from stepnx.core.model import EmptyRow, LightmapRow, NoteCell, NoteRow, PackedNoteRow
+from stepnx.core.model import (
+    CompactRows,
+    EmptyRow,
+    LightmapRow,
+    NoteCell,
+    NoteRow,
+    OverlayRows,
+    PackedNoteRow,
+)
 
 
-# Values are structural coordinates only, never object references. The cache is
-# therefore safe across immutable note-edit document snapshots. Every hit is
-# validated against the current document before use; structure edits that move
-# a row simply cause a rebuild on the next access.
-_ROW_LOCATIONS: dict[tuple[object, ...], dict[int, tuple[int, int, int]]] = {}
+_ACTIVE_BLOCK_ID: int | None = None
 
 
-def _document_key(document) -> tuple[object, ...]:
-    return (
-        document.source_name,
-        document.stable_id,
-        int(document.columns.value),
-        len(document.splits),
-    )
+def _compact_row_index(rows: CompactRows, row_id: int) -> int | None:
+    # CompactRows allocates stable IDs monotonically. Cell IDs may appear
+    # between row IDs, so a range test alone is insufficient; binary-search the
+    # parser's row-id table and verify an exact match without materializing rows.
+    index = bisect_left(rows._row_ids, row_id)
+    if index < len(rows._row_ids) and int(rows._row_ids[index]) == row_id:
+        return index
+    return None
 
 
-def _build_row_locations(document) -> dict[int, tuple[int, int, int]]:
-    locations: dict[int, tuple[int, int, int]] = {}
+def _row_index(rows, row_id: int) -> int | None:
+    if isinstance(rows, CompactRows):
+        return _compact_row_index(rows, row_id)
+    if isinstance(rows, OverlayRows):
+        # Overlay replacements preserve the row's stable identity, so the base
+        # compact index remains valid after arbitrarily many sparse note edits.
+        return _compact_row_index(rows.base, row_id)
+    for index, row in enumerate(rows):
+        if row.stable_id == row_id:
+            return index
+    return None
+
+
+def _locate_row(
+    document,
+    row_id: int,
+    block_hint: int | None = None,
+) -> tuple[int, int, int]:
+    hint = _ACTIVE_BLOCK_ID if block_hint is None else block_hint
+    if hint is not None:
+        for split_index, split in enumerate(document.splits):
+            for block_index, block in enumerate(split.blocks):
+                if block.stable_id != hint:
+                    continue
+                row_index = _row_index(block.rows, row_id)
+                if row_index is not None:
+                    return split_index, block_index, row_index
+                break
+
+    # Fallback for direct/test use or after an unexpected structure change.
+    # Compact/overlay Blocks still use O(log rows) lookup and never materialize
+    # their row tables during this search.
     for split_index, split in enumerate(document.splits):
         for block_index, block in enumerate(split.blocks):
-            for row_index, row in enumerate(block.rows):
-                locations[row.stable_id] = (split_index, block_index, row_index)
-    _ROW_LOCATIONS[_document_key(document)] = locations
-    return locations
-
-
-def _cached_location(document, row_id: int) -> tuple[int, int, int] | None:
-    locations = _ROW_LOCATIONS.get(_document_key(document))
-    location = None if locations is None else locations.get(row_id)
-    if location is None:
-        return None
-    split_index, block_index, row_index = location
-    try:
-        row = document.splits[split_index].blocks[block_index].rows[row_index]
-    except IndexError:
-        return None
-    return location if row.stable_id == row_id else None
-
-
-def _locate_row(document, row_id: int) -> tuple[int, int, int]:
-    location = _cached_location(document, row_id)
-    if location is not None:
-        return location
-    locations = _build_row_locations(document)
-    try:
-        return locations[row_id]
-    except KeyError as exc:
-        raise ModelInvariantError(f"row stable ID {row_id} was not found") from exc
+            row_index = _row_index(block.rows, row_id)
+            if row_index is not None:
+                return split_index, block_index, row_index
+    raise ModelInvariantError(f"row stable ID {row_id} was not found")
 
 
 def _fast_find_row(document, row_id: int):
@@ -74,12 +86,20 @@ def _rich_cells(row) -> list[NoteCell]:
     raise ModelInvariantError("row is not a playable note row")
 
 
+def _replace_one_row(rows, row_index: int, replacement):
+    if isinstance(rows, (CompactRows, OverlayRows)):
+        return rows.with_row(row_index, replacement)
+    edited = list(rows)
+    edited[row_index] = replacement
+    return tuple(edited)
+
+
 class _FastSetNoteAt:
-    """Interactive SetNoteAt using a validated row-location index.
+    """Interactive SetNoteAt with Block hinting and sparse row replacement.
 
     The public/core SetNoteAt deliberately remains generic and search-based.
     This adapter is installed only into the Phase10 interactive layer, where
-    mouse hit-testing already gives us a stable row identity and latency matters.
+    mouse hit-testing already gives us a Block identity and latency matters.
     """
 
     def __init__(self, row_id: int, lane: int, raw: bytes):
@@ -126,9 +146,10 @@ class _FastSetNoteAt:
         else:
             replacement = NoteRow(self.row_id, tuple(cells), None)
 
-        rows = list(block.rows)
-        rows[row_index] = replacement
-        block = replace(block, rows=tuple(rows))
+        block = replace(
+            block,
+            rows=_replace_one_row(block.rows, row_index, replacement),
+        )
         blocks = list(split.blocks)
         blocks[block_index] = block
         split = replace(split, blocks=tuple(blocks))
@@ -150,3 +171,29 @@ def install_phase11_fast_note_index(window) -> None:
 
     phase10_module._find_row = _fast_find_row
     phase10_module.SetNoteAt = _FastSetNoteAt
+
+    # Keep the Block identity from timeline hit-testing alive for the complete
+    # click/hold transaction, including SequenceCommand erase/hold operations.
+    original_click = window._phase10_click
+    original_hold = window._phase10_hold
+
+    def indexed_click(widget, hit):
+        global _ACTIVE_BLOCK_ID
+        previous = _ACTIVE_BLOCK_ID
+        _ACTIVE_BLOCK_ID = hit[0].block.stable_id
+        try:
+            return original_click(widget, hit)
+        finally:
+            _ACTIVE_BLOCK_ID = previous
+
+    def indexed_hold(widget, start, end):
+        global _ACTIVE_BLOCK_ID
+        previous = _ACTIVE_BLOCK_ID
+        _ACTIVE_BLOCK_ID = start[0].block.stable_id
+        try:
+            return original_hold(widget, start, end)
+        finally:
+            _ACTIVE_BLOCK_ID = previous
+
+    window._phase10_click = indexed_click
+    window._phase10_hold = indexed_hold
