@@ -1,12 +1,20 @@
 # Phase 11 metadata closeout
 
-Date: 2026-08-25
+Date: 2026-08-26
 
 Status: semantic registry frozen for the Phase 11 merge candidate. Unknown/raw fields listed below are deliberate preservation cases, not missing implementation.
 
 ## Evidence policy
 
-StepNX Studio keeps engine profiles separate. A same-number field may have different meaning or encoding in NXA, Fiesta 2, Prime 2, or the NXA Step5 patch. Ordered metadata, duplicates, unknown IDs, unknown values, and the full 32-bit metadata ID remain lossless even when no typed editor is offered.
+StepNX Studio uses three compact public engine-family profiles while keeping stable internal keys for compatibility:
+
+- `NXA` (`nxa-native`): NX Absolute native semantics;
+- `Fiesta` (`fiesta2`): Fiesta / Fiesta EX / Fiesta 2;
+- `Prime+` (`prime2`): Prime / Prime 2 / XX / Phoenix / R!SE and compatible modern successors.
+
+The hidden `NXA-patched` profile remains an overlay for the Step5 engine patch. A separate R!SE profile is intentionally unnecessary: the supplied R!SE dump retains the modern NX20 semantics represented by Prime+, with Header1008 as the only newly observed Header field versus the previous NXA/Fiesta2/Prime2 baseline.
+
+A same-number field may have different meaning or encoding across engine families or the NXA Step5 patch. Ordered metadata, duplicates, unknown IDs, unknown values, and the full 32-bit metadata ID remain lossless even when no typed editor is offered.
 
 Evidence labels used by the registry:
 
@@ -85,7 +93,7 @@ This is the extended VJ/XJ/UJ-capable behavior and must not leak back into `nxa-
 - 120: judgment effect/multiplier encoding;
 - 200: per-block style override (`0` preserve, `1` Versus, `2` Double, `3` Single/collapsed).
 
-## Fiesta 2
+## Fiesta family
 
 ### Header differences
 
@@ -146,14 +154,17 @@ Evidence anchors:
 
 Fiesta 2 uses Division200 extensively as the per-block style override. The NXA Step5 implementation is a direct port of this later behavior.
 
-## Prime 2
+## Prime+ modern family
 
 - Header19 retains the later Random Skin selector family.
 - Header1005 = Auto Velocity using an **absolute final scroll-velocity target**, rather than the Fiesta-era value-1 enable-flag interpretation.
 - Header1007 = Card-only / AM.PASS.
+- Header1008 = **Step Artist (XX and beyond)**. This field is absent from Prime/Prime 2 because the player-visible Step Artist credit was introduced later. In the supplied R!SE dump, the executable names it `mpStepArtist`; all observed Header1008 payloads are trailer-relative offsets and resolve to NUL-terminated UTF-8 Step Artist strings. It is therefore registered in Prime+ as a typed trailer field rather than creating a R!SE-specific profile.
 - mission difficulty `1101/1201/1301/1401` uses Arcade-comparable chart levels rather than Fiesta's 1..8 mission scale.
-- Fiesta Division11/12 O/X conditions are not demonstrated in supplied Prime 2 Brain charts and Prime 2 mission results omit the O/X result counter. Preserve if encountered but do not offer them for Prime 2 authoring.
+- Fiesta Division11/12 O/X conditions are not demonstrated in supplied Prime 2 Brain charts and Prime 2 mission results omit the O/X result counter. Preserve if encountered but do not offer them for Prime+ authoring.
 - discarded `EF2166_D18_MINAMI` contains placeholder Split IDs 0..4 and Division IDs 1005..1007. These are raw-only discarded-mission fields and must not inherit same-number gameplay semantics.
+
+The R!SE corpus does not justify a separate profile: no new Split IDs, Division IDs, select modes, Brain values, padding semantics, Block flags, or note-cell families were observed relative to the modern baseline.
 
 ## Composite Header IDs and trailer offsets
 
