@@ -6,12 +6,14 @@ import unittest
 try:
     from stepnx.gui.audio_transport import (
         _accept_transport_position,
+        _metronome_frames_to_write,
         _metronome_voice_count,
         _mix_metronome_chunk,
         _uses_linux_metronome_sink,
     )
 except ImportError as exc:
     _accept_transport_position = None
+    _metronome_frames_to_write = None
     _metronome_voice_count = None
     _mix_metronome_chunk = None
     _uses_linux_metronome_sink = None
@@ -86,6 +88,48 @@ class AudioTransportJitterTests(unittest.TestCase):
         )
         self.assertEqual(payload, b"\x00" * 12)
         self.assertEqual(remaining, ())
+
+    def test_idle_linux_sink_only_prefills_four_milliseconds(self) -> None:
+        # 48 kHz stereo Int16: 20 ms physical buffer = 3840 bytes.
+        self.assertEqual(
+            _metronome_frames_to_write(
+                buffer_bytes=3840,
+                free_bytes=3840,
+                frame_bytes=4,
+                sample_rate=48_000,
+                active=False,
+            ),
+            192,
+        )
+
+    def test_idle_queue_is_not_filled_to_physical_buffer_capacity(self) -> None:
+        # Once the 4 ms / 768-byte idle lead is queued, no more silence should
+        # be written even though most of the 20 ms sink buffer remains free.
+        self.assertEqual(
+            _metronome_frames_to_write(
+                buffer_bytes=3840,
+                free_bytes=3072,
+                frame_bytes=4,
+                sample_rate=48_000,
+                active=False,
+            ),
+            0,
+        )
+
+    def test_trigger_expands_idle_queue_only_to_eight_milliseconds(self) -> None:
+        # A newly triggered click starts behind at most the existing 4 ms idle
+        # lead, then raises the queue target from 4 ms to 8 ms for underrun
+        # tolerance while the sample is active.
+        self.assertEqual(
+            _metronome_frames_to_write(
+                buffer_bytes=3840,
+                free_bytes=3072,
+                frame_bytes=4,
+                sample_rate=48_000,
+                active=True,
+            ),
+            192,
+        )
 
 
 if __name__ == "__main__":
