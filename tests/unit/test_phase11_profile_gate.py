@@ -15,6 +15,7 @@ class _FakeAction:
         self._checked = checked
         self.visible = True
         self.text = ""
+        self.tooltip = ""
         self.peer = None
 
     def isChecked(self) -> bool:
@@ -30,6 +31,9 @@ class _FakeAction:
 
     def setText(self, text: str) -> None:
         self.text = text
+
+    def setToolTip(self, tooltip: str) -> None:
+        self.tooltip = tooltip
 
 
 class _FakeWindow:
@@ -73,10 +77,16 @@ class Phase11ProfileGateTests(unittest.TestCase):
         window = _FakeWindow()
         install_phase11_profile_gate(window, executable_name="StepNX Studio.exe")
         native = window.profile_actions["nxa-native"]
+        fiesta = window.profile_actions["fiesta2"]
+        prime = window.profile_actions["prime2"]
         patched = window.profile_actions["nxa-step5-patched"]
         self.assertTrue(native.visible)
         self.assertTrue(native.isChecked())
         self.assertEqual(native.text, "NXA")
+        self.assertEqual(fiesta.text, "Fiesta")
+        self.assertEqual(prime.text, "Prime+")
+        self.assertIn("Fiesta EX", fiesta.tooltip)
+        self.assertIn("R!SE", prime.tooltip)
         self.assertFalse(patched.visible)
         self.assertFalse(patched.isChecked())
         self.assertEqual(patched.text, "NXA-patched")
