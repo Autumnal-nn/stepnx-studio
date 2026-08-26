@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offs
 
 try:
     from PySide6.QtGui import QAction, QKeySequence
-    from PySide6.QtWidgets import QApplication, QMainWindow
+    from PySide6.QtWidgets import QApplication, QMainWindow, QMenu
 
     from stepnx.authoring.selection import CellSelection, CellTarget
     from stepnx.authoring.snapshot import create_authoring_snapshot
@@ -41,6 +41,14 @@ class Phase11UiPolishTests(unittest.TestCase):
         snapshot = create_authoring_snapshot(document)
         geometry = TimelineGeometry(row_height=row_height)
         return TimelineLayout(snapshot, geometry), geometry
+
+    @staticmethod
+    def _owned_menu(window: QMainWindow, title: str) -> QMenu:
+        """Create a menu with explicit C++ ownership for offscreen Qt tests."""
+
+        menu = QMenu(title, window)
+        window.menuBar().addMenu(menu)
+        return menu
 
     def test_selection_is_centered_on_note_timing_line_even_for_empty_cell(self) -> None:
         _install_timing_line_note_alignment()
@@ -129,8 +137,8 @@ class Phase11UiPolishTests(unittest.TestCase):
 
     def test_waveform_toggle_moves_from_lonely_view_menu_to_audio(self) -> None:
         window = QMainWindow()
-        view_menu = window.menuBar().addMenu("&View")
-        audio_menu = window.menuBar().addMenu("&Audio")
+        view_menu = self._owned_menu(window, "&View")
+        audio_menu = self._owned_menu(window, "&Audio")
         audio_menu.addAction("Select audio…")
         separator = audio_menu.addSeparator()
         waveform = QAction("Show waveform", window)
@@ -150,9 +158,9 @@ class Phase11UiPolishTests(unittest.TestCase):
 
     def test_requested_folder_and_audio_shortcuts_are_installed(self) -> None:
         window = QMainWindow()
-        file_menu = window.menuBar().addMenu("&File")
+        file_menu = self._owned_menu(window, "&File")
         open_action = file_menu.addAction("Open folder…")
-        audio_menu = window.menuBar().addMenu("&Audio")
+        audio_menu = self._owned_menu(window, "&Audio")
         select_audio = audio_menu.addAction("Select audio…")
 
         _install_shortcuts(window)
