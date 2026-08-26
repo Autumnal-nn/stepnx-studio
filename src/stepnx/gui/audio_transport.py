@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -17,6 +18,21 @@ from stepnx.authoring.audio import AudDecodeError, decode_enc2_aud
 
 
 _METRONOME_VOICES = 8
+_LINUX_METRONOME_VOICES = 2
+
+
+def _metronome_voice_count(platform: str | None = None) -> int:
+    """Return a conservative number of concurrent QSoundEffect streams.
+
+    Qt's Linux multimedia stack may fall back from PipeWire to PulseAudio.
+    Keeping eight loaded QSoundEffect voices in that configuration can starve
+    or underrun the main QMediaPlayer stream on otherwise healthy systems.
+    Two voices still allow normal click overlap while avoiding that stream
+    explosion. Windows keeps the established eight-voice behavior.
+    """
+
+    selected = sys.platform if platform is None else platform
+    return _LINUX_METRONOME_VOICES if selected.startswith("linux") else _METRONOME_VOICES
 
 
 def _accept_transport_position(
@@ -55,10 +71,11 @@ class AudioTransport(QObject):
         # Use several independent one-shot voices. A single QSoundEffect with
         # stop()+play() truncates the previous BEAT.WAV whenever two legitimate
         # notes are closer together than the sample duration, which itself can
-        # create an audible click. Eight voices comfortably cover dense chart
-        # passages while keeping the implementation lightweight.
+        # create an audible click. Linux deliberately uses fewer voices because
+        # the PulseAudio fallback can underrun the main player when too many
+        # QSoundEffect streams are loaded concurrently.
         self._metronome_voices = tuple(
-            QSoundEffect(self) for _ in range(_METRONOME_VOICES)
+            QSoundEffect(self) for _ in range(_metronome_voice_count())
         )
         for voice in self._metronome_voices:
             voice.setLoopCount(1)
