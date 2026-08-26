@@ -84,8 +84,12 @@ class AudDecodeTests(unittest.TestCase):
 
             self.assertEqual(decode_enc2_aud(path), payload)
 
-    def test_nxa_profile_decodes_to_same_mp3_bytes(self) -> None:
-        payload = b"ID3\x03\x00\x00\x00\x00\x00\x00" + bytes(range(64))
+    def test_nxa_profile_is_recovered_from_mastering_signature(self) -> None:
+        # One of the four prefixes observed in the paired 39-song corpus.
+        # The profile itself is arbitrary: recovery must come from the MP3
+        # plaintext signature rather than from a per-song hard-coded key.
+        signature = b"\xff\xfb\xb4D" + b"\x00" * 32 + b"Info"
+        payload = signature + bytes(range(64))
         nxa_profile = bytes.fromhex("ba81da7ea69ec09db6bfdab8a2d4f8df")
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "nxa-song.AUD"
