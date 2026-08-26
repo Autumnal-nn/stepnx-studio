@@ -5,6 +5,34 @@ branch is still under active validation.
 
 ## Implemented, awaiting final Windows validation
 
+- **First closed-alpha responsiveness / workflow feedback**: interactive note
+  toggles now avoid full-document route/diagnostic reconstruction in the
+  immediate click path. Mouse hit-testing retains the already-known Block,
+  CompactRows use binary stable-ID lookup, and one-cell edits remain sparse row
+  overlays. The visible Block snapshot updates immediately; structural
+  validation, Routes, Diagnostics and menu refresh coalesce into one idle pass
+  after a short edit burst. The generic core SetNoteAt remains unchanged and
+  regression tests require byte-equivalence with the indexed interactive path.
+- **StepEdit-style Split boundary drag**: the divider between adjacent Splits
+  exposes a vertical-resize cursor. Dragging resizes the upper Split and shifts
+  every Block Start Time in the immediately lower Split by the corresponding
+  visible/reference-Block time delta. Shrinking is clamped after the last
+  non-empty cell across every Block in the upper Split, so the gesture cannot
+  truncate arrows/items/Division cells. The completed drag is one Undo/Redo
+  command.
+- **Metadata workflow discoverability**: Edit → Metadata now includes an
+  explicit Division metadata action that uses the Block last inspected in the
+  chart even when the workspace tree is still selected on a Split. The existing
+  duplicate-preserving typed dialog supplies Add/Edit/Remove.
+- **Stable two-row toolbar layout**: Audio transport is placed on its own toolbar
+  row, eliminating the transient Qt three-dot overflow popup.
+- **Compact engine-family profiles and R!SE evidence**: public labels are `NXA`,
+  `Fiesta`, and `Prime+`, while stable internal keys remain `nxa-native`,
+  `fiesta2`, and `prime2`. `Fiesta` represents Fiesta / Fiesta EX / Fiesta 2;
+  `Prime+` represents Prime / Prime 2 / XX / Phoenix / R!SE and compatible
+  modern successors. Header1008 is registered in Prime+ as the runtime-confirmed
+  `Step Artist (XX and beyond)` trailer field (`mpStepArtist` in R!SE), enabling
+  the guarded trailer-string editor without creating a R!SE-only profile.
 - **NX file management in the folder tree**: create, duplicate, and delete `.NX`
   files without leaving the editor. New charts use the exact `LM.NX` as their
   header/timing template, start with empty gameplay rows, and choose their field
@@ -65,11 +93,11 @@ branch is still under active validation.
   The GUI now uses this guarded path instead of imposing the earlier same-byte-
   length restriction.
 - **Patched-profile capability gating**: normal executable names expose only NXA,
-  Fiesta 2, and Prime 2. The hidden patched capability replaces native NXA only
+  Fiesta, and Prime+. The hidden patched capability replaces native NXA only
   when the startup executable identity explicitly enables it; its UI label is
   `NXA-patched` while the internal registry key remains stable for compatibility.
-- **Final engine-profile authoring coverage**: the NXA, Fiesta 2, Prime 2, and
-  patched-NXA registries now cover every metadata ID observed in the supplied
+- **Final engine-profile authoring coverage**: the NXA, Fiesta, Prime+, and
+  patched-NXA registries cover every metadata ID observed in the supplied
   official corpora without inventing semantics for unresolved raw fields. The
   final audit separates NXA GM65's native simplified decoder from the Fiesta-
   style decoder deliberately copied by the Step5 patch; removes later-only
@@ -78,12 +106,12 @@ branch is still under active validation.
   Judge Hide/Judge by Note; records Fiesta-era H1005 Auto Velocity as strongly
   inferred and H1006 as raw-only; types per-floor x110/x111 Rush/scroll values;
   records the Fiesta Brain Div11/12 family and the co-op `1000+n = other-player
-  Div n` condition family; suppresses that O/X authoring in Prime 2; and isolates
-  all discarded `EF2166_D18_MINAMI` Split 0..4 / Division 1005..1007 placeholders
-  from inherited semantics. Composite trailer IDs preserve their full 32-bit ID,
-  resolve only through registered trailer base IDs, and expose the historical
-  language labels Korean/Spanish/Portuguese/Chinese/Japanese. The complete
-  decision record is `docs/PHASE11_METADATA_CLOSEOUT.md`.
+  Div n` condition family; suppresses that O/X authoring in Prime+; isolates
+  discarded `EF2166_D18_MINAMI` Split 0..4 / Division 1005..1007 placeholders;
+  and adds modern Header1008 Step Artist from the R!SE evidence. Composite
+  trailer IDs preserve their full 32-bit ID and expose the historical language
+  labels Korean/Spanish/Portuguese/Chinese/Japanese. The complete decision record
+  is `docs/PHASE11_METADATA_CLOSEOUT.md`.
 - **Official NX2 -> NXA importer audit**: all 2,125 supplied NX2 charts fall
   inside the supported NX10 source domain, and 2,111 same-path official NXA NX20
   successors provide conversion evidence. The comparison corrected Half Double
@@ -126,10 +154,10 @@ None inside the agreed Phase 11 scope.
 - `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, and
   `docs/PHASE11_METADATA_CLOSEOUT.md` reflect SEE import, compressed/staged
   waveform generation, guarded trailer relocation, workspace tools, completed
-  version profiles, the final metadata registry, and the frozen official NX2
-  import domain.
+  engine-family profiles, the first closed-alpha feedback round, and the frozen
+  official NX2 import domain.
 - No additional Phase 11 implementation or research dependency remains.
-- The branch is ready to become a merge candidate after the strict Windows test
-  gate and manual closed-alpha smoke test are run on the final Phase 11 HEAD.
+- Re-run the strict Windows test gate and closed-alpha smoke test on the final
+  Phase 11 HEAD before merging.
 - Do not merge solely from documentation state; the Windows gate remains the
   final release/merge guard.
