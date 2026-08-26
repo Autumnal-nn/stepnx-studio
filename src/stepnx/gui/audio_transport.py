@@ -23,7 +23,7 @@ from PySide6.QtMultimedia import (
     QSoundEffect,
 )
 
-from stepnx.authoring.audio import AudDecodeError, decode_enc2_aud
+from stepnx.authoring.audio import AudDecodeError, decode_aud
 
 
 _METRONOME_VOICES = 8
@@ -439,7 +439,7 @@ class AudioTransport(QObject):
         source = Path(path)
         if source.suffix.casefold() in {".aud", ".a"}:
             try:
-                payload = decode_enc2_aud(source)
+                payload = decode_aud(source)
             except AudDecodeError as exc:
                 self.errorOccurred.emit(str(exc))
                 return False
