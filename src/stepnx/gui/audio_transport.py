@@ -29,7 +29,9 @@ from stepnx.authoring.audio import AudDecodeError, decode_enc2_aud
 _METRONOME_VOICES = 8
 _LINUX_MIXER_MAX_VOICES = 8
 _LINUX_MIXER_BUFFER_MS = 20
-_LINUX_MIXER_PUMP_MS = 4
+_LINUX_MIXER_IDLE_QUEUE_MS = 4
+_LINUX_MIXER_ACTIVE_QUEUE_MS = 8
+_LINUX_MIXER_PUMP_MS = 2
 
 
 def _uses_linux_metronome_sink(platform: str | None = None) -> bool:
@@ -172,6 +174,42 @@ def _mix_metronome_chunk(
     return struct.pack(f"<{frames * channels}h", *clipped), tuple(remaining)
 
 
+def _metronome_frames_to_write(
+    *,
+    buffer_bytes: int,
+    free_bytes: int,
+    frame_bytes: int,
+    sample_rate: int,
+    active: bool,
+) -> int:
+    """Return enough frames to maintain a short latency-oriented sink queue.
+
+    The QAudioSink may expose a larger physical buffer for underrun tolerance,
+    but continuously filling that buffer with silence delays a newly triggered
+    click behind all already-queued silence. Keep only a small idle lead and a
+    slightly larger lead while a click is active.
+    """
+
+    if frame_bytes <= 0 or sample_rate <= 0:
+        return 0
+    free_bytes = max(0, int(free_bytes))
+    buffer_bytes = max(0, int(buffer_bytes))
+    if buffer_bytes > 0:
+        free_bytes = min(free_bytes, buffer_bytes)
+        queued_bytes = max(0, buffer_bytes - free_bytes)
+    else:
+        queued_bytes = 0
+
+    target_ms = (
+        _LINUX_MIXER_ACTIVE_QUEUE_MS if active else _LINUX_MIXER_IDLE_QUEUE_MS
+    )
+    target_frames = max(1, round(sample_rate * target_ms / 1000.0))
+    target_bytes = target_frames * frame_bytes
+    missing_bytes = max(0, target_bytes - queued_bytes)
+    writable_bytes = min(free_bytes, missing_bytes)
+    return writable_bytes // frame_bytes
+
+
 class _LinuxMetronomeSink(QObject):
     """One persistent Qt audio stream with software-mixed metronome clicks."""
 
@@ -283,7 +321,13 @@ class _LinuxMetronomeSink(QObject):
             return
         frame_bytes = self._channels * 2
         free_bytes = max(0, int(sink.bytesFree()))
-        frames = free_bytes // frame_bytes
+        frames = _metronome_frames_to_write(
+            buffer_bytes=int(sink.bufferSize()),
+            free_bytes=free_bytes,
+            frame_bytes=frame_bytes,
+            sample_rate=self._rate,
+            active=bool(self._voices),
+        )
         if frames <= 0:
             return
         payload, self._voices = _mix_metronome_chunk(
@@ -372,9 +416,10 @@ class AudioTransport(QObject):
     def playback_source(self) -> Path | None:
         """Exact local file currently handed to QMediaPlayer.
 
-        For ordinary formats this is the selected source. ENC2 AUD/A is decoded
-        and staged as MP3 first, so waveform decoding can consume precisely the
-        same bytes as playback instead of independently repeating that pipeline.
+        For ordinary formats this is the selected source. ENC1/ENC2 AUD/A is
+        decoded and staged as MP3 first, so waveform decoding can consume
+        precisely the same bytes as playback instead of independently repeating
+        that pipeline.
         """
 
         return self._playback_source
@@ -406,7 +451,7 @@ class AudioTransport(QObject):
             try:
                 source.write_bytes(payload)
             except OSError as exc:
-                self.errorOccurred.emit(f"cannot stage decoded ENC2 audio: {exc}")
+                self.errorOccurred.emit(f"cannot stage decoded AUD audio: {exc}")
                 return False
         source = source.resolve()
         self._playback_source = source
@@ -434,7 +479,7 @@ class AudioTransport(QObject):
         directory = QTemporaryDir("stepnx-audio-XXXXXX")
         if not directory.isValid():
             self.errorOccurred.emit(
-                "cannot create temporary directory for decoded ENC2 audio"
+                "cannot create temporary directory for decoded AUD audio"
             )
             return None
         directory.setAutoRemove(True)
