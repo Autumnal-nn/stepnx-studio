@@ -39,6 +39,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase11_nx10_materialization import install_phase11_nx10_materialization
     from stepnx.gui.phase11_preferences import install_phase11_preferences
     from stepnx.gui.phase11_profile_gate import install_phase11_profile_gate
+    from stepnx.gui.phase11_split_cascade import install_phase11_split_cascade
     from stepnx.gui.phase11_state_guard import install_phase11_state_guard
     from stepnx.gui.phase11_trailer_edit import install_phase11_trailer_edit
     from stepnx.gui.phase11_waveform import install_phase11_waveform
@@ -65,6 +66,7 @@ def main(argv=None) -> int:
             install_phase11_nx10_materialization(self)
             install_phase11_preferences(self)
             install_phase11_feedback(self)
+            install_phase11_split_cascade(self)
             install_phase11_fast_note_index(self)
         return original_show(self, *args, **kwargs)
 
