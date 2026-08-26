@@ -14,11 +14,12 @@ branch is still under active validation.
   after a short edit burst. The generic core SetNoteAt remains unchanged and
   regression tests require byte-equivalence with the indexed interactive path.
 - **StepEdit-style Split boundary drag**: the divider between adjacent Splits
-  exposes a vertical-resize cursor. Dragging resizes the upper Split and shifts
-  every Block Start Time in the immediately lower Split by the corresponding
-  visible/reference-Block time delta. Shrinking is clamped after the last
-  non-empty cell across every Block in the upper Split, so the gesture cannot
-  truncate arrows/items/Division cells. The completed drag is one Undo/Redo
+  exposes a vertical-resize cursor over the note grid. Dragging resizes the upper
+  Split and shifts every Block Start Time in the immediately lower Split by the
+  corresponding visible/reference-Block time delta. Shrinking is clamped after
+  the last non-empty cell across every Block in the upper Split, so the gesture
+  cannot truncate arrows/items/Division cells. The right timing gutter keeps its
+  existing inspection/context behavior. The completed drag is one Undo/Redo
   command.
 - **Metadata workflow discoverability**: Edit → Metadata now includes an
   explicit Division metadata action that uses the Block last inspected in the
@@ -161,5 +162,9 @@ None inside the agreed Phase 11 scope.
   Phase 11 HEAD before merging. The previous successful package predates the
   feedback/performance changes and is therefore evidence for the earlier HEAD,
   not the current merge candidate.
+- Smoke the reported feedback explicitly: rapid note toggling on a large chart,
+  two toolbar rows with no overflow popup, Split boundary drag in both directions
+  plus Undo, Division metadata Add/Edit/Remove on the active Block, and Header1008
+  Step Artist trailer editing under Prime+.
 - Do not merge solely from documentation state; the Windows gate remains the
   final release/merge guard.
