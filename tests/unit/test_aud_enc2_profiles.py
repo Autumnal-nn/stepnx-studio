@@ -5,7 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from stepnx.authoring.audio import AudDecodeError, decode_enc2_aud
+from stepnx.authoring.audio import (
+    AudDecodeError,
+    _ENC1_TABLE,
+    decode_aud,
+    decode_enc1_aud,
+    decode_enc2_aud,
+)
 
 
 _BIT_REVERSE = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
@@ -30,6 +36,19 @@ _ARBITRARY_PROFILES = (
 )
 
 
+def _enc1_fixture(payload: bytes, *, start: int = 0x12345678, skip: int = 9) -> bytes:
+    encrypted = bytes(
+        _BIT_REVERSE[value ^ _ENC1_TABLE[(start + index) & 1023]]
+        for index, value in enumerate(payload)
+    )
+    header = bytearray(0x86 + skip + 4)
+    header[:4] = b"ENC1"
+    struct.pack_into("<I", header, 0x7E, len(payload) ^ 0xCCBB)
+    struct.pack_into("<I", header, 0x82, skip)
+    struct.pack_into("<I", header, 0x86 + skip, start)
+    return bytes(header) + encrypted
+
+
 def _enc2_fixture(payload: bytes, base_profile: bytes) -> bytes:
     key = bytes(range(16))
     table = bytes((index * 37 + 11) & 0xFF for index in range(1024))
@@ -50,7 +69,17 @@ def _enc2_fixture(payload: bytes, base_profile: bytes) -> bytes:
     return bytes(header) + bytes(skip) + struct.pack("<I", start) + table + encrypted
 
 
-class Enc2ProfileTests(unittest.TestCase):
+class AudWrapperTests(unittest.TestCase):
+    def test_enc1_official_table_decodes_mp3_payload(self) -> None:
+        payload = b"ID3\x03\x00\x00\x00\x00\x00\x00" + bytes(range(64))
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "enc1.AUD"
+            path.write_bytes(_enc1_fixture(payload))
+            self.assertEqual(decode_enc1_aud(path), payload)
+            self.assertEqual(decode_aud(path), payload)
+            # Existing GUI callers still use this historical entry point.
+            self.assertEqual(decode_enc2_aud(path), payload)
+
     def test_encdecrypt_profile_still_decodes_generic_mp3_payload(self) -> None:
         payload = b"ID3\x03\x00\x00\x00\x00\x00\x00" + bytes(range(64))
         with tempfile.TemporaryDirectory() as temporary:
@@ -69,13 +98,27 @@ class Enc2ProfileTests(unittest.TestCase):
                     path.write_bytes(_enc2_fixture(payload, profile))
                     self.assertEqual(decode_enc2_aud(path), payload)
 
-    def test_unknown_profile_and_mastering_signature_remain_rejected(self) -> None:
+    def test_zero_run_recovers_unknown_enc2_mastering_signature(self) -> None:
         payload = (
             b"ID3\x04\x00\x00\x00\x00\x00\x10"
             b"TXXX\x00\x00\x00\x06\x00\x00other"
-            + bytes(range(64))
+            + bytes(range(48))
+            + b"\x00" * 32
+            + bytes(range(48, 96))
         )
         unknown = bytes.fromhex("fedcba98765432100123456789abcdef")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "zero-run.AUD"
+            path.write_bytes(_enc2_fixture(payload, unknown))
+            self.assertEqual(decode_enc2_aud(path), payload)
+
+    def test_unknown_profile_without_recovery_evidence_remains_rejected(self) -> None:
+        payload = (
+            b"ID3\x04\x00\x00\x00\x00\x00\x10"
+            b"TXXX\x00\x00\x00\x06\x00\x00other"
+            + bytes(range(1, 97))
+        )
+        unknown = bytes.fromhex("102132435465768798a9bacbdcedfe0f")
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "unknown.AUD"
             path.write_bytes(_enc2_fixture(payload, unknown))
