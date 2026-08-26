@@ -84,11 +84,16 @@ class Phase11UiPolishTests(unittest.TestCase):
         _install_timing_line_note_alignment()
         layout, geometry = self._layout(row_height=8.0)
         segment = layout.segments[0]
-        self.assertGreaterEqual(segment.block.row_count, 3)
+        self.assertGreaterEqual(segment.block.row_count, 2)
+        self.assertGreaterEqual(layout.snapshot.columns, 3)
+
+        # Two diagonal cells inside a 2x2 bounding rectangle leave the other
+        # two cells unselected. A single bounding outline would falsely claim
+        # those gaps, so sparse Ctrl selection must keep separate outlines.
         targets = frozenset(
             (
                 CellTarget(segment.block.rows[0].stable_id, 1),
-                CellTarget(segment.block.rows[2].stable_id, 1),
+                CellTarget(segment.block.rows[1].stable_id, 2),
             )
         )
         outlines = _selection_outline_rects(
