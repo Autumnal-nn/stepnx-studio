@@ -21,16 +21,25 @@ class AudDecodeError(ValueError):
 
 _BIT_REVERSE = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
 _ENCDECRYPT_PROFILE = bytes.fromhex("000000001c1d1e1f3c3e383a585b5e59")
-# Fixed profiles recovered from pairs of original NXA-era ENC2 wrappers whose
-# decrypted MP3 payloads are byte-identical. For each pair, all 1024 keystream
-# positions and all 16 repeating profile lanes agree across the full payload,
-# so these are not header-signature guesses.
-_NXA_705_ENC2_PROFILE = bytes.fromhex("ba81da7ea69ec09db6bfdab8a2d4f8df")
-_NXA_704_ENC2_PROFILE = bytes.fromhex("9ea4448e82b95a8d9aa27c88beb79a8f")
-_ENC2_PROFILES = (
-    _ENCDECRYPT_PROFILE,
-    _NXA_705_ENC2_PROFILE,
-    _NXA_704_ENC2_PROFILE,
+
+# Original Linux NXA wrappers do not share one fixed ENC2 profile. A paired
+# 39-song Windows/Linux corpus produced 39 distinct profiles, while every pair
+# decrypted to a byte-identical MP3. Fortunately the mastering pipeline uses
+# four stable MP3 prefixes. Because the unknown ENC2 component repeats every
+# 16 bytes, the first 16 known plaintext bytes recover all 16 profile lanes;
+# the remaining 24 bytes then provide a strong independent signature check.
+# This avoids accumulating one hard-coded profile per song/wrapper.
+_NXA_MP3_SIGNATURES = (
+    b"\xff\xfb\xb4D" + b"\x00" * 32 + b"Info",
+    b"\xff\xfb\xb4d" + b"\x00" * 32 + b"Info",
+    bytes.fromhex(
+        "4944330300000000086754495432000000010000005450453100000001000000"
+        "54414c4200000001"
+    ),
+    bytes.fromhex(
+        "4944330300000000077647454f4200000019000000000053664d61726b657273"
+        "000c000000640000"
+    ),
 )
 
 
@@ -42,14 +51,86 @@ def _looks_like_mp3(payload: bytes) -> bool:
     return len(payload) >= 4 and payload[0] == 0xFF and payload[1] & 0xE0 == 0xE0
 
 
-def decode_enc2_aud(path: str | Path) -> bytes:
-    """Decode known self-contained Andamiro ENC2 AUD profiles.
+def _enc2_key_stream(encrypted_table: bytes, profile: bytes) -> bytes:
+    return bytes(
+        value ^ profile[index & 15]
+        for index, value in enumerate(encrypted_table)
+    )
 
-    The first profile matches ENCDecrypt.exe. Additional profiles were
-    recovered from paired NXA-era wrappers carrying byte-identical MP3
-    payloads. Unknown machine/HASP-derived profiles are rejected instead of
-    returning plausible-looking garbage.
+
+def _decode_enc2_bytes(
+    encrypted_payload: bytes,
+    key_stream: bytes,
+    start_index: int,
+    *,
+    limit: int | None = None,
+) -> bytes:
+    payload = encrypted_payload if limit is None else encrypted_payload[:limit]
+    return bytes(
+        _BIT_REVERSE[value] ^ key_stream[(start_index + index) & 1023]
+        for index, value in enumerate(payload)
+    )
+
+
+def _recover_profile_from_signature(
+    signature: bytes,
+    key: bytes,
+    encrypted_table: bytes,
+    encrypted_payload: bytes,
+    start_index: int,
+) -> bytes | None:
+    """Recover a per-file base profile from a confirmed MP3 plaintext prefix."""
+
+    if len(signature) < 16 or len(encrypted_payload) < len(signature):
+        return None
+    effective = bytearray(16)
+    for index, plain in enumerate(signature[:16]):
+        stream_index = (start_index + index) & 1023
+        lane = stream_index & 15
+        effective[lane] = (
+            _BIT_REVERSE[encrypted_payload[index]]
+            ^ plain
+            ^ encrypted_table[stream_index]
+        )
+    return bytes(value ^ key[index] for index, value in enumerate(effective))
+
+
+def _try_enc2_profile(
+    base_profile: bytes,
+    key: bytes,
+    encrypted_table: bytes,
+    encrypted_payload: bytes,
+    start_index: int,
+    *,
+    signature: bytes | None = None,
+) -> bytes | None:
+    profile = bytes(left ^ right for left, right in zip(base_profile, key))
+    key_stream = _enc2_key_stream(encrypted_table, profile)
+    probe_size = len(signature) if signature is not None else min(16, len(encrypted_payload))
+    probe = _decode_enc2_bytes(
+        encrypted_payload,
+        key_stream,
+        start_index,
+        limit=probe_size,
+    )
+    if signature is not None:
+        if probe != signature:
+            return None
+    elif not _looks_like_mp3(probe):
+        return None
+    decoded = _decode_enc2_bytes(encrypted_payload, key_stream, start_index)
+    return decoded if _looks_like_mp3(decoded) else None
+
+
+def decode_enc2_aud(path: str | Path) -> bytes:
+    """Decode supported Andamiro ENC2 AUD wrappers to their MP3 payload.
+
+    ENCDecrypt.exe uses one fixed profile. Original Linux NXA wrappers instead
+    carry per-file profiles; those are recovered from strongly validated MP3
+    signatures observed across paired Windows/Linux corpus data. Unknown audio
+    mastering signatures remain rejected instead of returning plausible noise.
     """
+
     try:
         source = Path(path).read_bytes()
     except OSError as exc:
@@ -67,28 +148,41 @@ def decode_enc2_aud(path: str | Path) -> bytes:
     encrypted_table = source[table_offset + 4 : payload_offset]
     encrypted_payload = source[payload_offset:payload_end]
 
-    for base_profile in _ENC2_PROFILES:
-        profile = bytes(left ^ right for left, right in zip(base_profile, key))
-        key_stream = bytes(
-            value ^ profile[index & 15]
-            for index, value in enumerate(encrypted_table)
+    decoded = _try_enc2_profile(
+        _ENCDECRYPT_PROFILE,
+        key,
+        encrypted_table,
+        encrypted_payload,
+        start_index,
+    )
+    if decoded is not None:
+        return decoded
+
+    attempted: set[bytes] = {_ENCDECRYPT_PROFILE}
+    for signature in _NXA_MP3_SIGNATURES:
+        base_profile = _recover_profile_from_signature(
+            signature,
+            key,
+            encrypted_table,
+            encrypted_payload,
+            start_index,
         )
-        probe_size = min(16, len(encrypted_payload))
-        probe = bytes(
-            _BIT_REVERSE[value] ^ key_stream[(start_index + index) & 1023]
-            for index, value in enumerate(encrypted_payload[:probe_size])
-        )
-        if not _looks_like_mp3(probe):
+        if base_profile is None or base_profile in attempted:
             continue
-        decoded = bytes(
-            _BIT_REVERSE[value] ^ key_stream[(start_index + index) & 1023]
-            for index, value in enumerate(encrypted_payload)
+        attempted.add(base_profile)
+        decoded = _try_enc2_profile(
+            base_profile,
+            key,
+            encrypted_table,
+            encrypted_payload,
+            start_index,
+            signature=signature,
         )
-        if _looks_like_mp3(decoded):
+        if decoded is not None:
             return decoded
 
     raise AudDecodeError(
-        "ENC2 AUD uses an unsupported key profile; decoded payload is not MP3"
+        "ENC2 AUD uses an unsupported key profile or MP3 mastering signature"
     )
 
 
