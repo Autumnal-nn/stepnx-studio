@@ -44,18 +44,19 @@ class Phase11FeedbackTests(unittest.TestCase):
         return document, upper.stable_id, reference.stable_id
 
     def test_indexed_note_edit_is_byte_equivalent_to_core_command(self) -> None:
-        source = parse_bytes(make_normal_nx20(), row_storage="rich")
-        block = source.splits[0].blocks[0]
-        for row in block.rows:
-            with self.subTest(row=row.stable_id):
-                core = SetNoteAt(
-                    row.stable_id, 0, b"\x03\x03\x09\x00"
-                ).apply(source)
-                fast = _FastSetNoteAt(
-                    row.stable_id, 0, b"\x03\x03\x09\x00"
-                ).apply(source)
-                self.assertEqual(serialize(fast), serialize(core))
-                self.assertEqual(fast.next_stable_id, core.next_stable_id)
+        for storage in ("rich", "compact"):
+            source = parse_bytes(make_normal_nx20(), row_storage=storage)
+            block = source.splits[0].blocks[0]
+            for row in block.rows:
+                with self.subTest(storage=storage, row=row.stable_id):
+                    core = SetNoteAt(
+                        row.stable_id, 0, b"\x03\x03\x09\x00"
+                    ).apply(source)
+                    fast = _FastSetNoteAt(
+                        row.stable_id, 0, b"\x03\x03\x09\x00"
+                    ).apply(source)
+                    self.assertEqual(serialize(fast), serialize(core))
+                    self.assertEqual(fast.next_stable_id, core.next_stable_id)
 
     def test_fast_snapshot_patch_replaces_only_changed_block_rows(self) -> None:
         document = parse_bytes(make_normal_nx20(), row_storage="rich")
