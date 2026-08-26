@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import struct
 import tempfile
 import unittest
@@ -70,6 +71,13 @@ def _enc2_fixture(payload: bytes, base_profile: bytes) -> bytes:
 
 
 class AudWrapperTests(unittest.TestCase):
+    def test_enc1_table_matches_both_official_tools(self) -> None:
+        self.assertEqual(len(_ENC1_TABLE), 1024)
+        self.assertEqual(
+            hashlib.sha256(_ENC1_TABLE).hexdigest(),
+            "dc90c8e61b715f80100bd57809742e34be0fafbefe9d2cc4e213344bd1eee0dc",
+        )
+
     def test_enc1_official_table_decodes_mp3_payload(self) -> None:
         payload = b"ID3\x03\x00\x00\x00\x00\x00\x00" + bytes(range(64))
         with tempfile.TemporaryDirectory() as temporary:
