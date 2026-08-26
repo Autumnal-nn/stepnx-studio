@@ -9,10 +9,24 @@ from stepnx.authoring.audio import AudDecodeError, decode_enc2_aud
 
 
 _BIT_REVERSE = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
-_PROFILES = (
-    bytes.fromhex("000000001c1d1e1f3c3e383a585b5e59"),
-    bytes.fromhex("ba81da7ea69ec09db6bfdab8a2d4f8df"),
-    bytes.fromhex("9ea4448e82b95a8d9aa27c88beb79a8f"),
+_ENCDECRYPT_PROFILE = bytes.fromhex("000000001c1d1e1f3c3e383a585b5e59")
+_NXA_SIGNATURES = (
+    b"\xff\xfb\xb4D" + b"\x00" * 32 + b"Info",
+    b"\xff\xfb\xb4d" + b"\x00" * 32 + b"Info",
+    bytes.fromhex(
+        "4944330300000000086754495432000000010000005450453100000001000000"
+        "54414c4200000001"
+    ),
+    bytes.fromhex(
+        "4944330300000000077647454f4200000019000000000053664d61726b657273"
+        "000c000000640000"
+    ),
+)
+_ARBITRARY_PROFILES = (
+    bytes.fromhex("112233445566778899aabbccddeeff00"),
+    bytes.fromhex("b8861ec4a49b3cdbb4bc5efea0d97415"),
+    bytes.fromhex("28d8503734c54e2624d6483130c34e20"),
+    bytes.fromhex("e6fa6a35fae77024e2f06a37f6e5685e"),
 )
 
 
@@ -37,18 +51,31 @@ def _enc2_fixture(payload: bytes, base_profile: bytes) -> bytes:
 
 
 class Enc2ProfileTests(unittest.TestCase):
-    def test_all_recovered_profiles_decode_same_mp3_payload(self) -> None:
+    def test_encdecrypt_profile_still_decodes_generic_mp3_payload(self) -> None:
         payload = b"ID3\x03\x00\x00\x00\x00\x00\x00" + bytes(range(64))
         with tempfile.TemporaryDirectory() as temporary:
-            for index, profile in enumerate(_PROFILES):
-                with self.subTest(profile=index):
-                    path = Path(temporary) / f"profile-{index}.AUD"
+            path = Path(temporary) / "encdecrypt.AUD"
+            path.write_bytes(_enc2_fixture(payload, _ENCDECRYPT_PROFILE))
+            self.assertEqual(decode_enc2_aud(path), payload)
+
+    def test_nxa_signatures_recover_arbitrary_per_file_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            for index, (signature, profile) in enumerate(
+                zip(_NXA_SIGNATURES, _ARBITRARY_PROFILES)
+            ):
+                with self.subTest(signature=index):
+                    payload = signature + bytes(range(64))
+                    path = Path(temporary) / f"dynamic-{index}.AUD"
                     path.write_bytes(_enc2_fixture(payload, profile))
                     self.assertEqual(decode_enc2_aud(path), payload)
 
-    def test_unknown_profile_remains_rejected(self) -> None:
-        payload = b"ID3\x03\x00\x00\x00\x00\x00\x00" + bytes(range(64))
-        unknown = bytes.fromhex("112233445566778899aabbccddeeff00")
+    def test_unknown_profile_and_mastering_signature_remain_rejected(self) -> None:
+        payload = (
+            b"ID3\x04\x00\x00\x00\x00\x00\x10"
+            b"TXXX\x00\x00\x00\x06\x00\x00other"
+            + bytes(range(64))
+        )
+        unknown = bytes.fromhex("fedcba98765432100123456789abcdef")
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "unknown.AUD"
             path.write_bytes(_enc2_fixture(payload, unknown))
