@@ -25,8 +25,12 @@ from stepnx.core.profiles import (
     unpack_dm120,
     unpack_u16_range,
 )
+from stepnx.core.profile_extensions import install_profile_extensions as _install_profile_extensions
 from stepnx.core.scalars import RawF32, RawU8, RawU16, RawU32, SourceSpan
 from stepnx.core.validation import ValidationIssue, ValidationReport, validate
+
+_install_profile_extensions()
+del _install_profile_extensions
 
 __all__ = [
     "CommandStack",

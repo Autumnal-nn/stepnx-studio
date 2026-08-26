@@ -7,6 +7,8 @@ from stepnx.authoring.audio import (
     NoteMetronomeClock,
     WaveformEnvelope,
     WaveformError,
+    decode_aud,
+    decode_enc1_aud,
     decode_enc2_aud,
     estimate_bpm,
     load_pcm_wav_waveform,
@@ -32,6 +34,13 @@ from stepnx.authoring.conditions import (
     evaluate_condition,
     parse_condition,
     tokenize_condition,
+)
+from stepnx.authoring.field import (
+    FIELD_PRESETS,
+    FieldGeometry,
+    SetChartField,
+    count_dropped_nonempty_cells,
+    current_field,
 )
 from stepnx.authoring.glyphs import VisualPack, VisualPackError, load_visual_pack
 from stepnx.authoring.metadata import (
@@ -139,6 +148,8 @@ __all__ = [
     "ConditionSyntaxError",
     "ConditionUnary",
     "DivisionTrigger",
+    "FIELD_PRESETS",
+    "FieldGeometry",
     "FolderBatchPlan",
     "LocalNoteskinPack",
     "MetadataBatchMode",
@@ -159,6 +170,7 @@ __all__ = [
     "ReplaceMetadataCollection",
     "RouteBranch",
     "SemanticMetadata",
+    "SetChartField",
     "SetTrailerStringSameSize",
     "ShiftBlockStartTimes",
     "SnapshotDiagnostic",
@@ -185,7 +197,11 @@ __all__ = [
     "apply_note_modifiers",
     "condition_variables",
     "copy_selection",
+    "count_dropped_nonempty_cells",
     "create_authoring_snapshot",
+    "current_field",
+    "decode_aud",
+    "decode_enc1_aud",
     "decode_enc2_aud",
     "evaluate_condition",
     "insert_empty_block_after",

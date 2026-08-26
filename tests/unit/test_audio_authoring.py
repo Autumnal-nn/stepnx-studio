@@ -52,14 +52,17 @@ class WaveformTests(unittest.TestCase):
 
 class AudDecodeTests(unittest.TestCase):
     @staticmethod
-    def _enc2_fixture(payload: bytes) -> bytes:
+    def _enc2_fixture(
+        payload: bytes,
+        *,
+        base_profile: bytes = bytes.fromhex("000000001c1d1e1f3c3e383a585b5e59"),
+    ) -> bytes:
         reverse = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
-        profile = bytes.fromhex("000000001c1d1e1f3c3e383a585b5e59")
         key = bytes(range(16))
         table = bytes((index * 37 + 11) & 0xFF for index in range(1024))
         start = 0x12345678
         stream = bytes(
-            value ^ profile[index & 15] ^ key[index & 15]
+            value ^ base_profile[index & 15] ^ key[index & 15]
             for index, value in enumerate(table)
         )
         encrypted = bytes(
@@ -78,6 +81,21 @@ class AudDecodeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "song.AUD"
             path.write_bytes(self._enc2_fixture(payload))
+
+            self.assertEqual(decode_enc2_aud(path), payload)
+
+    def test_nxa_profile_is_recovered_from_mastering_signature(self) -> None:
+        # One of the four prefixes observed in the paired 39-song corpus.
+        # The profile itself is arbitrary: recovery must come from the MP3
+        # plaintext signature rather than from a per-song hard-coded key.
+        signature = b"\xff\xfb\xb4D" + b"\x00" * 32 + b"Info"
+        payload = signature + bytes(range(64))
+        nxa_profile = bytes.fromhex("ba81da7ea69ec09db6bfdab8a2d4f8df")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "nxa-song.AUD"
+            path.write_bytes(
+                self._enc2_fixture(payload, base_profile=nxa_profile)
+            )
 
             self.assertEqual(decode_enc2_aud(path), payload)
 

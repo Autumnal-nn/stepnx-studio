@@ -7,6 +7,7 @@ from stepnx.core.profiles import (
     MetadataDefinition,
     MetadataScope,
     ValueKind,
+    get_profile,
     metadata_definition,
     pack_dm120,
     unpack_dm120,
@@ -238,8 +239,9 @@ def project_brain_shower(document: NX20Document) -> tuple[BrainShowerBlock, ...]
 
 def validate_authoring(document: NX20Document) -> ValidationReport:
     issues: list[ValidationIssue] = []
-    known_profiles = {"nxa-native", "nxa-step5-patched"}
-    if document.profile not in known_profiles:
+    try:
+        get_profile(document.profile)
+    except KeyError:
         return ValidationReport(
             (
                 ValidationIssue(

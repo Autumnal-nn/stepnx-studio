@@ -22,8 +22,8 @@ padding, note cells, floating-point payloads, or its trailer.
 - one NX20 codec shared by `.NX` and `.NFO`;
 - isolated one-way NX10 importer with preserved source bytes and structured
   conversion diagnostics;
-- conservative STF, NOT/NOT5, STX, and KSF import projections through a shared
-  legacy semantic model;
+- conservative STF, NOT/NOT5, STX, KSF, UCS, and corpus-verified SEE import
+  projections through isolated one-way importer paths;
 - compact/lazy row storage, now the default;
 - sparse row overlays: editing one cell promotes one row, not the entire block;
 - immutable commands for metadata, block fields, rows, and cells;
@@ -37,7 +37,8 @@ padding, note cells, floating-point payloads, or its trailer.
   NX10-to-NX20 materialization required for imported Lightmaps;
 - StepEdit-compatible blank NX20 Lightmap generation with preview, explicit
   write, valid-file reuse, and no replacement of existing Lightmaps;
-- explicit chart-audio selection plus deterministic sibling `<FolderName>.mp3` auto-load;
+- explicit chart-audio selection plus deterministic sibling `<FolderName>.mp3`,
+  sibling `A.mp3`, and in-folder case-insensitive `Song.mp3` auto-load;
 - application-state recovery snapshots with payload hash verification;
 - explicit NX/NFO mirror comparison and export primitives;
 - `inspect`, `roundtrip`, `verify`, `validate`, `diff`, `import-nx10`,
@@ -53,20 +54,23 @@ padding, note cells, floating-point payloads, or its trailer.
   function/visibility flags;
 - deterministic row/beat/time projection, atomic Block timing editing, and
   chart-wide Start Time shifting;
-- session audio transport, selection-or-viewport Play seeking, PCM WAV
-  waveform, per-beat or per-arrow metronome, follow-playhead, and explicit
+- session audio transport, selection-or-viewport Play seeking, PCM-WAV and
+  Qt-decoded compressed waveform generation, adaptive stereo min/max waveform
+  rendering, per-beat or per-arrow metronome, follow-playhead, and explicit
   audio offset;
 - bundled royalty-free static noteskin atlases and metronome sound, with local
   noteskin/audio overrides;
 - declarative `nxa-native` and `nxa-step5-patched` capability registries with
-  scope-aware metadata labels and authoring validation;
+  scope-aware metadata labels and authoring validation; normal builds hide the
+  patched profile unless startup capability gating explicitly enables it;
 - ordered, duplicate-preserving typed metadata editing, including Brain Shower
   fields and packed condition ranges;
 - conditional-route projection with direct branch navigation;
 - a safe mission-condition parser validated against every condition in the
   supplied official NX2/NXA mission files;
-- same-byte-length UTF-8 trailer-string editing for proven metadata offsets,
-  with relocation and unknown encodings deliberately blocked;
+- guarded UTF-8 trailer-string editing for proven metadata offsets, including
+  length-changing relocation when aligned storage and all affected known
+  pointers can be updated safely; ambiguous unknown pointers block relocation;
 - previewed folder batches for header metadata and Block Start Times;
 - explicit GUI comparison and export of NX/NFO deployment mirrors;
 - immutable gameplay snapshots that retain every route branch, with internal
@@ -80,9 +84,7 @@ padding, note cells, floating-point payloads, or its trailer.
 
 ## Not implemented yet
 
-- length-changing trailer-string relocation;
 - typed editing of trailer fields whose offsets or encodings are still unknown;
-- corpus-verified SEE decryption/import;
 - full-corpus validation of the NX10 importer against the official NX2 dump.
 
 This pre-alpha tree is suitable for focused authoring tests, not as a stable
@@ -162,31 +164,36 @@ height as a lane is wide. A larger Beat Split therefore makes a beat physically
 taller instead of compressing its rows. Without Ctrl, each mouse-wheel notch
 still scrolls half a musical beat in the split under the pointer.
 Use **Edit → Structure → Edit Block timing** for the nine native NX20 Block
-scalars. `Shift` extends a rectangular selection and `Ctrl` toggles cells;
-copy/paste, mirror, filtered replace, erase, and application of the current tool
-operate as one undo step. Audio source selection, metronome mode, and chart
-following live under **Audio**; engine profile and Snap live under
-**File → Settings**. On Play, an active selection becomes the seek anchor;
-without one, playback starts at the beat at or immediately before the 7%
-viewport playhead. Audio offset remains a session-only calibration action in
-the Audio menu. The
-paused authoring grid retains the selected row zoom; Beat Split never silently
-divides it. During Play, the spatial projection uses per-row `Scroll`; row
-timing already contains Beat Split, so tickcount is not multiplied twice,
-including zero-height `scroll = 0` blocks. Returning to Pause restores the
-editable grid while retaining the playhead at the same viewport position. PCM WAV
-files receive an in-timeline waveform. A blank virtual tail after the last
-row lets followed playback keep the playhead at 7% through the chart endpoint;
-the tail never becomes editable or serialized. Compressed files still use Qt's
-transport but do not pretend a waveform was decoded when it was not.
+scalars. The toolbar's **All splits** option applies a Start Time change as one
+relative delta across every Block, while **Edit → Editable Inspector timing
+values** allows direct typed edits of those same timing fields. `Shift` extends
+a rectangular selection and `Ctrl` toggles cells; copy/paste, mirror, filtered
+replace, erase, and application of the current tool operate as one undo step.
+Audio source selection, metronome mode, and chart following live under **Audio**;
+engine profile and Snap live under **File → Settings**. On Play, an active
+selection becomes the seek anchor; without one, playback starts at the beat at
+or immediately before the 7% viewport playhead. Audio offset remains a
+session-only calibration action in the Audio menu. The paused authoring grid
+retains the selected row zoom; Beat Split never silently divides it. During
+Play, the spatial projection uses per-row `Scroll`; row timing already contains
+Beat Split, so tickcount is not multiplied twice, including zero-height
+`scroll = 0` blocks. Returning to Pause restores the editable grid while
+retaining the playhead at the same viewport position. PCM WAV and supported
+compressed audio receive an in-timeline waveform; compressed and staged ENC2
+audio is decoded asynchronously through Qt while playback and waveform share the
+same staged source. A blank virtual tail after the last row lets followed
+playback keep the playhead at 7% through the chart endpoint; the tail never
+becomes editable or serialized.
 Choose the engine profile before opening a folder. **Edit → Metadata** operates
 on the Header, Split, or Block selected in the workspace tree and preserves
-unknown entries and duplicate order. The Routes side tab projects Split flags,
-condition ranges, and Division triggers; double-clicking a branch activates its
-Block without changing chart data. Folder batches show every affected document
-before changing memory and still require **Save All**. NFO mirrors remain an
-explicit compare/export action and are never synchronized merely because their
-basename matches an NX chart.
+unknown entries and duplicate order. Proven trailer strings may be edited with
+safe length-changing relocation; any ambiguous untyped pointer blocks the move
+instead of being guessed. The Routes side tab projects Split flags, condition
+ranges, and Division triggers; double-clicking a branch activates its Block
+without changing chart data. Folder batches show every affected document before
+changing memory and still require **Save All**. NFO mirrors remain an explicit
+compare/export action and are never synchronized merely because their basename
+matches an NX chart.
 The bundled royalty-free authoring pack and optional local visual overrides are
 documented in [`docs/VISUAL_PACKS.md`](docs/VISUAL_PACKS.md). No proprietary
 sprites ship with the project.

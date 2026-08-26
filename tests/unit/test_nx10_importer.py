@@ -61,9 +61,34 @@ def _make_nx10(
 
     if lightmap_row is None:
         note_offset = len(output)
-        stored_offset = note_offset - chart_type * 2
-        struct.pack_into("<I", output, row_pointer_position, stored_offset)
+        # The NX2 corpus proves that Half Double stores the pointer to its six
+        # active cells directly.  chart_type controls start_column, not a second
+        # byte offset applied to the row pointer.
+        struct.pack_into("<I", output, row_pointer_position, note_offset)
         output += b"".join(struct.pack("<H", note) for note in notes)
+    return bytes(output)
+
+
+def _make_two_block_nx10(first_bpm: float, second_bpm: float) -> bytes:
+    split_offset = 20
+    first_block_offset = 32
+    first_note_offset = first_block_offset + 36
+    second_block_offset = first_note_offset + 10
+    second_note_offset = second_block_offset + 36
+
+    output = bytearray(b"NX10")
+    output += _u32(0) + _u32(5) + _u32(1) + _u32(split_offset)
+    output += _u32(2) + _u32(first_block_offset) + _u32(second_block_offset)
+
+    def append_block(start_time: float, bpm: float, note_offset: int) -> None:
+        output.extend(struct.pack("<fffff", start_time, bpm, 1.0, 0.0, 0.0))
+        output.extend(_u32(0))
+        output.extend(struct.pack("<HBBI", 4, 4, 0, 1))
+        output.extend(_u32(note_offset))
+        output.extend(b"\x00" * 10)
+
+    append_block(0.0, first_bpm, first_note_offset)
+    append_block(1000.0, second_bpm, second_note_offset)
     return bytes(output)
 
 
@@ -84,6 +109,21 @@ class NX10ImporterTests(unittest.TestCase):
         self.assertEqual(native[:4], b"NX20")
         self.assertEqual(serialize(parse_bytes(native)), native)
         self.assertTrue(validate(result.document).is_valid)
+
+    def test_official_bank_bits_are_retained_in_both_nx20_locations(self) -> None:
+        source = _make_nx10(notes=(0x05B3, 0x0AB3, 0, 0, 0))
+        row = import_bytes(source).document.splits[0].blocks[0].rows[0]
+
+        self.assertEqual(struct.unpack("<I", row.cells[0].raw)[0], 0x40010343)
+        self.assertEqual(struct.unpack("<I", row.cells[1].raw)[0], 0x80020343)
+
+    def test_no_register_long_components_use_0x30_family(self) -> None:
+        source = _make_nx10(notes=(0x0074, 0x0076, 0x0077, 0, 0))
+        row = import_bytes(source).document.splits[0].blocks[0].rows[0]
+
+        self.assertEqual(struct.unpack("<I", row.cells[0].raw)[0], 0x00000337)
+        self.assertEqual(struct.unpack("<I", row.cells[1].raw)[0], 0x0000033B)
+        self.assertEqual(struct.unpack("<I", row.cells[2].raw)[0], 0x0000033F)
 
     def test_division_minimums_and_maximums_project_to_ids_zero_through_nine(self) -> None:
         source = _make_nx10(division_ranges={0: (3, 4), 5: (7, 9), 9: (2, 0)})
@@ -119,7 +159,16 @@ class NX10ImporterTests(unittest.TestCase):
         self.assertEqual(result.report.diagnostics[0].code, "nx10.block.bpm-zero-warp")
         self.assertTrue(result.report.is_semantically_lossless)
 
-    def test_halfdouble_applies_chart_type_step_offset(self) -> None:
+    def test_leading_bpm_zero_defaults_to_120_instead_of_looking_ahead(self) -> None:
+        result = import_bytes(_make_two_block_nx10(0.0, 121.0))
+        first, second = result.document.splits[0].blocks
+
+        self.assertEqual(first.bpm.value, 120.0)
+        self.assertEqual(first.smooth_speed.value, 2)
+        self.assertEqual(second.bpm.value, 121.0)
+        self.assertEqual(second.smooth_speed.value, 0)
+
+    def test_halfdouble_uses_stored_row_pointer_without_extra_offset(self) -> None:
         source = _make_nx10(
             chart_type=2,
             columns=6,
@@ -130,7 +179,16 @@ class NX10ImporterTests(unittest.TestCase):
         self.assertEqual(result.document.start_column.value, 2)
         self.assertEqual(result.document.columns.value, 6)
         row = result.document.splits[0].blocks[0].rows[0]
+        self.assertIsInstance(row, NoteRow)
         self.assertEqual(struct.unpack("<I", row.cells[0].raw)[0], 0x00000343)
+
+    def test_halfdouble_explicit_zero_row_collapses_to_empty(self) -> None:
+        source = _make_nx10(chart_type=2, columns=6, notes=(0, 0, 0, 0, 0, 0))
+        result = import_bytes(source)
+
+        row = result.document.splits[0].blocks[0].rows[0]
+        self.assertIsInstance(row, EmptyRow)
+        self.assertEqual(result.report.note_cells, 0)
 
     def test_lightmap_rows_are_inline(self) -> None:
         source = _make_nx10(

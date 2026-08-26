@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-19
+Date: 2026-08-25
 
 Version: 0.1.0.dev0
 
@@ -22,9 +22,17 @@ Version: 0.1.0.dev0
 - generated command-sequence and parser-mutation property tests;
 - isolated NX10 importer with source preservation and structured diagnostics;
 - NX2 Single, Double/Freestyle, Half-Double, and Lightmap projections;
+- complete supplied NX2 source-domain audit over 2,125 NX10 charts plus 2,111
+  same-path official NXA NX20 successor conversions;
+- corpus-backed NX10 conversion rules for Half Double row addressing, NX20
+  noteskin-bank high bits, no-register long-note components, and leading
+  zero-BPM fallback;
 - NX10 Division range projection, including the Division 0 `1/0` and `2/0`
-  Split-select exceptions;
+  Split-select exceptions, verified exactly across 18,769 aligned successor
+  Blocks;
 - explicit NX10 `BPM == 0` to NX20 smooth-warp conversion;
+- all 110 distinct nonzero NX10 note codes observed in the supplied NX2 corpus
+  have matching official NXA successor evidence;
 - `import-nx10` CLI command with explicit-output-only writes;
 - immediate-folder discovery with independent per-file failures;
 - native NX20 entries and NX10 provenance whose editable model is always NX20;
@@ -84,16 +92,20 @@ Version: 0.1.0.dev0
   does not;
 - validated ENC2 AUD-to-MP3 support for the self-contained `ENCDecrypt.exe`
   profile, with explicit rejection of unsupported machine/HASP profiles;
-- `nxa-native` and `nxa-step5-patched` registries with contextual Header, Split,
-  and Division metadata definitions and evidence levels;
-- profile-aware authoring diagnostics that never turn unknown data into a
-  structural error;
+- `nxa-native`, Fiesta 2, Prime 2, and `nxa-step5-patched` registries with
+  contextual Header, Split, and Division metadata definitions, inheritance,
+  evidence levels, and complete supplied-corpus ID coverage without guessed
+  semantics;
+- profile-aware authoring diagnostics that run for every installed engine
+  profile and never turn unknown data into a structural error;
 - atomic ordered metadata collection editing with safe typed values, duplicates,
   unknown fields, and stable-ID preservation;
 - Brain Shower field projection/editing and conditional-route visualization;
 - mission-condition parsing validated against all supplied NX2/NXA mission
   conditions, including profile-gated patched variables;
-- safe fixed-byte-length UTF-8 trailer-string editing for proven offset fields;
+- guarded UTF-8 trailer-string editing for proven offset fields, including
+  conservative length-changing relocation with downstream typed-offset and size-
+  marker repair;
 - previewed folder batches and explicit Qt NX/NFO mirror deployment workflow;
 - read-only `PreviewSnapshot` export with all route alternatives retained;
 - manual, internally randomized, and profile-aware all-perfect route resolution
@@ -115,15 +127,24 @@ Version: 0.1.0.dev0
 | Corpus metric | Value |
 | --- | ---: |
 | Exact NX20/NFO | 12,909 / 12,909 |
-| Classified NX10 | 12 |
+| Classified NXA NX10 | 12 |
 | Clean NX10 imports from NXA | 12 / 12 |
-| Differences | 0 |
+| Supplied NX2 NX10 source domain | 2,125 / 2,125 supported |
+| Same-path NX2 -> NXA NX20 successors | 2,111 |
+| Distinct NX2 note codes with successor evidence | 110 / 110 |
+| Aligned Division Blocks with exact projection | 18,769 / 18,769 |
+| NX20/NFO round-trip differences | 0 |
 | Structural errors | 0 |
 
 The largest chart in the corpus is 2,125,684 bytes with 267,264 rows. Rich mode
 used 150.7 MiB and 1.48 s for parse plus rebuild. Compact mode used 31.3 MiB and
 0.244 s: about 79% less memory and six times faster, with identical bytes,
 stable IDs, and source spans.
+
+The official NX2 -> NXA audit is documented in
+`docs/NX2_NXA_CONVERSION_ANALYSIS.md`. The successor corpus is used as semantic
+conversion evidence rather than a byte-identity target because NXA also retimed
+and edited a subset of deployed charts.
 
 ### Phase 5 Windows validation
 
@@ -144,14 +165,14 @@ without abandoning compact row storage.
 
 - structural row insertion/removal/move currently materializes the affected
   compact row collection; point edits remain sparse;
-- trailer string relocation remains disabled; only proven offsets containing
-  valid UTF-8 may be edited, and only at the same encoded byte length;
-- NX10 importer awaits validation against the complete official NX2 dump;
-- Phase 8 has passed its iterative Windows manual preview gate; its 19 automated
-  Qt tests still require the packaged Windows/PySide6 workflow before the
-  Windows artifact is accepted;
-- waveform extraction is intentionally limited to PCM WAV; Qt transport still
-  plays supported compressed formats without fabricating waveform data;
+- trailer fields whose offsets or encodings remain untyped are still raw-only;
+  length-changing edits are refused whenever an untyped value plausibly points
+  into the region that would move;
+- NX10 inputs outside the complete supplied NX2 observed domain remain guarded
+  by explicit approximation/unsupported diagnostics rather than generalized
+  from unproven extensions;
+- Phase 8 has passed its iterative Windows manual preview gate; its packaged
+  Windows/PySide6 artifact gate remains separate from the Phase 11 close-out;
 - ENC2 AUD support currently accepts the profile proven by `732.AUD`; the
   distinct profiles in `D91.AUD` and `508.AUD` remain unsupported;
 - cross-Split Block moves remain outside the current structural UI;
@@ -160,18 +181,36 @@ without abandoning compact row storage.
 - negative Speed/Freeze remains diagnostic-only until NXA behavior is
   independently measured; Smooth Speed 0–3 preserves notes and every nonzero
   value interpolates the fifth-float factor;
+- actual cabinet-light actuation from `LM.NX` is not runtime-validated because
+  it requires suitable Pump hardware; this is optional hardware research, not
+  an editor publication or release gate.
 
 ## Next gate
 
-1. validate the NX10 importer against the official NX2 corpus and NXA runtime;
-2. execute the generated blank `LM.NX` in NXA as an independent runtime gate;
-3. keep public release packaging disabled until the project is ready for a public build.
+1. run the strict Windows test gate and final Phase 11 manual smoke tests on the
+   final branch HEAD;
+2. record the close-out result and merge Phase 11;
+3. keep public release packaging disabled until the project is ready for a public
+   build.
 
 The viewer audit accepts STEPEdit-pixi as a conditional layout reference and
 WebPrime as a behavioral reference only. Phase 8 uses a native Qt projection;
 neither external parser becomes authoritative, and no proprietary artwork
 enters the build.
 
+## Product-scope notes
+
+- `.NFO` remains in scope because it is a native NX20 chart/deployment document.
+- World Max `mission.txt` remains outside the Studio document model. The supplied
+  NX2/NXA mission files are valuable reference corpora for condition syntax, but
+  StepNX Studio does not need a mission-map/configuration editor.
+- a dedicated Lightmap visualizer is not required. Optional future research may
+  reverse-engineer how `piu_nxa` sends Lightmap state to cabinet I/O if suitable
+  executable/hardware evidence becomes available.
+- matched KSF <-> NOT research is no longer a Phase 11 gate. The pending
+  13-column KSF material is likely downstream conversion material and therefore
+  would not be an independent oracle; genuinely independent matched originals
+  can still refine the importer later if they become available.
 
 ## Phase 9/10 consolidation
 
@@ -186,7 +225,37 @@ Additional delivered behavior includes:
 - patched-NXA SPECIAL/Number Block authoring and raw Source Slot/Brain fields;
 - fixed 640x480 external Gameplay Preview with arcade-calibrated scroll pitch;
 - Space Play/Pause with silent transport when chart audio is absent;
-- lazy AUD staging and strict sibling `<FolderName>.mp3` auto-load;
+- lazy AUD staging and sibling `<FolderName>.mp3` auto-load.
 
-SEE import remains deliberately disabled pending a verified decryption
-profile.
+## Phase 11 active branch
+
+Additional delivered behavior includes:
+
+- one-way STF/ST2, NOT/NOT5, STX, SEE, KSF, and UCS authoring import through a
+  reviewed multi-chart materialization flow that never overwrites existing NX;
+- NX file create/duplicate/delete tools and explicit Single/Double/Half Double
+  or custom field geometry editing;
+- corpus/runtime-backed NX20 sparse-hold behavior in the preview and timing-line-
+  aligned hold terminals in authoring;
+- sibling `<FolderName>.mp3`, sibling `A.mp3`, and case-insensitive in-folder
+  `Song.mp3` discovery with a manual-selection fallback;
+- asynchronous compressed/staged waveform decoding with stereo signed min/max,
+  a 16-frame base summary, and multiresolution viewport queries;
+- persistent local visual and noteskin preferences outside chart folders;
+- guarded length-changing trailer relocation exposed by the Qt editor;
+- profile capability gating that hides patched NXA from normal startup and uses
+  the concise `NXA-patched` UI label when the hidden capability is enabled;
+- complete NXA/Fiesta 2/Prime 2/patched-NXA authoring-profile coverage over the
+  supplied corpora, including localized trailer-ID resolution and safe raw-only
+  treatment for unresolved fields;
+- official NX2 -> NXA successor-corpus validation and the resulting NX10 importer
+  corrections for Half Double, noteskin banks, no-register longs, and BPM-zero
+  fallback;
+- optional all-Block Start Time delta editing, direct typed Inspector timing
+  edits, and authoring hold-head shaft underlay;
+- monotonic live audio position filtering plus a metronome voice pool, removing
+  duplicate ~one-poll ticks and sample-cutoff clicks observed during validation.
+
+No Phase 11 implementation or research dependency remains open in
+`PHASE11_BACKLOG.md`; the branch is awaiting its final strict Windows gate,
+manual smoke test, and merge close-out.

@@ -129,8 +129,11 @@ def parse_stf(data: bytes, *, source: str | None = None) -> LegacyChart:
     bpm = struct.unpack_from("<f", data, 256)[0]
     if not math.isfinite(bpm) or bpm <= 0:
         bpm = 120.0
+    # StepEdit 5.63 interprets the fixed STF row grid at Beat Split 2.  Using
+    # the NX-era default 4 halves every row duration and makes imported charts
+    # run at twice their intended speed.
     return LegacyChart(
-        "stf", 10, (LegacyBlock(bpm, 4, 4, 0.0, tuple(rows)),), source, data
+        "stf", 10, (LegacyBlock(bpm, 4, 2, 0.0, tuple(rows)),), source, data
     )
 
 
@@ -246,14 +249,14 @@ def parse_ksf(data: bytes, *, source: str | None = None) -> LegacyChart:
             match = _HEADER.match(line)
             if match:
                 key, value = match.groups()
-                headers[key.upper()] = value
+                headers[key.upper()] = value.strip().removesuffix(";").strip()
                 in_step = key.upper() == "STEP"
             continue
         control = _CONTROL.match(line)
         if control:
-            controls.append((control.group(1).upper(), control.group(2)))
+            controls.append((control.group(1).upper(), control.group(2).strip().removesuffix(";").strip()))
             continue
-        if line.startswith("#") and line.upper() in {"#END", "#ENDSTEP"}:
+        if line.startswith("#") and line.upper().removesuffix(";") in {"#END", "#ENDSTEP"}:
             break
         if not line or line.startswith("//"):
             continue

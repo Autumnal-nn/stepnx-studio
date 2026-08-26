@@ -188,7 +188,10 @@ def _mode(chart_type: RawU32, columns: RawU32, source: str | None) -> _HeaderMod
     modes = {
         (0, 5): _HeaderMode(0, 5, False, 0),
         (0, 10): _HeaderMode(0, 10, False, 0),
-        (2, 6): _HeaderMode(2, 6, False, 4),
+        # Official NX2 -> NXA conversions prove that Half Double's stored row
+        # pointer already addresses the six active cells.  start_column=2 is the
+        # physical-field offset; adding another four bytes here shifts the chart.
+        (2, 6): _HeaderMode(2, 6, False, 0),
         (10, 3): _HeaderMode(0, 3, True, 20),
     }
     try:
@@ -315,23 +318,28 @@ def _note_to_nx20(
     elif functionality == "register-no-combo":
         low = 0x60 if note_type not in {7, 11, 15} or roll else 0x70
     else:
-        low = 0x20
+        # NX2's no-register long-note components use the 0x30 family while
+        # taps/items/accumulators remain in the 0x20 family.  This distinction
+        # is independently present in the official NXA conversion corpus.
+        low = 0x30 if note_type in {7, 11, 15} and not roll else 0x20
     value = low | note_type | (visibility << 8)
     if item_id is not None:
         value |= 0xC0000000 | (item_id << 16)
     elif note_type == 2:
         value |= 0xC0000000 | (accumulator_id << 16)
     else:
-        value |= bank << 16
+        # NX20 retains the bank selector in bits 16.. and also carries the bank
+        # in the high function bits: bank 1 => 0x40000000, bank 2 => 0x80000000.
+        # All 110 distinct NX2 note codes observed in the supplied corpus have
+        # matching official NXA evidence under this mapping.
+        value |= (bank << 16) | (bank << 30)
     return struct.pack("<I", value)
 
 
 def _safe_bpm(blocks: list[Block], index: int) -> RawF32:
+    # The official converter inherits only from an earlier positive BPM.  A
+    # leading zero-BPM run uses 120 rather than looking ahead to a later block.
     for candidate in range(index - 1, -1, -1):
-        value = float(blocks[candidate].bpm.value)
-        if value > 0.0 and math.isfinite(value):
-            return RawF32(blocks[candidate].bpm.raw, None)
-    for candidate in range(index + 1, len(blocks)):
         value = float(blocks[candidate].bpm.value)
         if value > 0.0 and math.isfinite(value):
             return RawF32(blocks[candidate].bpm.raw, None)
@@ -537,6 +545,17 @@ def import_bytes(
                             path=f"{row_path} column {column}",
                         )
                         cells.append(NoteCell(ids.take(), converted, None))
+                    # Official Half Double conversion collapses an explicitly
+                    # stored row whose six active cells are all empty to NX20's
+                    # structural EmptyRow marker.  This is observed 1006 times
+                    # across all 18 matching NX2/NXA Half Double charts.
+                    if (
+                        mode.start_column == 2
+                        and mode.columns == 6
+                        and all(cell.raw == b"\x00\x00\x00\x00" for cell in cells)
+                    ):
+                        rows.append(EmptyRow(ids.take(), b"\x80\x00\x00\x00", None))
+                        continue
                     rows.append(NoteRow(ids.take(), tuple(cells), row_span))
                     total_cells += mode.columns
 

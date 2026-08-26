@@ -22,6 +22,7 @@ from stepnx.core.profiles import (
     ValueKind,
     authorable_metadata,
     metadata_definition,
+    metadata_variant_label,
     pack_dm120,
     pack_u16_range,
     unpack_dm120,
@@ -49,7 +50,7 @@ class MetadataCollectionDialog(QDialog):
         self.setWindowTitle(
             "Brain Shower metadata" if brain_only else f"Edit {scope.value} metadata"
         )
-        self.resize(820, 440)
+        self.resize(920, 460)
 
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
@@ -104,9 +105,17 @@ class MetadataCollectionDialog(QDialog):
         self.table.setRowCount(len(self._drafts))
         for row, draft in enumerate(self._drafts):
             definition = self._definition(draft)
+            variant = (
+                metadata_variant_label(draft.meta_id)
+                if self.scope is MetadataScope.HEADER
+                else None
+            )
+            field = definition.label if definition else "Unknown"
+            if variant:
+                field = f"{field} [{variant}]"
             values = (
                 str(draft.meta_id),
-                definition.label if definition else "Unknown",
+                field,
                 str(draft.value),
                 definition.display_value(draft.value)
                 if definition
@@ -114,8 +123,20 @@ class MetadataCollectionDialog(QDialog):
                 definition.evidence.value if definition else "unregistered",
                 "new" if draft.stable_id is None else str(draft.stable_id),
             )
+            tooltip = ""
+            if definition:
+                details = [definition.description] if definition.description else []
+                if draft.meta_id > 0xFFFF and variant:
+                    details.append(
+                        f"Composite Header ID: base {draft.meta_id & 0xFFFF}, "
+                        f"variant {draft.meta_id >> 16} ({variant}). The full 32-bit ID "
+                        "is preserved when saving."
+                    )
+                tooltip = "\n\n".join(details)
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
+                if tooltip:
+                    item.setToolTip(tooltip)
                 if not self._is_editable(draft):
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
                 self.table.setItem(row, column, item)
@@ -237,6 +258,17 @@ class MetadataCollectionDialog(QDialog):
             except (ValueError, TypeError) as exc:
                 QMessageBox.critical(self, "Invalid DM120 value", str(exc))
                 return None
+        if definition.kind is ValueKind.INT32:
+            value = struct.unpack("<i", struct.pack("<I", current))[0]
+            result, accepted = QInputDialog.getInt(
+                self,
+                definition.label,
+                "Signed 32-bit value:",
+                value,
+                -0x80000000,
+                0x7FFFFFFF,
+            )
+            return result & 0xFFFFFFFF if accepted else None
         if definition.kind is ValueKind.FLOAT32_BITS:
             value = struct.unpack("<f", struct.pack("<I", current))[0]
             result, accepted = QInputDialog.getDouble(

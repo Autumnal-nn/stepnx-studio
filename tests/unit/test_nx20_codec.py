@@ -8,7 +8,13 @@ from stepnx.codecs.nx20 import parse_bytes, serialize
 from stepnx.core.errors import ModelInvariantError, ParseError, UnsupportedFormatError
 from stepnx.core.model import EnvelopeKind, LightmapRow, MetadataEntry, NoteRow, PackedNoteRow
 from stepnx.core.scalars import RawU32
-from tests.fixture_factory import make_implicit_lightmap, make_normal_nx20, make_nx10, u32
+from tests.fixture_factory import (
+    SYNTHETIC_UNKNOWN_DIVISION_ID,
+    make_implicit_lightmap,
+    make_normal_nx20,
+    make_nx10,
+    u32,
+)
 
 
 class NX20CodecTests(unittest.TestCase):
@@ -30,7 +36,11 @@ class NX20CodecTests(unittest.TestCase):
         self.assertEqual(block.scroll.bits, 0x7FA12345)
         self.assertEqual(block.smooth_speed.value, 3)
         self.assertEqual(block.raw_flag.value, 0xA5)
-        self.assertEqual(block.divisions[0].meta_id.value, 111)
+        self.assertEqual(
+            block.divisions[0].meta_id.value,
+            SYNTHETIC_UNKNOWN_DIVISION_ID,
+        )
+        self.assertEqual(block.divisions[0].value.value, 0xDEADBEEF)
 
     def test_rows_keep_exact_encoding(self) -> None:
         document = parse_bytes(make_normal_nx20(), row_storage="rich")

@@ -22,8 +22,8 @@ class EngineProfileTests(unittest.TestCase):
     def test_fiesta2_and_prime2_profiles_are_registered(self):
         from stepnx.core.profiles import get_profile, profile_capabilities
 
-        self.assertEqual(get_profile("fiesta2").label, "Pump It Up Fiesta 2")
-        self.assertEqual(get_profile("prime2").label, "Pump It Up Prime 2")
+        self.assertEqual(get_profile("fiesta2").label, "Fiesta")
+        self.assertEqual(get_profile("prime2").label, "Prime+")
         self.assertIn("items-21-23", profile_capabilities("fiesta2"))
         self.assertIn("items-21-23", profile_capabilities("prime2"))
 
@@ -166,7 +166,6 @@ class Phase10AdapterTests(unittest.TestCase):
         self.assertEqual(set(_BRAIN_CODE_LABELS), {0, 1, 6, 7})
         self.assertEqual(_BRAIN_CODE_LABELS[6], "Incorrect / X")
         self.assertEqual(_BRAIN_CODE_LABELS[7], "Correct / O")
-
 
     def test_source_slot_advanced_state_overrides_legacy_widget_fallback(self):
         from stepnx.gui.phase10_install import _selected_player_slot
