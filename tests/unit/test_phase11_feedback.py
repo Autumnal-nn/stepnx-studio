@@ -6,14 +6,17 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offscreen")
 
 try:
+    from PySide6.QtCore import QPointF
     from PySide6.QtWidgets import QApplication
 
     from stepnx.authoring.snapshot import create_authoring_snapshot
     from stepnx.authoring.structure import StructureTarget, insert_empty_split_after
     from stepnx.codecs.nx20 import parse_bytes, serialize
     from stepnx.core.commands import SetNoteAt
+    from stepnx.gui.phase10_timeline import Phase10TimelineWidget
     from stepnx.gui.phase11_fast_notes import _FastSetNoteAt
     from stepnx.gui.phase11_feedback import (
+        _boundary_hit,
         _minimum_reference_rows,
         _resize_split_boundary_document,
         _snapshot_with_updated_rows,
@@ -70,6 +73,40 @@ class Phase11FeedbackTests(unittest.TestCase):
         self.assertEqual(patched.splits[0].blocks[0].rows, updated_block.rows)
         self.assertEqual(patched.active_blocks, snapshot.active_blocks)
         self.assertEqual(patched.diagnostics, snapshot.diagnostics)
+
+    def test_boundary_hit_uses_real_layout_geometry_without_blocking_mouse_input(self) -> None:
+        document, split_id, _block_id = self._two_split_document()
+        widget = Phase10TimelineWidget(create_authoring_snapshot(document))
+
+        class Event:
+            def __init__(self, x: float, y: float) -> None:
+                self._position = QPointF(x, y)
+
+            def position(self):
+                return self._position
+
+        try:
+            layout = widget._layout
+            segment = layout.segments[0]
+            geometry = layout.geometry
+            x_scroll = widget.horizontalScrollBar().value()
+            y_scroll = widget.verticalScrollBar().value()
+
+            inside = Event(
+                geometry.ruler_width + geometry.lane_width / 2 - x_scroll,
+                segment.bottom - y_scroll,
+            )
+            hit = _boundary_hit(widget, inside)
+            self.assertIsNotNone(hit)
+            self.assertEqual(hit[0].split_id, split_id)
+
+            gutter = Event(
+                layout.chart_width + 10 - x_scroll,
+                segment.bottom - y_scroll,
+            )
+            self.assertIsNone(_boundary_hit(widget, gutter))
+        finally:
+            widget.deleteLater()
 
     def test_boundary_shrink_is_clamped_after_last_nonempty_row(self) -> None:
         document, split_id, block_id = self._two_split_document()
