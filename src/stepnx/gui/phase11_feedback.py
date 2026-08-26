@@ -97,9 +97,6 @@ def _nearest_representable_rows(
     ):
         return requested_rows
 
-    # Every Block Beat Split is integral, so a representable value must recur.
-    # Search symmetrically around the pointer target, never below the content
-    # clamp. The generous bound still resolves instantly for realistic splits.
     for distance in range(1, 65537):
         lower = requested_rows - distance
         upper = requested_rows + distance
@@ -120,13 +117,7 @@ def _resize_split_boundary_document(
     reference_block_id: int,
     requested_rows: int,
 ):
-    """Resize the upper Split and move the immediately lower Split in chart time.
-
-    The visible/reference Block defines the time delta, matching the branch that
-    the author is dragging. Shrinking is clamped before the last non-empty row
-    in every Block, so the gesture can never truncate arrows/items/Division
-    cells. All Blocks in the lower Split receive the same Start Time delta.
-    """
+    """Resize upper Split and move the immediately lower Split in chart time."""
 
     split_index = next(
         i for i, item in enumerate(document.splits) if item.stable_id == split_id
@@ -297,8 +288,6 @@ def _install_fast_note_feedback(window) -> None:
     window._phase10_click = click_fast
     window._phase10_hold = hold_fast
 
-    # The base finish handler refreshes menus synchronously after every click.
-    # The deferred pass above already does this once after the burst of edits.
     def finish_fast(document_index, widget) -> None:
         window.sessions[document_index].finish_coalescing()
         window.gesture_keys.pop(widget, None)
@@ -344,8 +333,6 @@ def _install_division_metadata_action(window) -> None:
             )
             return
         document_index, split_id, block_id = active
-        # Synchronize the tree only on explicit metadata editing. Ordinary grid
-        # clicks stay cheap and do not repeatedly rebuild the workspace tree.
         window._populate_tree(("block", document_index, split_id, block_id))
         window._inspect("block", document_index, split_id, block_id)
         window._edit_metadata()
@@ -356,8 +343,6 @@ def _install_division_metadata_action(window) -> None:
 def _install_toolbar_rows(window) -> None:
     for toolbar in window.findChildren(QToolBar):
         if toolbar.windowTitle() == "Audio transport":
-            # Keep authoring and transport controls on stable rows. This avoids
-            # Qt's transient extension popup (the three-dot overflow button).
             window.insertToolBarBreak(toolbar)
             return
 
@@ -367,10 +352,12 @@ def _boundary_hit(widget, event):
         return None
     content_x = event.position().x() + widget.horizontalScrollBar().value()
     content_y = event.position().y() + widget.verticalScrollBar().value()
-    if content_x < 0 or content_x > widget._layout.chart_width:
+    # Restrict the resize affordance to the actual note grid. The right-side
+    # timing gutter retains its existing click/double-click/context behavior.
+    grid_width = widget.snapshot.columns * widget._layout.lane_width
+    if content_x < 0 or content_x > grid_width:
         return None
-    segments = widget._layout.segments
-    for segment in segments[:-1]:
+    for segment in widget._layout.segments[:-1]:
         if abs(content_y - segment.bottom) <= _BOUNDARY_TOLERANCE_PX:
             return segment, content_y
     return None
