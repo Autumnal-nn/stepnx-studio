@@ -9,12 +9,14 @@ try:
     from PySide6.QtGui import QAction, QKeySequence
     from PySide6.QtWidgets import QApplication, QMainWindow
 
+    from stepnx.authoring.selection import CellSelection, CellTarget
     from stepnx.authoring.snapshot import create_authoring_snapshot
     from stepnx.authoring.timeline import TimelineGeometry, TimelineLayout
     from stepnx.codecs.nx20 import parse_bytes
     from stepnx.gui.phase11_ui_polish import (
         _install_shortcuts,
         _move_waveform_to_audio,
+        _selection_outline_rects,
         _selection_rect,
         _timing_line_cell_hit,
         _timing_line_row_hit,
@@ -34,10 +36,10 @@ class Phase11UiPolishTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
 
-    def _layout(self):
+    def _layout(self, row_height: float = 48.0):
         document = parse_bytes(make_normal_nx20(), row_storage="rich")
         snapshot = create_authoring_snapshot(document)
-        geometry = TimelineGeometry(row_height=48.0)
+        geometry = TimelineGeometry(row_height=row_height)
         return TimelineLayout(snapshot, geometry), geometry
 
     def test_selection_is_centered_on_note_timing_line_even_for_empty_cell(self) -> None:
@@ -48,6 +50,53 @@ class Phase11UiPolishTests(unittest.TestCase):
         self.assertAlmostEqual(rect.center().y(), row_y)
         self.assertAlmostEqual(rect.width(), geometry.lane_width - 2.0)
         self.assertAlmostEqual(rect.height(), geometry.lane_width - 2.0)
+
+    def test_shift_rectangle_draws_one_external_outline_at_dense_zoom(self) -> None:
+        _install_timing_line_note_alignment()
+        layout, geometry = self._layout(row_height=8.0)
+        segment = layout.segments[0]
+        count = min(4, segment.block.row_count)
+        self.assertGreaterEqual(count, 2)
+        targets = frozenset(
+            CellTarget(segment.block.rows[index].stable_id, lane)
+            for index in range(count)
+            for lane in (1, 2)
+        )
+        outlines = _selection_outline_rects(
+            geometry,
+            segment,
+            CellSelection(targets, next(iter(targets))),
+        )
+        self.assertEqual(len(outlines), 1)
+        outline = outlines[0]
+        first = _selection_rect(
+            geometry, 1, segment.y_for_row(0), segment.row_height
+        )
+        last = _selection_rect(
+            geometry, 2, segment.y_for_row(count - 1), segment.row_height
+        )
+        self.assertAlmostEqual(outline.left(), first.left())
+        self.assertAlmostEqual(outline.right(), last.right())
+        self.assertAlmostEqual(outline.top(), first.top())
+        self.assertAlmostEqual(outline.bottom(), last.bottom())
+
+    def test_sparse_ctrl_selection_does_not_claim_unselected_gap(self) -> None:
+        _install_timing_line_note_alignment()
+        layout, geometry = self._layout(row_height=8.0)
+        segment = layout.segments[0]
+        self.assertGreaterEqual(segment.block.row_count, 3)
+        targets = frozenset(
+            (
+                CellTarget(segment.block.rows[0].stable_id, 1),
+                CellTarget(segment.block.rows[2].stable_id, 1),
+            )
+        )
+        outlines = _selection_outline_rects(
+            geometry,
+            segment,
+            CellSelection(targets, next(iter(targets))),
+        )
+        self.assertEqual(len(outlines), 2)
 
     def test_mouse_hit_is_partitioned_around_timing_line_not_legacy_cell_top(self) -> None:
         layout, geometry = self._layout()
