@@ -22,6 +22,10 @@ class AudDecodeError(ValueError):
 _BIT_REVERSE = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
 _ENCDECRYPT_PROFILE = bytes.fromhex("000000001c1d1e1f3c3e383a585b5e59")
 _ENC2_ZERO_SCAN_LIMIT = 64 * 1024
+_ENC2_TAIL_SCAN_SIZE = 1024
+_ENC2_UNIFORM_BLOCKS = 4
+_MP3_LEADING_ZERO_PADDING = 576
+_MP3_PROBE_SIZE = _MP3_LEADING_ZERO_PADDING + 16
 
 # Static 1024-byte ENC1 table used by both ENCDecrypt.exe and ENCEncrypt.exe.
 # The official decryptor indexes it with (start_index + payload_index) & 0x3ff
@@ -78,12 +82,26 @@ _NXA_MP3_SIGNATURES = (
 )
 
 
-def _looks_like_mp3(payload: bytes) -> bool:
+def _looks_like_mp3_at_start(payload: bytes) -> bool:
     if payload.startswith(b"ID3") and len(payload) >= 10:
         return payload[3] in (2, 3, 4) and not any(
             byte & 0x80 for byte in payload[6:10]
         )
     return len(payload) >= 4 and payload[0] == 0xFF and payload[1] & 0xE0 == 0xE0
+
+
+def _looks_like_mp3(payload: bytes) -> bool:
+    if _looks_like_mp3_at_start(payload):
+        return True
+    # Some official NXA assets contain exactly one 576-byte all-zero encoded
+    # frame-sized prefix before the first real MP3 frame. FFmpeg skips it, and
+    # the Windows ENCDecrypt output preserves it byte-for-byte.
+    return (
+        len(payload) >= _MP3_LEADING_ZERO_PADDING + 4
+        and payload[:_MP3_LEADING_ZERO_PADDING]
+        == b"\x00" * _MP3_LEADING_ZERO_PADDING
+        and _looks_like_mp3_at_start(payload[_MP3_LEADING_ZERO_PADDING:])
+    )
 
 
 def _decode_enc1_source(source: bytes) -> bytes:
@@ -170,7 +188,11 @@ def _try_enc2_profile(
 ) -> bytes | None:
     profile = bytes(left ^ right for left, right in zip(base_profile, key))
     key_stream = _enc2_key_stream(encrypted_table, profile)
-    probe_size = len(signature) if signature is not None else min(16, len(encrypted_payload))
+    probe_size = (
+        len(signature)
+        if signature is not None
+        else min(_MP3_PROBE_SIZE, len(encrypted_payload))
+    )
     probe = _decode_enc2_bytes(
         encrypted_payload,
         key_stream,
@@ -186,19 +208,32 @@ def _try_enc2_profile(
     return decoded if _looks_like_mp3(decoded) else None
 
 
+def _profile_assuming_zero_block(
+    offset: int,
+    key: bytes,
+    encrypted_table: bytes,
+    encrypted_payload: bytes,
+    start_index: int,
+) -> bytes:
+    """Recover the base profile assuming 16 plaintext bytes are all zero."""
+    effective = bytearray(16)
+    for index in range(16):
+        stream_index = (start_index + offset + index) & 1023
+        lane = stream_index & 15
+        effective[lane] = (
+            _BIT_REVERSE[encrypted_payload[offset + index]]
+            ^ encrypted_table[stream_index]
+        )
+    return bytes(value ^ key[index] for index, value in enumerate(effective))
+
+
 def _recover_enc2_from_zero_run(
     key: bytes,
     encrypted_table: bytes,
     encrypted_payload: bytes,
     start_index: int,
 ) -> bytes | None:
-    """Recover per-file ENC2 profile from a 32-byte zero run in the MP3.
-
-    After removing the file table and header key, the unknown profile repeats
-    every 16 bytes. Two equal masked 16-byte blocks are therefore candidates
-    for a zero run. A candidate is accepted only if the resulting stream starts
-    as MP3, so unrelated repeated ciphertext blocks are rejected cheaply.
-    """
+    """Recover per-file ENC2 profile from a 32-byte zero run near the start."""
     prefix_size = min(len(encrypted_payload), _ENC2_ZERO_SCAN_LIMIT + 32)
     masked = bytes(
         _BIT_REVERSE[encrypted_payload[index]]
@@ -211,16 +246,12 @@ def _recover_enc2_from_zero_run(
     for offset in range(stop + 1):
         if masked[offset : offset + 16] != masked[offset + 16 : offset + 32]:
             continue
-        effective = bytearray(16)
-        for index in range(16):
-            stream_index = (start_index + offset + index) & 1023
-            lane = stream_index & 15
-            effective[lane] = (
-                _BIT_REVERSE[encrypted_payload[offset + index]]
-                ^ encrypted_table[stream_index]
-            )
-        base_profile = bytes(
-            value ^ key[index] for index, value in enumerate(effective)
+        base_profile = _profile_assuming_zero_block(
+            offset,
+            key,
+            encrypted_table,
+            encrypted_payload,
+            start_index,
         )
         if base_profile in attempted:
             continue
@@ -234,6 +265,89 @@ def _recover_enc2_from_zero_run(
         )
         if decoded is not None:
             return decoded
+    return None
+
+
+def _recover_enc2_from_uniform_tail(
+    key: bytes,
+    encrypted_table: bytes,
+    encrypted_payload: bytes,
+    start_index: int,
+) -> bytes | None:
+    """Recover a profile from long constant-byte padding near the MP3 tail.
+
+    A constant plaintext byte repeated for at least four 16-byte profile periods
+    appears as four identical masked blocks. Assuming that byte is zero recovers
+    the real profile XOR one uniform byte. The MP3 prefix determines that final
+    byte, so no song-specific profile or mastering signature is required.
+    """
+    block_size = 16
+    run_size = block_size * _ENC2_UNIFORM_BLOCKS
+    if len(encrypted_payload) < run_size:
+        return None
+
+    region_start = max(0, len(encrypted_payload) - _ENC2_TAIL_SCAN_SIZE - run_size)
+    masked = bytes(
+        _BIT_REVERSE[encrypted_payload[offset]]
+        ^ encrypted_table[(start_index + offset) & 1023]
+        ^ key[(start_index + offset) & 15]
+        for offset in range(region_start, len(encrypted_payload))
+    )
+    attempted: set[bytes] = set()
+    stop = len(masked) - run_size
+    for local_offset in range(stop + 1):
+        first = masked[local_offset : local_offset + block_size]
+        if any(
+            masked[
+                local_offset + block_size * block
+                : local_offset + block_size * (block + 1)
+            ]
+            != first
+            for block in range(1, _ENC2_UNIFORM_BLOCKS)
+        ):
+            continue
+
+        offset = region_start + local_offset
+        base_zero = _profile_assuming_zero_block(
+            offset,
+            key,
+            encrypted_table,
+            encrypted_payload,
+            start_index,
+        )
+        zero_profile = bytes(left ^ right for left, right in zip(base_zero, key))
+        zero_stream = _enc2_key_stream(encrypted_table, zero_profile)
+        probe_zero = _decode_enc2_bytes(
+            encrypted_payload,
+            zero_stream,
+            start_index,
+            limit=min(_MP3_PROBE_SIZE, len(encrypted_payload)),
+        )
+        if not probe_zero:
+            continue
+
+        # If the tail byte is C, the zero-assumption decodes every payload byte
+        # as plaintext XOR C. These three candidates cover ID3, raw MPEG sync,
+        # and the official 576-byte all-zero leading pad respectively.
+        constants = {
+            probe_zero[0] ^ ord("I"),
+            probe_zero[0] ^ 0xFF,
+            probe_zero[0],
+        }
+        for constant in constants:
+            base_profile = bytes(value ^ constant for value in base_zero)
+            if base_profile in attempted:
+                continue
+            attempted.add(base_profile)
+            decoded = _try_enc2_profile(
+                base_profile,
+                key,
+                encrypted_table,
+                encrypted_payload,
+                start_index,
+            )
+            if decoded is not None:
+                return decoded
     return None
 
 
@@ -285,6 +399,15 @@ def _decode_enc2_source(source: bytes) -> bytes:
             return decoded
 
     decoded = _recover_enc2_from_zero_run(
+        key,
+        encrypted_table,
+        encrypted_payload,
+        start_index,
+    )
+    if decoded is not None:
+        return decoded
+
+    decoded = _recover_enc2_from_uniform_tail(
         key,
         encrypted_table,
         encrypted_payload,
