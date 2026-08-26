@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import struct
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from stepnx.authoring.audio import AudDecodeError, decode_enc2_aud
@@ -72,6 +72,10 @@ def _zero_run_recovery(source: bytes):
     stop = min(_ZERO_SCAN_LIMIT, max(0, len(masked) - 32))
     attempted: set[bytes] = set()
     for offset in range(stop + 1):
+        # With the unknown profile removed, two equal 16-byte blocks imply
+        # a 32-byte repeated plaintext block. Treating that block as zeros
+        # yields a candidate profile; the decoded MP3 header is the independent
+        # validation step, so a coincidental ciphertext repetition is rejected.
         if masked[offset : offset + 16] != masked[offset + 16 : offset + 32]:
             continue
         effective = bytearray(16)
@@ -108,58 +112,78 @@ def _magic(source: bytes) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Classify AUD corpus decode failures and zero-run recovery candidates."
+        description="Classify AUD corpus formats and ENC2 recovery candidates."
     )
     parser.add_argument("root", type=Path)
     args = parser.parse_args()
+    root = args.root.resolve()
 
     paths = sorted(
-        path for path in args.root.rglob("*")
+        path for path in root.rglob("*")
         if path.is_file() and path.suffix.casefold() in {".aud", ".a"}
     )
     current_ok = 0
     zero_ok: list[tuple[str, int]] = []
     unresolved: list[str] = []
-    non_enc2: list[tuple[str, str]] = []
+    enc1: list[tuple[str, str]] = []
+    other: list[tuple[str, str]] = []
 
     for path in paths:
+        relative = path.relative_to(root).as_posix()
+        source = path.read_bytes()
+        magic = source[:4].upper()
+        if magic == b"ENC1":
+            enc1.append((relative, _magic(source)))
+            continue
+        if magic != b"ENC2":
+            other.append((relative, _magic(source)))
+            continue
         try:
             decode_enc2_aud(path)
         except AudDecodeError:
-            source = path.read_bytes()
-            if not source[:4].upper() == b"ENC2":
-                non_enc2.append((path.name, _magic(source)))
-                continue
             recovered = _zero_run_recovery(source)
             if recovered is None:
-                unresolved.append(path.name)
+                unresolved.append(relative)
             else:
                 offset, _decoded = recovered
-                zero_ok.append((path.name, offset))
+                zero_ok.append((relative, offset))
         else:
             current_ok += 1
 
     print(f"TOTAL: {len(paths)}")
-    print(f"CURRENT_OK: {current_ok}")
-    print(f"ZERO_RUN_RECOVERABLE: {len(zero_ok)}")
-    print(f"STILL_UNRESOLVED_ENC2: {len(unresolved)}")
-    print(f"NON_ENC2: {len(non_enc2)}")
+    print(f"ENC2_CURRENT_OK: {current_ok}")
+    print(f"ENC2_ZERO_RUN_RECOVERABLE: {len(zero_ok)}")
+    print(f"ENC2_STILL_UNRESOLVED: {len(unresolved)}")
+    print(f"ENC1: {len(enc1)}")
+    print(f"OTHER_FORMAT: {len(other)}")
 
     offsets = Counter(offset for _name, offset in zero_ok)
     if offsets:
-        print("ZERO_RUN_OFFSETS:")
+        print("ENC2_ZERO_RUN_OFFSETS:")
         for offset, count in offsets.most_common(20):
             print(f"  {offset}: {count}")
 
     if unresolved:
-        print("UNRESOLVED_ENC2_NAMES:")
+        print("ENC2_UNRESOLVED_PATHS:")
         for name in unresolved:
             print(f"  {name}")
 
-    if non_enc2:
-        print("NON_ENC2_MAGICS:")
-        for name, magic in non_enc2:
-            print(f"  {name}: {magic}")
+    if enc1:
+        groups: dict[str, list[str]] = defaultdict(list)
+        for relative, magic_text in enc1:
+            groups[magic_text].append(relative)
+        print(f"ENC1_HEADER_GROUPS: {len(groups)}")
+        for magic_text, members in sorted(
+            groups.items(), key=lambda item: (-len(item[1]), item[0])
+        ):
+            examples = "; ".join(members[:4])
+            suffix = " ..." if len(members) > 4 else ""
+            print(f"  {len(members):4d}  {magic_text}  {examples}{suffix}")
+
+    if other:
+        print("OTHER_FORMAT_PATHS:")
+        for relative, magic_text in other:
+            print(f"  {relative}: {magic_text}")
 
     return 0
 
