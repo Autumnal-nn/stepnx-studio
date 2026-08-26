@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import struct
 import unittest
 
 try:
     from stepnx.gui.audio_transport import (
         _accept_transport_position,
         _metronome_voice_count,
+        _mix_metronome_chunk,
+        _uses_linux_metronome_sink,
     )
 except ImportError as exc:
     _accept_transport_position = None
     _metronome_voice_count = None
+    _mix_metronome_chunk = None
+    _uses_linux_metronome_sink = None
     QT_UNAVAILABLE = str(exc)
 else:
     QT_UNAVAILABLE = ""
@@ -49,12 +54,38 @@ class AudioTransportJitterTests(unittest.TestCase):
                 accepted.append(candidate)
         self.assertEqual(accepted, [1008, 1012])
 
-    def test_linux_limits_qsoundeffect_voice_pool(self) -> None:
-        self.assertEqual(_metronome_voice_count("linux"), 2)
-        self.assertEqual(_metronome_voice_count("linux2"), 2)
+    def test_linux_uses_single_software_metronome_sink(self) -> None:
+        self.assertTrue(_uses_linux_metronome_sink("linux"))
+        self.assertTrue(_uses_linux_metronome_sink("linux2"))
+        self.assertEqual(_metronome_voice_count("linux"), 0)
 
-    def test_windows_keeps_existing_voice_pool(self) -> None:
+    def test_windows_keeps_existing_qsoundeffect_voice_pool(self) -> None:
+        self.assertFalse(_uses_linux_metronome_sink("win32"))
         self.assertEqual(_metronome_voice_count("win32"), 8)
+
+    def test_software_metronome_mixes_overlap_and_clips_int16(self) -> None:
+        # Two stereo frames at +20000 on every channel. Starting two click
+        # instances together must software-mix to +32767 rather than spawning
+        # two independent backend streams or overflowing signed Int16.
+        sample = (20000, 20000, 20000, 20000)
+        payload, remaining = _mix_metronome_chunk(
+            sample,
+            (0, 0),
+            channels=2,
+            frames=1,
+        )
+        self.assertEqual(struct.unpack("<2h", payload), (32767, 32767))
+        self.assertEqual(remaining, (1, 1))
+
+    def test_software_metronome_outputs_silence_without_active_clicks(self) -> None:
+        payload, remaining = _mix_metronome_chunk(
+            (1000, 1000),
+            (),
+            channels=2,
+            frames=3,
+        )
+        self.assertEqual(payload, b"\x00" * 12)
+        self.assertEqual(remaining, ())
 
 
 if __name__ == "__main__":
