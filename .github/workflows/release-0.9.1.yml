@@ -59,7 +59,7 @@ jobs:
       - name: Check out release commit
         uses: actions/checkout@v4
 
-      - name: Build and test in Ubuntu 20.04
+      - name: Build and test on glibc 2.31 baseline
         run: |
           docker run --rm \
             -e DEBIAN_FRONTEND=noninteractive \
@@ -67,16 +67,11 @@ jobs:
             -e RELEASE_VERSION="${RELEASE_VERSION}" \
             -v "$PWD:/work" \
             -w /work \
-            ubuntu:20.04 \
+            python:3.11-bullseye \
             bash -lc '
               set -euo pipefail
               apt-get update
-              apt-get install -y software-properties-common ca-certificates
-              add-apt-repository -y ppa:deadsnakes/ppa
-              apt-get update
-              apt-get install -y \
-                python3.11 \
-                python3.11-venv \
+              apt-get install -y --no-install-recommends \
                 libasound2 \
                 libegl1 \
                 libgl1 \
@@ -88,12 +83,11 @@ jobs:
                 libxcb-render-util0 \
                 libxcb-xinerama0 \
                 libxkbcommon-x11-0
-              python3.11 -m venv /tmp/stepnx-release
-              /tmp/stepnx-release/bin/python -m pip install --upgrade pip
-              /tmp/stepnx-release/bin/python -m pip install -e ".[gui,build]"
-              /tmp/stepnx-release/bin/python -c "import importlib.metadata as m, os; assert m.version(\"stepnx-studio\") == os.environ[\"RELEASE_VERSION\"]"
-              /tmp/stepnx-release/bin/python -m unittest discover -s tests -v
-              /tmp/stepnx-release/bin/python -m PyInstaller --noconfirm --clean packaging/stepnx-studio.spec
+              python -m pip install --upgrade pip
+              python -m pip install -e ".[gui,build]"
+              python -c "import importlib.metadata as m, os; assert m.version(\"stepnx-studio\") == os.environ[\"RELEASE_VERSION\"]"
+              python -m unittest discover -s tests -v
+              python -m PyInstaller --noconfirm --clean packaging/stepnx-studio.spec
               test -x dist/StepNX-Studio-Windows/StepNX-Studio
               mv dist/StepNX-Studio-Windows dist/StepNX-Studio-Linux-x86_64
               mkdir -p release
