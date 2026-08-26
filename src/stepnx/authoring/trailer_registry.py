@@ -17,7 +17,7 @@ class TrailerFieldDefinition:
     localized: bool = False
 
 
-# These definitions are deliberately profile-specific.  NXA metadata ID 20,
+# These definitions are deliberately profile-specific. NXA metadata ID 20,
 # for example, has different semantics and NXA has no later-generation sized
 # trailer at all.
 _FIESTA2_FIELDS = (
@@ -67,12 +67,23 @@ _FIESTA2_FIELDS = (
     TrailerFieldDefinition(1450, "Mission condition string", TrailerEvidence.OFFICIAL_CORPUS),
 )
 
+# Header 1008 first appears in the XX-and-later branch. R!SE names the runtime
+# field mpStepArtist, and official R!SE charts store a trailer-relative offset
+# to a NUL-terminated UTF-8 Step Artist string. Keep it in the existing modern
+# profile instead of adding a one-off R!SE profile.
+_MODERN_FIELDS = (
+    *_FIESTA2_FIELDS,
+    TrailerFieldDefinition(
+        1008,
+        "Step Artist (XX and beyond)",
+        TrailerEvidence.RUNTIME_CONFIRMED,
+    ),
+)
+
 
 _BY_PROFILE = {
     "fiesta2": {item.base_id: item for item in _FIESTA2_FIELDS},
-    # Prime 2 retains the Fiesta 2 trailer family in the supplied corpus.  Any
-    # Prime-2-only field should be added here rather than silently generalized.
-    "prime2": {item.base_id: item for item in _FIESTA2_FIELDS},
+    "prime2": {item.base_id: item for item in _MODERN_FIELDS},
 }
 
 
