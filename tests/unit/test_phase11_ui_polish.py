@@ -9,13 +9,18 @@ try:
     from PySide6.QtGui import QAction, QKeySequence
     from PySide6.QtWidgets import QApplication, QMainWindow
 
-    from stepnx.authoring.timeline import TimelineGeometry
+    from stepnx.authoring.snapshot import create_authoring_snapshot
+    from stepnx.authoring.timeline import TimelineGeometry, TimelineLayout
+    from stepnx.codecs.nx20 import parse_bytes
     from stepnx.gui.phase11_ui_polish import (
         _install_shortcuts,
         _move_waveform_to_audio,
         _selection_rect,
+        _timing_line_cell_hit,
+        _timing_line_row_hit,
     )
     from stepnx.gui.phase11_waveform_precision import _install_timing_line_note_alignment
+    from tests.fixture_factory import make_normal_nx20
 except ImportError as exc:
     QApplication = None
     QT_UNAVAILABLE = str(exc)
@@ -29,6 +34,12 @@ class Phase11UiPolishTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
 
+    def _layout(self):
+        document = parse_bytes(make_normal_nx20(), row_storage="rich")
+        snapshot = create_authoring_snapshot(document)
+        geometry = TimelineGeometry(row_height=48.0)
+        return TimelineLayout(snapshot, geometry), geometry
+
     def test_selection_is_centered_on_note_timing_line_even_for_empty_cell(self) -> None:
         _install_timing_line_note_alignment()
         geometry = TimelineGeometry()
@@ -37,6 +48,30 @@ class Phase11UiPolishTests(unittest.TestCase):
         self.assertAlmostEqual(rect.center().y(), row_y)
         self.assertAlmostEqual(rect.width(), geometry.lane_width - 2.0)
         self.assertAlmostEqual(rect.height(), geometry.lane_width - 2.0)
+
+    def test_mouse_hit_is_partitioned_around_timing_line_not_legacy_cell_top(self) -> None:
+        layout, geometry = self._layout()
+        segment = layout.segments[0]
+        self.assertGreaterEqual(segment.block.row_count, 2)
+        second_line = segment.y_for_row(1)
+
+        # Twenty pixels above row 1 is still inside the upper half of a
+        # 44-pixel note/selection centered on that timing line. Legacy
+        # row_at_y() resolves this point to row 0; Phase 11 must resolve row 1.
+        hit = _timing_line_row_hit(layout, second_line - 20.0)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit[1], 1)
+
+        # Cross the exact midpoint between row 0 and row 1 and ownership moves
+        # back to row 0, so empty cells have the same unambiguous hit regions.
+        hit = _timing_line_row_hit(layout, second_line - 25.0)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit[1], 0)
+
+        lane_x = geometry.ruler_width + geometry.lane_width * 2.5
+        cell_hit = _timing_line_cell_hit(layout, lane_x, second_line - 20.0)
+        self.assertIsNotNone(cell_hit)
+        self.assertEqual(cell_hit[1:], (1, 2))
 
     def test_waveform_toggle_moves_from_lonely_view_menu_to_audio(self) -> None:
         window = QMainWindow()
