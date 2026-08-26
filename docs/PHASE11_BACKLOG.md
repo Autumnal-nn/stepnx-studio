@@ -158,6 +158,8 @@ None inside the agreed Phase 11 scope.
   official NX2 import domain.
 - No additional Phase 11 implementation or research dependency remains.
 - Re-run the strict Windows test gate and closed-alpha smoke test on the final
-  Phase 11 HEAD before merging.
+  Phase 11 HEAD before merging. The previous successful package predates the
+  feedback/performance changes and is therefore evidence for the earlier HEAD,
+  not the current merge candidate.
 - Do not merge solely from documentation state; the Windows gate remains the
   final release/merge guard.
