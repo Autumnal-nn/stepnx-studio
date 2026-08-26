@@ -13,8 +13,9 @@ def executable_enables_patched_profile(executable_name: str | None = None) -> bo
     """Return whether the deliberately hidden patched-NXA profile is exposed.
 
     The comparison is intentionally exact. Normal StepNX Studio builds expose
-    only native NXA, Fiesta 2, and Prime 2. Renaming the Windows executable to
-    the easter-egg name replaces native NXA with the patched profile.
+    only native NXA, Fiesta-family, and modern Prime-family semantics. Renaming
+    the Windows executable to the easter-egg name replaces native NXA with the
+    patched profile.
     """
 
     if executable_name is None:
@@ -42,12 +43,23 @@ def install_phase11_profile_gate(window, *, executable_name: str | None = None) 
         return
 
     native = actions.get("nxa-native")
+    fiesta = actions.get("fiesta2")
+    prime = actions.get("prime2")
     patched = actions.get("nxa-step5-patched")
-    if native is None or patched is None:
+    if native is None or fiesta is None or prime is None or patched is None:
         return
 
     native.setText("NXA")
+    native.setToolTip("NX Absolute native engine semantics.")
+    fiesta.setText("Fiesta")
+    fiesta.setToolTip("Fiesta / Fiesta EX / Fiesta 2 engine family.")
+    prime.setText("Prime+")
+    prime.setToolTip(
+        "Modern engine family: Prime / Prime 2 / XX / Phoenix / R!SE and compatible successors."
+    )
     patched.setText("NXA-patched")
+    patched.setToolTip("NXA with the Step5 patch extensions enabled.")
+
     enabled = executable_enables_patched_profile(executable_name)
 
     if enabled:
