@@ -13,18 +13,43 @@ def _magic(source: bytes) -> str:
     return f"{raw.hex()}  {text}"
 
 
+def _is_intro_preview(path: Path, root: Path) -> bool:
+    """Return whether *path* belongs to the non-authoring INTRO preview tree."""
+
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    return bool(relative.parts) and relative.parts[0].casefold() == "intro"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Audit StepNX AUD decoder coverage across ENC1 and ENC2 files."
     )
     parser.add_argument("root", type=Path)
+    parser.add_argument(
+        "--include-intro",
+        action="store_true",
+        help="include /INTRO song-preview cuts in decoder coverage",
+    )
     args = parser.parse_args()
     root = args.root.resolve()
 
-    paths = sorted(
+    discovered = sorted(
         path
         for path in root.rglob("*")
         if path.is_file() and path.suffix.casefold() in {".aud", ".a"}
+    )
+    ignored_intro = (
+        []
+        if args.include_intro
+        else [path for path in discovered if _is_intro_preview(path, root)]
+    )
+    paths = (
+        discovered
+        if args.include_intro
+        else [path for path in discovered if not _is_intro_preview(path, root)]
     )
 
     ok = Counter()
@@ -52,6 +77,9 @@ def main() -> int:
         else:
             ok[magic] += 1
 
+    print(f"DISCOVERED: {len(discovered)}")
+    if not args.include_intro:
+        print(f"IGNORED_INTRO: {len(ignored_intro)}")
     print(f"TOTAL: {len(paths)}")
     print(f"ENC1_OK: {ok['ENC1']}")
     print(f"ENC1_FAIL: {len(failed['ENC1'])}")
