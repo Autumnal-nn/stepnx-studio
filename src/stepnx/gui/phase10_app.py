@@ -36,6 +36,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase11_fast_notes import install_phase11_fast_note_index
     from stepnx.gui.phase11_feedback import install_phase11_feedback
     from stepnx.gui.phase11_import import install_phase11_import
+    from stepnx.gui.phase11_linux_metronome import install_phase11_linux_metronome
     from stepnx.gui.phase11_nx10_materialization import install_phase11_nx10_materialization
     from stepnx.gui.phase11_preferences import install_phase11_preferences
     from stepnx.gui.phase11_profile_gate import install_phase11_profile_gate
@@ -57,6 +58,7 @@ def main(argv=None) -> int:
     def show_with_phase10(self, *args, **kwargs):
         if self.windowTitle() == "StepNX Studio":
             install_phase10(self)
+            install_phase11_linux_metronome(self)
             install_phase11_profile_gate(self)
             install_phase11_import(self)
             install_phase11_workspace_tools(self)
