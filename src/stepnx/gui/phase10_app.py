@@ -32,6 +32,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase10_timeline import Phase10TimelineWidget
     from stepnx.gui.phase10_timing import Phase10BlockTimingDialog
     from stepnx.gui.phase10_preview import Phase10GameplayPreviewWidget
+    from stepnx.gui.phase11_audio_picker import install_phase11_audio_picker
     from stepnx.gui.phase11_authoring_polish import install_phase11_authoring_polish
     from stepnx.gui.phase11_fast_notes import install_phase11_fast_note_index
     from stepnx.gui.phase11_feedback import install_phase11_feedback
@@ -64,6 +65,7 @@ def main(argv=None) -> int:
             install_phase11_workspace_tools(self)
             install_phase11_state_guard(self)
             install_phase11_waveform(self)
+            install_phase11_audio_picker(self)
             install_phase11_waveform_precision(self)
             install_phase11_authoring_polish(self)
             install_phase11_trailer_edit(self)
