@@ -21,13 +21,17 @@ class AudDecodeError(ValueError):
 
 _BIT_REVERSE = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
 _ENCDECRYPT_PROFILE = bytes.fromhex("000000001c1d1e1f3c3e383a585b5e59")
-# A second fixed profile is present in original NXA-era ENC2 wrappers. It was
-# recovered from two independently wrapped 705.AUD files whose decrypted MP3
-# payload is byte-identical. All 1024 keystream positions and all 16 repeating
-# profile lanes agree across the complete 2.56 MiB payload, so this is not a
-# header-signature guess.
-_NXA_ENC2_PROFILE = bytes.fromhex("ba81da7ea69ec09db6bfdab8a2d4f8df")
-_ENC2_PROFILES = (_ENCDECRYPT_PROFILE, _NXA_ENC2_PROFILE)
+# Fixed profiles recovered from pairs of original NXA-era ENC2 wrappers whose
+# decrypted MP3 payloads are byte-identical. For each pair, all 1024 keystream
+# positions and all 16 repeating profile lanes agree across the full payload,
+# so these are not header-signature guesses.
+_NXA_705_ENC2_PROFILE = bytes.fromhex("ba81da7ea69ec09db6bfdab8a2d4f8df")
+_NXA_704_ENC2_PROFILE = bytes.fromhex("9ea4448e82b95a8d9aa27c88beb79a8f")
+_ENC2_PROFILES = (
+    _ENCDECRYPT_PROFILE,
+    _NXA_705_ENC2_PROFILE,
+    _NXA_704_ENC2_PROFILE,
+)
 
 
 def _looks_like_mp3(payload: bytes) -> bool:
@@ -41,10 +45,10 @@ def _looks_like_mp3(payload: bytes) -> bool:
 def decode_enc2_aud(path: str | Path) -> bytes:
     """Decode known self-contained Andamiro ENC2 AUD profiles.
 
-    The first profile matches ENCDecrypt.exe. A second profile was recovered
-    from paired NXA-era wrappers carrying the same MP3 payload. Unknown
-    machine/HASP-derived profiles are rejected instead of returning
-    plausible-looking garbage.
+    The first profile matches ENCDecrypt.exe. Additional profiles were
+    recovered from paired NXA-era wrappers carrying byte-identical MP3
+    payloads. Unknown machine/HASP-derived profiles are rejected instead of
+    returning plausible-looking garbage.
     """
     try:
         source = Path(path).read_bytes()
