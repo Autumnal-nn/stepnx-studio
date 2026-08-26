@@ -42,6 +42,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase11_split_cascade import install_phase11_split_cascade
     from stepnx.gui.phase11_state_guard import install_phase11_state_guard
     from stepnx.gui.phase11_trailer_edit import install_phase11_trailer_edit
+    from stepnx.gui.phase11_ui_polish import install_phase11_ui_polish
     from stepnx.gui.phase11_waveform import install_phase11_waveform
     from stepnx.gui.phase11_waveform_precision import install_phase11_waveform_precision
     from stepnx.gui.phase11_workspace import install_phase11_workspace_tools
@@ -68,6 +69,7 @@ def main(argv=None) -> int:
             install_phase11_feedback(self)
             install_phase11_split_cascade(self)
             install_phase11_fast_note_index(self)
+            install_phase11_ui_polish(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10
