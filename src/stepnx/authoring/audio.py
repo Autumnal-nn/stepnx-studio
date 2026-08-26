@@ -21,6 +21,13 @@ class AudDecodeError(ValueError):
 
 _BIT_REVERSE = bytes(int(f"{value:08b}"[::-1], 2) for value in range(256))
 _ENCDECRYPT_PROFILE = bytes.fromhex("000000001c1d1e1f3c3e383a585b5e59")
+# A second fixed profile is present in original NXA-era ENC2 wrappers. It was
+# recovered from two independently wrapped 705.AUD files whose decrypted MP3
+# payload is byte-identical. All 1024 keystream positions and all 16 repeating
+# profile lanes agree across the complete 2.56 MiB payload, so this is not a
+# header-signature guess.
+_NXA_ENC2_PROFILE = bytes.fromhex("ba81da7ea69ec09db6bfdab8a2d4f8df")
+_ENC2_PROFILES = (_ENCDECRYPT_PROFILE, _NXA_ENC2_PROFILE)
 
 
 def _looks_like_mp3(payload: bytes) -> bool:
@@ -32,10 +39,12 @@ def _looks_like_mp3(payload: bytes) -> bool:
 
 
 def decode_enc2_aud(path: str | Path) -> bytes:
-    """Decode the self-contained ENC2 profile used by ENCDecrypt.exe.
+    """Decode known self-contained Andamiro ENC2 AUD profiles.
 
-    Some ENC2 files use a different machine/HASP-derived profile. Those are
-    rejected after decoding instead of returning plausible-looking garbage.
+    The first profile matches ENCDecrypt.exe. A second profile was recovered
+    from paired NXA-era wrappers carrying the same MP3 payload. Unknown
+    machine/HASP-derived profiles are rejected instead of returning
+    plausible-looking garbage.
     """
     try:
         source = Path(path).read_bytes()
@@ -53,20 +62,30 @@ def decode_enc2_aud(path: str | Path) -> bytes:
     start_index = struct.unpack_from("<I", source, table_offset)[0]
     encrypted_table = source[table_offset + 4 : payload_offset]
     encrypted_payload = source[payload_offset:payload_end]
-    profile = bytes(left ^ right for left, right in zip(_ENCDECRYPT_PROFILE, key))
-    key_stream = bytes(
-        value ^ profile[index & 15]
-        for index, value in enumerate(encrypted_table)
-    )
-    decoded = bytes(
-        _BIT_REVERSE[value] ^ key_stream[(start_index + index) & 1023]
-        for index, value in enumerate(encrypted_payload)
-    )
-    if not _looks_like_mp3(decoded):
-        raise AudDecodeError(
-            "ENC2 AUD uses an unsupported key profile; decoded payload is not MP3"
+
+    for base_profile in _ENC2_PROFILES:
+        profile = bytes(left ^ right for left, right in zip(base_profile, key))
+        key_stream = bytes(
+            value ^ profile[index & 15]
+            for index, value in enumerate(encrypted_table)
         )
-    return decoded
+        probe_size = min(16, len(encrypted_payload))
+        probe = bytes(
+            _BIT_REVERSE[value] ^ key_stream[(start_index + index) & 1023]
+            for index, value in enumerate(encrypted_payload[:probe_size])
+        )
+        if not _looks_like_mp3(probe):
+            continue
+        decoded = bytes(
+            _BIT_REVERSE[value] ^ key_stream[(start_index + index) & 1023]
+            for index, value in enumerate(encrypted_payload)
+        )
+        if _looks_like_mp3(decoded):
+            return decoded
+
+    raise AudDecodeError(
+        "ENC2 AUD uses an unsupported key profile; decoded payload is not MP3"
+    )
 
 
 @dataclass(frozen=True, slots=True)
