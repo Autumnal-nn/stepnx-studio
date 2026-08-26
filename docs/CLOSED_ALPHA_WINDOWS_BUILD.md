@@ -1,6 +1,6 @@
-# Closed-alpha Windows standalone build
+# Windows standalone build
 
-This procedure builds the current StepNX Studio closed-alpha package locally on Windows. It intentionally uses the repository's strict Windows gate and canonical PyInstaller spec rather than an ad-hoc command.
+This procedure builds the current StepNX Studio Windows package with the repository's strict test gate and canonical PyInstaller spec.
 
 ## Requirements
 
@@ -11,18 +11,18 @@ This procedure builds the current StepNX Studio closed-alpha package locally on 
 
 The project pins the GUI/build families to `PySide6>=6.7,<7` and `PyInstaller>=6.11,<7` through `pyproject.toml`.
 
-## 1. Get the exact merge-candidate branch
+## 1. Get the release source
 
 From Command Prompt or PowerShell:
 
 ```powershell
 git clone https://github.com/Autumnal-nn/stepnx-studio.git
 cd stepnx-studio
-git switch phase11
+git switch main
 git pull --ff-only
 ```
 
-For a reproducible closed-alpha build, record the commit before building:
+Record the exact source commit before building:
 
 ```powershell
 git rev-parse HEAD
@@ -38,8 +38,6 @@ The command should print nothing.
 
 ## 2. Recommended isolated environment
 
-The build script can install into the active Python environment directly, but a local virtual environment keeps the closed-alpha toolchain isolated:
-
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -53,42 +51,37 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-After activation, use `python` as the script's Python command:
+Build with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build_windows_package.ps1 -Python python
 ```
 
-Without a virtual environment, the equivalent canonical build is:
+Without a virtual environment:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build_windows_package.ps1
 ```
 
-The script performs all three release operations in order:
+The script:
 
 1. installs `.[gui,build]` unless `-SkipInstall` is supplied;
 2. runs `tools/run_windows_test_gate.py` unless `-SkipTests` is supplied;
-3. invokes PyInstaller with `packaging/stepnx-studio.spec`, validates the executable, creates the ZIP, and prints its SHA-256.
+3. invokes PyInstaller with `packaging/stepnx-studio.spec`;
+4. validates the executable, creates the ZIP, and prints its SHA-256.
 
-For a release candidate, **do not use `-SkipTests`**.
+For a release build, **do not use `-SkipTests`**.
 
 ## 3. Strict Windows gate
 
-The build script runs this automatically. To run it separately while diagnosing a failure:
+The build script runs this automatically. To run it separately:
 
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
 python tools\run_windows_test_gate.py
 ```
 
-The gate rejects:
-
-- any failing test;
-- fewer than the repository's minimum expected test count;
-- unexpected skipped tests.
-
-A plain green `python -m unittest` is not sufficient for the merge/release gate because Qt tests could otherwise be skipped silently.
+The gate rejects failing tests, an unexpectedly low discovered-test count, and unexpected skips.
 
 ## 4. Output
 
@@ -102,82 +95,40 @@ dist\StepNX-Studio-Windows\
 dist\StepNX-Studio-Windows.zip
 ```
 
-The distribution is intentionally **one-folder**, not a single-file PyInstaller executable. Distribute the entire `StepNX-Studio-Windows` folder or the generated ZIP; do not copy only the `.exe` out of that directory.
+The distribution is intentionally one-folder. Distribute the entire folder or the generated ZIP; do not copy only the executable out of its runtime directory.
 
-The build script prints the SHA-256 for:
+## 5. Public release profile set
 
-```text
-dist\StepNX-Studio-Windows.zip
-```
-
-Record that hash together with the source commit SHA for each closed-alpha drop.
-
-## 5. Standard and patched closed-alpha executables
-
-The ordinary build exposes these profiles:
+The standard release executable exposes the public engine-family profiles:
 
 - NXA;
-- Fiesta 2;
-- Prime 2.
+- Fiesta;
+- Prime+.
 
-The Step5-patched NXA profile is deliberately hidden behind the executable-name gate. To create the patched tester entry without rebuilding, copy the executable **inside the same distribution directory**:
-
-```powershell
-Copy-Item `
-  .\dist\StepNX-Studio-Windows\StepNX-Studio.exe `
-  .\dist\StepNX-Studio-Windows\"StepMX Studio.exe"
-```
-
-Launch:
-
-```powershell
-.\dist\StepNX-Studio-Windows\"StepMX Studio.exe"
-```
-
-The name must be exactly `StepMX Studio.exe`. Under that executable identity, `NXA-patched` replaces native NXA in the profile selector; Fiesta 2 and Prime 2 remain available.
-
-If both launchers should be included in the closed-alpha ZIP, create the copy before making the final tester archive, then recompute the SHA-256 of that final archive. The canonical build script's ZIP contains only the standard launcher unless the script itself is changed later.
+Experimental or private capability gates are not part of the public release procedure.
 
 ## 6. Manual smoke test before distributing
 
 Run the packaged executable, not the editable Python checkout. At minimum verify:
 
-1. standard `StepNX-Studio.exe` shows NXA, Fiesta 2, and Prime 2 and does not expose `NXA-patched`;
-2. `StepMX Studio.exe` shows `NXA-patched`, Fiesta 2, and Prime 2;
-3. open representative NXA, Fiesta 2, and Prime 2 folders/files;
-4. inspect Header, Split, and Division metadata and confirm unknown/raw entries remain visible but disabled;
-5. inspect a later-generation composite Header ID and confirm its field label includes the historical language slot while the full numeric ID is retained;
-6. edit a disposable copy, save it, reopen it, and confirm expected round-trip behavior;
-7. exercise waveform/playback with WAV, MP3, and a real uppercase `.AUD` song through both audio-picker paths; staged `.AUD` playback must use the generic ENC1/ENC2 decoder path;
-8. after the `.AUD` waveform is ready, switch audio or close the app and confirm no new persistent `stepnx-audio-*` temporary directory remains;
-9. exercise one NX10/legacy import and one Save All workflow;
-10. close/reopen the app to verify persisted local rendering preferences do not alter chart data.
+1. the standard executable exposes the expected public profiles;
+2. representative NXA, Fiesta-family, and Prime+-family folders/files open correctly;
+3. Header, Split, and Division metadata remain inspectable and unknown/raw entries remain preserved;
+4. a disposable edit can be saved, reopened, and round-tripped as expected;
+5. waveform/playback works with WAV, MP3, and a real uppercase `.AUD` song through both audio-picker paths;
+6. staged `.AUD` playback uses the generic ENC1/ENC2 decoder path;
+7. after the `.AUD` waveform is ready, switching audio or closing the app leaves no persistent `stepnx-audio-*` temporary directory;
+8. one NX10/legacy import and one Save All workflow succeed;
+9. persisted local rendering preferences survive restart without altering chart data.
 
 Do not perform release smoke tests on irreplaceable corpus files. Use disposable copies.
 
-## 7. Suggested closed-alpha naming
+## 7. Release naming
 
-Keep the source/application version untouched until a formal release-version decision. Name the external tester artifact using the date and short commit SHA, for example:
+The 0.9.1 Windows artifact is published as:
 
-```powershell
-$sha = (git rev-parse --short=8 HEAD)
-$stamp = Get-Date -Format "yyyyMMdd"
-$alpha = "StepNX-Studio-ClosedAlpha-$stamp-$sha.zip"
-Compress-Archive -Path .\dist\StepNX-Studio-Windows\* -DestinationPath $alpha -Force
-Get-FileHash $alpha -Algorithm SHA256
+```text
+StepNX-Studio-0.9.1-Windows-x86_64.zip
 ```
 
-This avoids pretending the pre-alpha package is a stable semantic version while still making every tester build traceable to an exact source state.
-
-## 8. Merge sequence after closed-alpha validation
-
-After the strict gate and smoke test succeed:
-
-1. confirm `git status --short` is clean;
-2. confirm the tested commit is still the head of `phase11` and Draft PR #8;
-3. record the tested commit SHA and package SHA-256 in the PR or release notes;
-4. mark PR #8 ready for review;
-5. review the final diff;
-6. merge only as a separate explicit action.
-
-Building the closed alpha does not itself merge Phase 11.
+Record its SHA-256 together with the source commit used for the release.
