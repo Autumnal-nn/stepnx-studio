@@ -29,8 +29,7 @@ StepNX Studio remains pre-1.0. Some runtime-accurate simulator details, deeper f
 ## Downloads
 
 - `StepNX-Studio-0.9.1-Windows-x86_64.zip`: ready-to-run Windows x86_64 one-folder bundle.
-- `StepNX-Studio-0.9.1-Linux-x86_64.AppImage`: Linux x86_64 AppImage.
-- `StepNX-Studio-0.9.1-Linux-x86_64.tar.gz`: unpacked-bundle fallback for Linux x86_64.
+- `StepNX-Studio-0.9.1-Linux-x86_64.tar.gz`: ready-to-run Linux x86_64 one-folder bundle.
 - `SHA256SUMS.txt`: SHA-256 checksums for the release artifacts.
 
 StepNX Studio is unofficial and is not affiliated with Andamiro. Official game assets are not distributed by this project.
