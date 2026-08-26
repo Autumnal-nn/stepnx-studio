@@ -14,7 +14,7 @@ from stepnx.core.profiles import (
     profile_capabilities,
 )
 from stepnx.core.scalars import RawU32
-from tests.fixture_factory import make_normal_nx20
+from tests.fixture_factory import make_normal_nx20, u32
 
 
 class ModernProfileExtensionTests(unittest.TestCase):
@@ -33,7 +33,13 @@ class ModernProfileExtensionTests(unittest.TestCase):
         self.assertIn("step-artist-trailer", profile_capabilities("prime2"))
 
     def test_step_artist_projects_and_edits_through_trailer_editor(self) -> None:
-        document = parse_bytes(make_normal_nx20(), profile="prime2")
+        # Relocation is intentionally supported only for the aligned string-pool
+        # layout observed in the official later-engine corpus.  The generic NX20
+        # fixture uses a compact synthetic trailer, so build an aligned trailer
+        # explicitly for this relocation test instead of weakening the guard.
+        payload = b"condition\x00\x00\x00localized text\x00"
+        source = make_normal_nx20(sized_trailer=False) + payload + u32(len(payload) + 4)
+        document = parse_bytes(source, profile="prime2")
         first = document.header_metadata[0]
         step_artist = replace(
             first,
