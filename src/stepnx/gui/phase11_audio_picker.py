@@ -43,7 +43,14 @@ def _choose_audio(window) -> None:
 
 
 def install_phase11_audio_picker(window) -> None:
-    """Make the chart-audio picker portable across case-sensitive desktops."""
+    """Make every chart-audio picker portable across case-sensitive desktops."""
+
+    # phase11_waveform's missing-song prompt calls its module-level
+    # _choose_audio_dialog() directly. Replace that global as well as the menu
+    # QAction so manual selection and the automatic fallback use one picker.
+    import stepnx.gui.phase11_waveform as waveform_module
+
+    waveform_module._choose_audio_dialog = _choose_audio
 
     action = next(
         (
