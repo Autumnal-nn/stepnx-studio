@@ -104,6 +104,26 @@ def _looks_like_mp3(payload: bytes) -> bool:
     )
 
 
+def _matches_recovered_mp3_kind(payload: bytes, kind: str) -> bool:
+    """Validate the exact prefix assumption used to recover a tail profile."""
+    if kind == "id3":
+        return payload.startswith(b"ID3") and _looks_like_mp3_at_start(payload)
+    if kind == "zero-padded":
+        return (
+            len(payload) >= _MP3_LEADING_ZERO_PADDING + 4
+            and payload[:_MP3_LEADING_ZERO_PADDING]
+            == b"\x00" * _MP3_LEADING_ZERO_PADDING
+            and _looks_like_mp3_at_start(payload[_MP3_LEADING_ZERO_PADDING:])
+        )
+    if kind == "mpeg":
+        return (
+            len(payload) >= 4
+            and payload[0] == 0xFF
+            and payload[1] & 0xE0 == 0xE0
+        )
+    raise ValueError(f"unknown MP3 recovery kind: {kind}")
+
+
 def _decode_enc1_source(source: bytes) -> bytes:
     if len(source) < 0x8A or source[:4].upper() != b"ENC1":
         raise AudDecodeError("AUD is not an ENC1 stream")
@@ -327,26 +347,36 @@ def _recover_enc2_from_uniform_tail(
             continue
 
         # If the tail byte is C, the zero-assumption decodes every payload byte
-        # as plaintext XOR C. These three candidates cover ID3, raw MPEG sync,
-        # and the official 576-byte all-zero leading pad respectively.
-        constants = {
-            probe_zero[0] ^ ord("I"),
-            probe_zero[0] ^ 0xFF,
-            probe_zero[0],
-        }
-        for constant in constants:
+        # as plaintext XOR C. Try prefix families in a deliberate order and
+        # require the recovered probe to match the family used to derive C.
+        # This avoids accepting an ID3 stream as a coincidental MPEG sync after
+        # XORing every byte by a uniform constant.
+        candidates = (
+            ("id3", probe_zero[0] ^ ord("I")),
+            ("zero-padded", probe_zero[0]),
+            ("mpeg", probe_zero[0] ^ 0xFF),
+        )
+        for kind, constant in candidates:
             base_profile = bytes(value ^ constant for value in base_zero)
             if base_profile in attempted:
                 continue
             attempted.add(base_profile)
-            decoded = _try_enc2_profile(
-                base_profile,
-                key,
-                encrypted_table,
+            profile = bytes(left ^ right for left, right in zip(base_profile, key))
+            key_stream = _enc2_key_stream(encrypted_table, profile)
+            probe = _decode_enc2_bytes(
                 encrypted_payload,
+                key_stream,
+                start_index,
+                limit=min(_MP3_PROBE_SIZE, len(encrypted_payload)),
+            )
+            if not _matches_recovered_mp3_kind(probe, kind):
+                continue
+            decoded = _decode_enc2_bytes(
+                encrypted_payload,
+                key_stream,
                 start_index,
             )
-            if decoded is not None:
+            if _looks_like_mp3(decoded):
                 return decoded
     return None
 
