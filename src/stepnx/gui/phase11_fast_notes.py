@@ -94,6 +94,24 @@ def _replace_one_row(rows, row_index: int, replacement):
     return tuple(edited)
 
 
+def _cells_for_empty_overlay_row(rows, row_index: int) -> list[NoteCell] | None:
+    """Recover original cell identities when an overlay note row was cleared.
+
+    OverlayRows deliberately keep a CompactRows base so sparse edits stay cheap.
+    If a packed note row is replaced by EmptyRow and then receives a note again,
+    allocating fresh IDs would make the replacement disagree with the base row's
+    stable cell identities. The validator correctly rejects that state. Reuse the
+    base PackedNoteRow cells instead.
+    """
+
+    if not isinstance(rows, OverlayRows):
+        return None
+    original = rows.base[row_index]
+    if isinstance(original, PackedNoteRow):
+        return list(original.cells)
+    return None
+
+
 class _FastSetNoteAt:
     """Interactive SetNoteAt with Block hinting and sparse row replacement.
 
@@ -127,11 +145,13 @@ class _FastSetNoteAt:
         if isinstance(row, EmptyRow):
             if self.raw == b"\0\0\0\0":
                 return document
-            cells = [
-                NoteCell(next_id + index, b"\0\0\0\0", None)
-                for index in range(columns)
-            ]
-            next_id += columns
+            cells = _cells_for_empty_overlay_row(block.rows, row_index)
+            if cells is None:
+                cells = [
+                    NoteCell(next_id + index, b"\0\0\0\0", None)
+                    for index in range(columns)
+                ]
+                next_id += columns
         else:
             cells = _rich_cells(row)
             if len(cells) != columns:
