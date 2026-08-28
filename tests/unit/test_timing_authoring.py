@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from stepnx.authoring import (
     BlockTimingValues,
@@ -63,6 +64,53 @@ class TimingProjectionTests(unittest.TestCase):
         self.assertEqual(point.beat, 0.25)
         self.assertAlmostEqual(point.time_ms, block.start_time + 125.0)
         self.assertEqual(projection.nearest_row(point.time_ms), point)
+
+    def test_skip_rows_share_start_time_and_transport_advances_past_div(self) -> None:
+        document = parse_bytes(make_normal_nx20(), source="NM.NX")
+        snapshot = create_authoring_snapshot(document)
+        source_split = snapshot.splits[0]
+        first = replace(
+            source_split.blocks[0],
+            start_time=1000.0,
+            smooth_speed=2,
+        )
+        second_split_id = source_split.stable_id + 100_000
+        second = replace(
+            source_split.blocks[0],
+            stable_id=source_split.blocks[0].stable_id + 100_000,
+            split_id=second_split_id,
+            start_time=1500.0,
+            smooth_speed=0,
+        )
+        first_split = replace(source_split, blocks=(first,))
+        second_split = replace(
+            source_split,
+            stable_id=second_split_id,
+            index=source_split.index + 1,
+            blocks=(second,),
+        )
+        snapshot = replace(
+            snapshot,
+            splits=(first_split, second_split),
+            active_blocks=(
+                (first_split.stable_id, first.stable_id),
+                (second_split.stable_id, second.stable_id),
+            ),
+        )
+        projection = TimingProjection(snapshot)
+
+        self.assertEqual(projection.row_duration_ms(first), 0.0)
+        self.assertEqual(
+            projection.point(
+                first.split_id,
+                first.stable_id,
+                first.row_count,
+            ).time_ms,
+            1000.0,
+        )
+        at_skip_start = projection.locate(1000.0)
+        self.assertEqual(at_skip_start.block_id, second.stable_id)
+        self.assertEqual(at_skip_start.row, 0.0)
 
 
 if __name__ == "__main__":
