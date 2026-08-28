@@ -10,7 +10,6 @@ from stepnx.preview.routes import ResolvedRoute
 from stepnx.preview.snapshot import PreviewSnapshot
 
 
-DIV_FLAG_SMOOTH = 0x01
 DIV_FLAG_SKIP = 0x02
 
 
@@ -96,8 +95,8 @@ class RuntimeEventStream:
         """Return the engine scroll factor active at ``time_ms``.
 
         The fifth Block float is the visual speed factor (negative values also
-        mark freezes). The Block flag byte is a bitfield: bit 0 requests a
-        smooth transition and bit 1 is the native Skip/warp flag.
+        mark freezes). ``smooth_speed`` does not remove a Block: any non-zero
+        value requests a transition from the preceding factor.
         """
 
         if not self.timing:
@@ -173,8 +172,7 @@ def build_event_stream(
         if block.bpm <= 0.0 or block.beat_split <= 0:
             warnings.append(f"Block {block.stable_id} has invalid BPM or Beat Split")
             continue
-        flags = block.smooth_speed
-        is_skip = bool(flags & DIV_FLAG_SKIP)
+        is_skip = bool(block.smooth_speed & DIV_FLAG_SKIP)
         freeze_delay = (
             max(0.0, block.offset_or_delay_ms)
             if block.speed_or_freeze < 0.0 and not is_skip
@@ -202,7 +200,7 @@ def build_event_stream(
             target_speed_factor = 1.0
         else:
             target_speed_factor = abs(block.speed_or_freeze)
-        smooth_transition = bool(flags & DIV_FLAG_SMOOTH)
+        smooth_transition = block.smooth_speed != 0
         start_speed_factor = (
             previous_speed_factor if smooth_transition else target_speed_factor
         )
