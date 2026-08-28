@@ -84,15 +84,22 @@ class RuntimeEventStream:
     def duration_ms(self) -> float:
         return max((event.time_ms for event in self.events), default=0.0)
 
+    @property
+    def uses_native_skip_projection(self) -> bool:
+        return self.native_timing is not None and any(
+            div.is_skip for div in self.native_timing.blocks
+        )
+
     def position_at(self, time_ms: float) -> float:
         """Return the current gameplay scroll coordinate.
 
-        When native timing is available this is the absolute-coordinate form of
-        PlayBase.GetBlockBeat for the current Position.  The old timing-segment
-        projection is retained only as a fallback for hand-built test streams.
+        Routes containing bSkip use the source-faithful Block/Line coordinate.
+        Routes without bSkip retain the already-validated continuous preview
+        projection in this hotfix; the full LineBase velocity audit is separate.
         """
 
-        if self.native_timing is not None:
+        if self.uses_native_skip_projection:
+            assert self.native_timing is not None
             return self.native_timing.current_position(time_ms)
         if not self.timing:
             return 0.0
@@ -197,10 +204,12 @@ def build_event_stream(
         raise ValueError("cannot build events from an unresolved route")
 
     native_timing = build_native_timing(snapshot, route)
+    use_native_skip = any(div.is_skip for div in native_timing.blocks)
     events: list[PreviewEvent] = []
     timing: list[PreviewTimingSegment] = []
     warnings: list[str] = []
     previous_speed_factor = 1.0
+    legacy_position = 0.0
     selected_blocks = [
         (split, split.block(route.block_id(split.stable_id)))
         for split in snapshot.splits
@@ -215,7 +224,7 @@ def build_event_stream(
 
         # Preserve the old speed-transition segment model until LineBase
         # velocity is audited independently.  It no longer controls judgment
-        # times or gameplay Y positions.
+        # times, and Skip routes no longer use it as their primary scroll axis.
         freeze_delay = (
             max(0.0, block.offset_or_delay_ms)
             if block.speed_or_freeze < 0.0 and not is_skip
@@ -230,8 +239,12 @@ def build_event_stream(
         legacy_row_ms = 60_000.0 / (block.bpm * block.beat_split)
         motion_start = block.start_time_ms + freeze_delay
         motion_end = motion_start + len(block.rows) * legacy_row_ms
-        start_position = native_timing.line_position(selected_index, 0)
-        end_position = native_timing.line_position(selected_index, len(block.rows))
+        if use_native_skip:
+            start_position = native_timing.line_position(selected_index, 0)
+            end_position = native_timing.line_position(selected_index, len(block.rows))
+        else:
+            start_position = legacy_position
+            end_position = legacy_position + len(block.rows) * safe_scroll
 
         if not isfinite(block.speed_or_freeze):
             warnings.append(
@@ -281,7 +294,11 @@ def build_event_stream(
             # spatial rows and fully judgeable according to note semantics.
             time_ms = native_timing.judgment_time(selected_index, row_index)
             beat = row_index / block.beat_split
-            event_position = native_timing.line_position(selected_index, row_index)
+            event_position = (
+                native_timing.line_position(selected_index, row_index)
+                if use_native_skip
+                else legacy_position + row_index * safe_scroll
+            )
             for lane, cell in enumerate(row.cells):
                 if cell.raw == b"\x00\x00\x00\x00":
                     continue
@@ -299,6 +316,7 @@ def build_event_stream(
                         selected_index,
                     )
                 )
+        legacy_position = end_position if not use_native_skip else legacy_position
         previous_speed_factor = target_speed_factor
 
     timing.sort(key=lambda item: (item.start_time_ms, item.split_id, item.block_id))
