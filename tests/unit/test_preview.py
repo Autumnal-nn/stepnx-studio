@@ -5,7 +5,13 @@ from dataclasses import replace
 from math import isnan
 
 from stepnx.codecs.nx20 import parse_bytes
-from stepnx.core.commands import InsertBlock, InsertMetadata, InsertRow, SetNoteAt
+from stepnx.core.commands import (
+    InsertBlock,
+    InsertMetadata,
+    InsertRow,
+    InsertSplit,
+    SetNoteAt,
+)
 from stepnx.core.profiles import pack_u16_range
 from stepnx.preview import (
     GameplaySession,
@@ -516,25 +522,95 @@ class RuntimeEventTests(unittest.TestCase):
         self.assertTrue(isnan(stream.events[0].scroll))
         self.assertEqual(stream.events[0].effective_scroll, 1.0)
 
-    def test_smooth_speed_two_keeps_notes_and_interpolates_speed(self) -> None:
-        document = parse_bytes(make_normal_nx20(), source="NM.NX")
-        split = document.splits[0]
-        block = replace(
-            split.blocks[0],
-            speed_or_freeze=split.blocks[0].speed_or_freeze.with_value(2.0),
-            smooth_speed=split.blocks[0].smooth_speed.with_value(2),
-        )
-        document = replace(document, splits=(replace(split, blocks=(block,)),))
-        snapshot = create_preview_snapshot(document)
-        route = resolve_route(snapshot, RoutePolicy.MANUAL)
-        stream = build_event_stream(snapshot, route)
+    def test_div_flag_values_zero_through_three_keep_smooth_and_skip_independent(self) -> None:
+        expected = {
+            0: (False, False, 2.0, 125.0),
+            1: (True, False, 1.5, 125.0),
+            2: (False, True, 2.0, 0.0),
+            3: (True, True, 2.0, 0.0),
+        }
 
-        self.assertTrue(stream.events)
-        segment = stream.timing[0]
-        self.assertEqual(stream.speed_factor_at(segment.start_time_ms), 1.0)
-        midpoint = (segment.start_time_ms + segment.speed_transition_end_ms) / 2
-        self.assertAlmostEqual(stream.speed_factor_at(midpoint), 1.5)
-        self.assertEqual(stream.speed_factor_at(segment.speed_transition_end_ms), 2.0)
+        for flags, (is_smooth, is_skip, speed, sample_ms) in expected.items():
+            with self.subTest(flags=flags):
+                document = parse_bytes(make_normal_nx20(), source="NM.NX")
+                split = document.splits[0]
+                block = replace(
+                    split.blocks[0],
+                    start_time=split.blocks[0].start_time.with_value(0.0),
+                    speed_or_freeze=split.blocks[0].speed_or_freeze.with_value(2.0),
+                    smooth_speed=split.blocks[0].smooth_speed.with_value(flags),
+                )
+                document = replace(
+                    document,
+                    splits=(replace(split, blocks=(block,)),),
+                )
+                snapshot = create_preview_snapshot(document)
+                stream = build_event_stream(
+                    snapshot, resolve_route(snapshot, RoutePolicy.MANUAL)
+                )
+
+                self.assertTrue(stream.events)
+                div = stream.native_timing.blocks[0]
+                self.assertIs(div.is_smooth, is_smooth)
+                self.assertIs(div.is_skip, is_skip)
+                self.assertAlmostEqual(stream.speed_factor_at(sample_ms), speed)
+
+    def test_smooth_uses_previous_loaded_speed_and_current_div_end(self) -> None:
+        document = parse_bytes(make_normal_nx20(), source="NM.NX")
+        first_split = document.splits[0]
+        first = replace(
+            first_split.blocks[0],
+            start_time=first_split.blocks[0].start_time.with_value(0.0),
+            speed_or_freeze=first_split.blocks[0].speed_or_freeze.with_value(-3.0),
+            smooth_speed=first_split.blocks[0].smooth_speed.with_value(0),
+        )
+        first_split = replace(
+            first_split,
+            raw_select=first_split.raw_select.with_value(0),
+            blocks=(first,),
+        )
+        document = replace(document, splits=(first_split,))
+        document = InsertSplit(first_split).apply(document)
+        document = InsertSplit(document.splits[-1]).apply(document)
+
+        first_split, second_split, third_split = document.splits
+        second = replace(
+            second_split.blocks[0],
+            start_time=second_split.blocks[0].start_time.with_value(250.0),
+            speed_or_freeze=second_split.blocks[0].speed_or_freeze.with_value(5.0),
+            smooth_speed=second_split.blocks[0].smooth_speed.with_value(1),
+        )
+        third = replace(
+            third_split.blocks[0],
+            start_time=third_split.blocks[0].start_time.with_value(1000.0),
+            speed_or_freeze=third_split.blocks[0].speed_or_freeze.with_value(1.0),
+            smooth_speed=third_split.blocks[0].smooth_speed.with_value(0),
+        )
+        document = replace(
+            document,
+            splits=(
+                first_split,
+                replace(
+                    second_split,
+                    raw_select=second_split.raw_select.with_value(0),
+                    blocks=(second,),
+                ),
+                replace(
+                    third_split,
+                    raw_select=third_split.raw_select.with_value(0),
+                    blocks=(third,),
+                ),
+            ),
+        )
+        snapshot = create_preview_snapshot(document)
+        stream = build_event_stream(
+            snapshot, resolve_route(snapshot, RoutePolicy.MANUAL)
+        )
+
+        self.assertEqual(stream.native_timing.blocks[0].speed, 3.0)
+        self.assertEqual(stream.speed_factor_at(250.0), 3.0)
+        self.assertAlmostEqual(stream.speed_factor_at(375.0), 4.0)
+        self.assertAlmostEqual(stream.speed_factor_at(499.0), 4.984, places=3)
 
     def test_zero_scroll_is_a_real_stationary_segment(self) -> None:
         document = parse_bytes(make_normal_nx20(), source="NM.NX")
