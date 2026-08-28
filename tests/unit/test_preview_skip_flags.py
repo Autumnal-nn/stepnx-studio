@@ -118,7 +118,6 @@ class NativeSkipTimingRegressionTests(unittest.TestCase):
         for row in (0, 6, 12, 32, 64, 102, 159):
             self.assertEqual(native.judgment_time(1, row), 10_445.0)
 
-        # The following ordinary Div still advances one real msPerLine per row.
         ordinary = native.blocks[3]
         self.assertGreater(ordinary.ms_per_line, 0.0)
         self.assertAlmostEqual(
@@ -149,6 +148,17 @@ class NativeSkipTimingRegressionTests(unittest.TestCase):
                 absolute - current_position,
                 native.block_beat_from_state(target_block, target_line, state),
             )
+
+    def test_skip_route_stream_uses_native_position_axis(self) -> None:
+        stream = build_event_stream(self._snapshot(), self._route())
+        self.assertTrue(stream.uses_native_skip_projection)
+        native = stream.native_timing
+        assert native is not None
+        state = native.state_at(10_200.0)
+        self.assertAlmostEqual(
+            stream.position_at(10_200.0),
+            native.current_position_from_state(state),
+        )
 
     def test_event_stream_keeps_nonzero_skip_rows_judgeable_at_start_time(self) -> None:
         stream = build_event_stream(self._snapshot(), self._route())
