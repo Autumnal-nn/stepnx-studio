@@ -610,7 +610,7 @@ class RuntimeEventTests(unittest.TestCase):
         self.assertEqual(stream.native_timing.blocks[0].speed, 3.0)
         self.assertEqual(stream.speed_factor_at(250.0), 3.0)
         self.assertAlmostEqual(stream.speed_factor_at(375.0), 4.0)
-        self.assertAlmostEqual(stream.speed_factor_at(499.0), 4.984, places=3)
+        self.assertAlmostEqual(stream.speed_factor_at(499.0), 4.992, places=3)
 
     def test_zero_scroll_is_a_real_stationary_segment(self) -> None:
         document = parse_bytes(make_normal_nx20(), source="NM.NX")
