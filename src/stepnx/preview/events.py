@@ -85,13 +85,15 @@ class RuntimeEventStream:
         return max((event.time_ms for event in self.events), default=0.0)
 
     def position_at(self, time_ms: float) -> float:
-        """Legacy/debug scroll coordinate retained for compatibility.
+        """Return the current gameplay scroll coordinate.
 
-        Gameplay note placement uses ``beat_distance_at`` instead.  The native
-        engine does not render from one pre-concatenated event-position clock;
-        LineBase asks PlayBase.GetBlockBeat(Block, Line) every frame.
+        When native timing is available this is the absolute-coordinate form of
+        PlayBase.GetBlockBeat for the current Position.  The old timing-segment
+        projection is retained only as a fallback for hand-built test streams.
         """
 
+        if self.native_timing is not None:
+            return self.native_timing.current_position(time_ms)
         if not self.timing:
             return 0.0
         if time_ms < self.timing[0].start_time_ms:
@@ -113,6 +115,8 @@ class RuntimeEventStream:
         *,
         state: NativeTimingState | None = None,
     ) -> float:
+        """Return the exact native GetBlockBeat distance for one event."""
+
         if self.native_timing is not None and event.native_block_index >= 0:
             if state is None:
                 state = self.native_timing.state_at(time_ms)
@@ -196,7 +200,6 @@ def build_event_stream(
     events: list[PreviewEvent] = []
     timing: list[PreviewTimingSegment] = []
     warnings: list[str] = []
-    position = 0.0
     previous_speed_factor = 1.0
     selected_blocks = [
         (split, split.block(route.block_id(split.stable_id)))
@@ -227,7 +230,8 @@ def build_event_stream(
         legacy_row_ms = 60_000.0 / (block.bpm * block.beat_split)
         motion_start = block.start_time_ms + freeze_delay
         motion_end = motion_start + len(block.rows) * legacy_row_ms
-        end_position = position + len(block.rows) * safe_scroll
+        start_position = native_timing.line_position(selected_index, 0)
+        end_position = native_timing.line_position(selected_index, len(block.rows))
 
         if not isfinite(block.speed_or_freeze):
             warnings.append(
@@ -256,7 +260,7 @@ def build_event_stream(
                 block.stable_id,
                 motion_start,
                 motion_end,
-                position,
+                start_position,
                 end_position,
                 block.bpm,
                 block.beat_split,
@@ -277,6 +281,7 @@ def build_event_stream(
             # spatial rows and fully judgeable according to note semantics.
             time_ms = native_timing.judgment_time(selected_index, row_index)
             beat = row_index / block.beat_split
+            event_position = native_timing.line_position(selected_index, row_index)
             for lane, cell in enumerate(row.cells):
                 if cell.raw == b"\x00\x00\x00\x00":
                     continue
@@ -290,11 +295,10 @@ def build_event_stream(
                         lane,
                         cell.raw,
                         block.scroll,
-                        position + row_index * safe_scroll,
+                        event_position,
                         selected_index,
                     )
                 )
-        position = end_position
         previous_speed_factor = target_speed_factor
 
     timing.sort(key=lambda item: (item.start_time_ms, item.split_id, item.block_id))
