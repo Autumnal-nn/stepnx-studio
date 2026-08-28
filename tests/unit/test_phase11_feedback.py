@@ -13,6 +13,8 @@ try:
     from stepnx.authoring.structure import StructureTarget, insert_empty_split_after
     from stepnx.codecs.nx20 import parse_bytes, serialize
     from stepnx.core.commands import SetNoteAt
+    from stepnx.core.model import EmptyRow, NoteRow
+    from stepnx.core.validation import validate
     from stepnx.gui.phase10_timeline import Phase10TimelineWidget
     from stepnx.gui.phase11_fast_notes import _FastSetNoteAt
     from stepnx.gui.phase11_feedback import (
@@ -60,6 +62,36 @@ class Phase11FeedbackTests(unittest.TestCase):
                     ).apply(source)
                     self.assertEqual(serialize(fast), serialize(core))
                     self.assertEqual(fast.next_stable_id, core.next_stable_id)
+
+    def test_fast_note_readd_preserves_compact_cell_stable_ids(self) -> None:
+        source = parse_bytes(make_normal_nx20(), row_storage="compact")
+        block = source.splits[0].blocks[0]
+        row = block.rows[0]
+        row_id = row.stable_id
+        columns = int(source.columns.value)
+        original_cell_ids = tuple(cell.stable_id for cell in row.cells)
+
+        edited = source
+        for lane in range(columns):
+            edited = _FastSetNoteAt(row_id, lane, b"\x00\x00\x00\x00").apply(edited)
+
+        cleared = edited.splits[0].blocks[0].rows[0]
+        self.assertIsInstance(cleared, EmptyRow)
+
+        raw = b"\x03\x03\x09\x00"
+        edited = _FastSetNoteAt(row_id, 0, raw).apply(edited)
+        restored = edited.splits[0].blocks[0].rows[0]
+        self.assertIsInstance(restored, NoteRow)
+        self.assertEqual(
+            tuple(cell.stable_id for cell in restored.cells),
+            original_cell_ids,
+        )
+        self.assertEqual(
+            tuple(cell.raw for cell in restored.cells),
+            (raw,) + (b"\x00\x00\x00\x00",) * (columns - 1),
+        )
+        self.assertFalse(validate(edited).errors)
+        serialize(edited)
 
     def test_fast_snapshot_patch_replaces_only_changed_block_rows(self) -> None:
         document = parse_bytes(make_normal_nx20(), row_storage="rich")

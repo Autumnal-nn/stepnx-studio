@@ -3,14 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtGui import QAction, QColor, QPalette
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QStyleFactory
 
 from stepnx.authoring.glyphs import VisualPackError, load_visual_pack
 
 
 _VISUAL_PACK_KEY = "assets/visual_pack"
 _NOTESKIN_KEY = "assets/noteskin"
+_DARK_MODE_KEY = "appearance/dark_mode"
 
 
 def _settings() -> QSettings:
@@ -18,6 +19,78 @@ def _settings() -> QSettings:
     # complete project/runtime unit and never receives a StepNX sidecar merely
     # because the user chose private rendering assets.
     return QSettings("Autumnal-nn", "StepNX Studio")
+
+
+def _dark_palette() -> QPalette:
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(25, 25, 25))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.Text, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 0, 0))
+    palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.Text,
+        QColor(127, 127, 127),
+    )
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.ButtonText,
+        QColor(127, 127, 127),
+    )
+    return palette
+
+
+def _apply_dark_mode(window, enabled: bool) -> None:
+    application = QApplication.instance()
+    if application is None:
+        return
+
+    if enabled:
+        fusion = QStyleFactory.create("Fusion")
+        if fusion is not None:
+            application.setStyle(fusion)
+        application.setPalette(_dark_palette())
+    else:
+        style_name = getattr(window, "_phase11_system_style_name", "")
+        style = QStyleFactory.create(style_name) if style_name else None
+        if style is not None:
+            application.setStyle(style)
+        palette = getattr(window, "_phase11_system_palette", None)
+        if palette is not None:
+            application.setPalette(palette)
+
+
+def _dark_mode_changed(window, checked: bool) -> None:
+    _apply_dark_mode(window, bool(checked))
+    settings = _settings()
+    settings.setValue(_DARK_MODE_KEY, bool(checked))
+    settings.sync()
+
+
+def _install_dark_mode_toggle(window) -> None:
+    application = QApplication.instance()
+    if application is None:
+        return
+
+    window._phase11_system_style_name = application.style().objectName()
+    window._phase11_system_palette = QPalette(application.palette())
+
+    action = window.settings_menu.addAction("Dark Mode")
+    action.setCheckable(True)
+    enabled = _settings().value(_DARK_MODE_KEY, False, type=bool)
+    action.setChecked(enabled)
+    action.toggled.connect(lambda checked: _dark_mode_changed(window, checked))
+    window.phase11_dark_mode_action = action
+    _apply_dark_mode(window, enabled)
 
 
 def _apply_visual_pack(window, path: Path, *, report_error: bool) -> bool:
@@ -124,6 +197,7 @@ def install_phase11_preferences(window) -> None:
         return
     window._phase11_preferences_installed = True
 
+    _install_dark_mode_toggle(window)
     _restore_preferences(window)
     _replace_action(window, "Load local visual pack…", _choose_visual_pack)
     _replace_action(window, "Load local noteskin atlases…", _choose_noteskin)
