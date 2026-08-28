@@ -68,21 +68,27 @@ class Phase11FeedbackTests(unittest.TestCase):
         block = source.splits[0].blocks[0]
         row = block.rows[0]
         row_id = row.stable_id
+        columns = int(source.columns.value)
         original_cell_ids = tuple(cell.stable_id for cell in row.cells)
 
         edited = source
-        for lane in range(int(source.columns.value)):
+        for lane in range(columns):
             edited = _FastSetNoteAt(row_id, lane, b"\x00\x00\x00\x00").apply(edited)
 
         cleared = edited.splits[0].blocks[0].rows[0]
         self.assertIsInstance(cleared, EmptyRow)
 
-        edited = _FastSetNoteAt(row_id, 0, b"\x03\x03\x09\x00").apply(edited)
+        raw = b"\x03\x03\x09\x00"
+        edited = _FastSetNoteAt(row_id, 0, raw).apply(edited)
         restored = edited.splits[0].blocks[0].rows[0]
         self.assertIsInstance(restored, NoteRow)
         self.assertEqual(
             tuple(cell.stable_id for cell in restored.cells),
             original_cell_ids,
+        )
+        self.assertEqual(
+            tuple(cell.raw for cell in restored.cells),
+            (raw,) + (b"\x00\x00\x00\x00",) * (columns - 1),
         )
         self.assertFalse(validate(edited).errors)
         serialize(edited)
