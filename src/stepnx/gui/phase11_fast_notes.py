@@ -95,20 +95,23 @@ def _replace_one_row(rows, row_index: int, replacement):
 
 
 def _cells_for_empty_overlay_row(rows, row_index: int) -> list[NoteCell] | None:
-    """Recover original cell identities when an overlay note row was cleared.
+    """Recover original identities without restoring notes from a cleared row.
 
     OverlayRows deliberately keep a CompactRows base so sparse edits stay cheap.
     If a packed note row is replaced by EmptyRow and then receives a note again,
-    allocating fresh IDs would make the replacement disagree with the base row's
-    stable cell identities. The validator correctly rejects that state. Reuse the
-    base PackedNoteRow cells instead.
+    fresh IDs would disagree with the base row and fail validation. Reuse only
+    the original stable IDs while keeping every cell empty until the requested
+    lane is written.
     """
 
     if not isinstance(rows, OverlayRows):
         return None
     original = rows.base[row_index]
     if isinstance(original, PackedNoteRow):
-        return list(original.cells)
+        return [
+            NoteCell(cell.stable_id, b"\0\0\0\0", None)
+            for cell in original.cells
+        ]
     return None
 
 
