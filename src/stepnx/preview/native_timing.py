@@ -108,12 +108,13 @@ class NativeTimingProjection:
         div = self.blocks[block_index]
         line = self.get_line(time_ms, block_index)
 
-        # PlayBase.Update after Step.SetCurrentTime.  This looks unusual for
-        # gap-free Divs, but it is the native formula and must not be replaced
-        # by a reconstructed continuous beat clock.
+        # PlayBase.Update after Step.SetCurrentTime.  The native code starts
+        # Beat at line*BeatPerLine, then subtracts the fractional elapsed-line
+        # distance whenever delta is non-negative.  For a pre-start Div it
+        # performs that subtraction only when the Div has a nonzero Gap.
         beat = line * div.beat_per_line
         delta = time_ms - div.start_time_ms
-        if div.ms_per_line != 0.0 and (delta <= 0.0 or div.gap_beats != 0.0):
+        if div.ms_per_line != 0.0 and (delta >= 0.0 or div.gap_beats != 0.0):
             beat -= delta * div.beat_per_line / div.ms_per_line
         return NativeTimingState(block_index, line, beat)
 
