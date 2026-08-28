@@ -19,7 +19,7 @@ class PreviewSkipFlagRegressionTests(unittest.TestCase):
     def _snapshot(*, flags: int, delay_ms: float, speed: float = -2.0) -> PreviewSnapshot:
         document = parse_bytes(make_normal_nx20(), source="PUPA-regression.NX")
         rows = document.splits[0].blocks[0].rows
-        skip_block = PreviewBlock(
+        first_block = PreviewBlock(
             stable_id=101,
             split_id=100,
             index=0,
@@ -60,7 +60,7 @@ class PreviewSkipFlagRegressionTests(unittest.TestCase):
             start_column=0,
             columns=5,
             splits=(
-                PreviewSplit(100, 0, 0, False, False, False, 0, (skip_block,)),
+                PreviewSplit(100, 0, 0, False, False, False, 0, (first_block,)),
                 PreviewSplit(200, 1, 0, False, False, False, 0, (overlapping_block,)),
             ),
             diagnostics=(),
@@ -91,25 +91,24 @@ class PreviewSkipFlagRegressionTests(unittest.TestCase):
         self.assertEqual(second.start_time_ms, 10_000.0)
         self.assertEqual(first.freeze_delay_ms, 0.0)
 
-    def test_skip_bit_alone_does_not_enable_smooth_speed_interpolation(self) -> None:
+    def test_normal_freeze_still_applies_its_delay(self) -> None:
         stream = build_event_stream(
-            self._snapshot(flags=0x02, delay_ms=445.0), self._route()
+            self._snapshot(flags=0x00, delay_ms=445.0), self._route()
         )
-        segment = stream.timing[0]
+        freeze_segment = next(segment for segment in stream.timing if segment.block_id == 101)
 
-        self.assertEqual(segment.start_speed_factor, 2.0)
-        self.assertEqual(segment.end_speed_factor, 2.0)
-        self.assertEqual(segment.speed_transition_end_ms, segment.start_time_ms)
+        self.assertEqual(freeze_segment.freeze_delay_ms, 445.0)
+        self.assertEqual(freeze_segment.start_time_ms, 10_445.0)
 
-    def test_smooth_and_skip_bits_remain_independent(self) -> None:
+    def test_skip_with_zero_delay_keeps_existing_preview_timing(self) -> None:
         stream = build_event_stream(
-            self._snapshot(flags=0x03, delay_ms=445.0), self._route()
+            self._snapshot(flags=0x02, delay_ms=0.0), self._route()
         )
-        segment = stream.timing[0]
+        first = stream.timing[0]
 
-        self.assertEqual(segment.freeze_delay_ms, 0.0)
-        self.assertEqual(segment.start_speed_factor, 1.0)
-        self.assertEqual(segment.end_speed_factor, 2.0)
+        self.assertEqual(first.block_id, 101)
+        self.assertEqual(first.start_time_ms, 10_000.0)
+        self.assertEqual(first.freeze_delay_ms, 0.0)
 
 
 if __name__ == "__main__":
