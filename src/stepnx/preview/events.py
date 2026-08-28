@@ -7,7 +7,6 @@ from math import isfinite
 from stepnx.core.model import NoteRow, PackedNoteRow
 from stepnx.core.validation import Severity
 from stepnx.preview.native_timing import (
-    DIV_FLAG_SKIP,
     NativeTimingProjection,
     NativeTimingState,
     build_native_timing,
@@ -135,23 +134,11 @@ class RuntimeEventStream:
         return event.position - self.position_at(time_ms)
 
     def speed_factor_at(self, time_ms: float) -> float:
-        """Return the preview speed multiplier active at ``time_ms``.
+        """Return R!SE's active Div Speed, including native Smooth handling."""
 
-        Speed interpolation remains the pre-hotfix approximation for now.  The
-        source-faithful change in this patch is the Block/Line timing and
-        geometry projection; LineBase velocity behavior is a separate audit.
-        """
-
-        if not self.timing:
+        if self.native_timing is None:
             return 1.0
-        if time_ms < self.timing[0].start_time_ms:
-            return self.timing[0].start_speed_factor
-        selected = self.timing[0]
-        for segment in self.timing:
-            if time_ms < segment.start_time_ms:
-                break
-            selected = segment
-        return selected.speed_factor_at(time_ms)
+        return self.native_timing.block_speed_at(time_ms)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,9 +153,6 @@ class PreviewTimingSegment:
     beat_split: int
     scroll: float
     freeze_delay_ms: float
-    start_speed_factor: float
-    end_speed_factor: float
-    speed_transition_end_ms: float
 
     def position_at(self, time_ms: float) -> float:
         if time_ms <= self.start_time_ms or self.end_time_ms <= self.start_time_ms:
@@ -176,20 +160,6 @@ class PreviewTimingSegment:
         ratio = (time_ms - self.start_time_ms) / (self.end_time_ms - self.start_time_ms)
         return self.start_position + min(1.0, max(0.0, ratio)) * (
             self.end_position - self.start_position
-        )
-
-    def speed_factor_at(self, time_ms: float) -> float:
-        if (
-            time_ms <= self.start_time_ms
-            or self.speed_transition_end_ms <= self.start_time_ms
-        ):
-            return self.start_speed_factor
-        ratio = (time_ms - self.start_time_ms) / (
-            self.speed_transition_end_ms - self.start_time_ms
-        )
-        ratio = min(1.0, max(0.0, ratio))
-        return self.start_speed_factor + ratio * (
-            self.end_speed_factor - self.start_speed_factor
         )
 
 
@@ -208,7 +178,6 @@ def build_event_stream(
     events: list[PreviewEvent] = []
     timing: list[PreviewTimingSegment] = []
     warnings: list[str] = []
-    previous_speed_factor = 1.0
     legacy_position = 0.0
     selected_blocks = [
         (split, split.block(route.block_id(split.stable_id)))
@@ -220,11 +189,8 @@ def build_event_stream(
             warnings.append(f"Block {block.stable_id} has invalid BPM or Beat Split")
             continue
         native_div = native_timing.blocks[selected_index]
-        is_skip = bool(block.smooth_speed & DIV_FLAG_SKIP)
+        is_skip = native_div.is_skip
 
-        # Preserve the old speed-transition segment model until LineBase
-        # velocity is audited independently.  It no longer controls judgment
-        # times, and Skip routes no longer use it as their primary scroll axis.
         freeze_delay = (
             max(0.0, block.offset_or_delay_ms)
             if block.speed_or_freeze < 0.0 and not is_skip
@@ -234,6 +200,10 @@ def build_event_stream(
             warnings.append(
                 f"Block {block.stable_id} has no finite Scroll; "
                 "renderer uses one row fraction"
+            )
+        if not isfinite(block.speed_or_freeze):
+            warnings.append(
+                f"Block {block.stable_id} has a non-finite Speed/Freeze factor"
             )
         safe_scroll = native_div.beat_per_line
         legacy_row_ms = 60_000.0 / (block.bpm * block.beat_split)
@@ -245,27 +215,6 @@ def build_event_stream(
         else:
             start_position = legacy_position
             end_position = legacy_position + len(block.rows) * safe_scroll
-
-        if not isfinite(block.speed_or_freeze):
-            warnings.append(
-                f"Block {block.stable_id} has a non-finite Speed/Freeze factor; "
-                "renderer uses 1x"
-            )
-            target_speed_factor = 1.0
-        else:
-            target_speed_factor = abs(block.speed_or_freeze)
-        smooth_transition = block.smooth_speed != 0
-        start_speed_factor = (
-            previous_speed_factor if smooth_transition else target_speed_factor
-        )
-        if selected_index + 1 < len(selected_blocks):
-            next_block = selected_blocks[selected_index + 1][1]
-            transition_end = max(motion_start, next_block.start_time_ms)
-        else:
-            transition_end = motion_end
-        if not smooth_transition or transition_end <= motion_start:
-            start_speed_factor = target_speed_factor
-            transition_end = motion_start
 
         timing.append(
             PreviewTimingSegment(
@@ -279,9 +228,6 @@ def build_event_stream(
                 block.beat_split,
                 safe_scroll,
                 freeze_delay,
-                start_speed_factor,
-                target_speed_factor,
-                transition_end,
             )
         )
 
@@ -317,7 +263,6 @@ def build_event_stream(
                     )
                 )
         legacy_position = end_position if not use_native_skip else legacy_position
-        previous_speed_factor = target_speed_factor
 
     timing.sort(key=lambda item: (item.start_time_ms, item.split_id, item.block_id))
     events.sort(
