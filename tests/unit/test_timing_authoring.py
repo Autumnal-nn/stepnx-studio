@@ -56,7 +56,18 @@ class TimingProjectionTests(unittest.TestCase):
     def test_row_beat_and_millisecond_projection_use_explicit_block_anchor(self) -> None:
         document = parse_bytes(make_normal_nx20(), source="NM.NX")
         snapshot = create_authoring_snapshot(document)
-        block = snapshot.splits[0].blocks[0]
+        source_split = snapshot.splits[0]
+        # The shared fixture intentionally carries smooth_speed=2, which is
+        # now correctly interpreted as bSkip. This test is about ordinary
+        # positive-msPerLine timing, so make that premise explicit instead of
+        # relying on the old mistaken meaning of raw value 2.
+        block = replace(source_split.blocks[0], smooth_speed=0)
+        split = replace(source_split, blocks=(block,))
+        snapshot = replace(
+            snapshot,
+            splits=(split,),
+            active_blocks=((split.stable_id, block.stable_id),),
+        )
         projection = TimingProjection(snapshot)
 
         point = projection.point(block.split_id, block.stable_id, 1)
