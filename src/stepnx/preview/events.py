@@ -8,6 +8,7 @@ from stepnx.core.model import NoteRow, PackedNoteRow
 from stepnx.core.validation import Severity
 from stepnx.preview.native_timing import (
     DIV_FLAG_SKIP,
+    DIV_FLAG_SMOOTH,
     NativeTimingProjection,
     NativeTimingState,
     build_native_timing,
@@ -254,7 +255,9 @@ def build_event_stream(
             target_speed_factor = 1.0
         else:
             target_speed_factor = abs(block.speed_or_freeze)
-        smooth_transition = block.smooth_speed != 0
+        # R!SE DivFlags is a bitfield.  Only bSmooth (0x01) enables block-speed
+        # interpolation; bSkip (0x02) by itself must not do so.
+        smooth_transition = bool(block.smooth_speed & DIV_FLAG_SMOOTH)
         start_speed_factor = (
             previous_speed_factor if smooth_transition else target_speed_factor
         )
