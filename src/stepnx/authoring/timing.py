@@ -253,7 +253,10 @@ class NoteMetronomeClock:
             for row_index, row in enumerate(block.rows):
                 if isinstance(row, (EmptyRow, LightmapRow)):
                     continue
-                cells = tuple(row.cell(lane) for lane in range(row.cell_count))
+                # Both rich NoteRow and compact PackedNoteRow expose .cells.
+                # Only PackedNoteRow has .cell(index), so using the shared
+                # sequence property keeps edited and source-backed rows equal.
+                cells = row.cells
                 if any(
                     cell.note_type in (0x3, 0x7) and cell.raw[0] & 0x40
                     for cell in cells
