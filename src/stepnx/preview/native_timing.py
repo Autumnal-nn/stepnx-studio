@@ -124,6 +124,33 @@ class NativeTimingProjection:
         # StepLoader sets msPerLine to zero.
         return div.start_time_ms + line * div.ms_per_line
 
+    def block_start_position(self, block_index: int) -> float:
+        """Absolute coordinate equivalent for current/future GetBlockBeat.
+
+        The native private overload uses sumLineSec[target-1] plus the gaps
+        through the target Div.  This coordinate makes the existing viewport's
+        event.position - current_position calculation identical to
+        GetBlockBeat for the current block and blocks ahead.
+        """
+
+        sec_before = self.sum_line_sec[block_index - 1] if block_index > 0 else 0.0
+        return sec_before + self.sum_line_gap[block_index]
+
+    def line_position(self, block_index: int, line: int) -> float:
+        div = self.blocks[block_index]
+        return self.block_start_position(block_index) + line * div.beat_per_line
+
+    def current_position_from_state(self, state: NativeTimingState) -> float:
+        div = self.blocks[state.block_index]
+        return (
+            self.block_start_position(state.block_index)
+            + state.line * div.beat_per_line
+            - state.beat
+        )
+
+    def current_position(self, time_ms: float) -> float:
+        return self.current_position_from_state(self.state_at(time_ms))
+
     def block_beat_from_state(
         self,
         target_block: int,
@@ -137,15 +164,16 @@ class NativeTimingProjection:
         current = self.blocks[current_block]
         target = self.blocks[target_block]
 
-        # First subtraction occurs before the target/current branch in the
-        # native private overload.
-        value = state.beat - current_line * current.beat_per_line
-
+        # In the native control flow, equality jumps directly to this path
+        # before the common current-line subtraction used by the < and > cases.
         if target_block == current_block:
-            # The equal-block path performs a second current-line subtraction;
-            # the public overload then adds targetLine * target BeatPerLine.
-            value -= current_line * target.beat_per_line
-            return value + target_line * target.beat_per_line
+            return (
+                state.beat
+                - current_line * current.beat_per_line
+                + target_line * target.beat_per_line
+            )
+
+        value = state.beat - current_line * current.beat_per_line
 
         if target_block < current_block:
             current_prev_sec = (
