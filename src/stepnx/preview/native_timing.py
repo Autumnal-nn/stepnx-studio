@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 from bisect import bisect_right
 from dataclasses import dataclass
 from math import isfinite
@@ -10,6 +11,11 @@ from stepnx.preview.snapshot import PreviewSnapshot
 
 DIV_FLAG_SMOOTH = 0x01
 DIV_FLAG_SKIP = 0x02
+
+
+def _f32(value: float) -> float:
+    """Round one arithmetic result to the CLR/native IEEE-754 float domain."""
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,10 +104,14 @@ class NativeTimingProjection:
 
     def get_line(self, time_ms: float, block_index: int) -> int:
         div = self.blocks[block_index]
-        delta = time_ms - div.start_time_ms
+        # The IL2CPP method operates on System.Single.  Keeping Python's
+        # binary64 arithmetic here can turn an exact native row boundary into
+        # 0.99999999999998 and int() then selects the previous row.  Re-enter
+        # the float32 domain before the division instead of adding an epsilon.
+        delta = _f32(_f32(time_ms) - _f32(div.start_time_ms))
         if delta < 0.0 or div.ms_per_line == 0.0:
             return 0
-        return int(delta / div.ms_per_line)
+        return int(_f32(delta / _f32(div.ms_per_line)))
 
     def state_at(self, time_ms: float) -> NativeTimingState:
         block_index = self.get_block(time_ms)
@@ -235,10 +245,12 @@ def build_native_timing(
             )
         flags = int(block.smooth_speed) & 0xFF
         is_skip = bool(flags & DIV_FLAG_SKIP)
+        # StepLoader stores this derived value back into a float field.  Round
+        # at the same point so later GetLine boundary arithmetic matches IL2CPP.
         ms_per_line = (
             0.0
             if is_skip
-            else 60_000.0 / (block.bpm * block.beat_split)
+            else _f32(60_000.0 / (block.bpm * block.beat_split))
         )
         beat_per_line = (
             block.scroll
