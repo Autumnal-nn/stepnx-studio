@@ -6,11 +6,14 @@ from math import isfinite
 
 from stepnx.core.model import NoteRow, PackedNoteRow
 from stepnx.core.validation import Severity
+from stepnx.preview.native_timing import (
+    DIV_FLAG_SKIP,
+    NativeTimingProjection,
+    NativeTimingState,
+    build_native_timing,
+)
 from stepnx.preview.routes import ResolvedRoute
 from stepnx.preview.snapshot import PreviewSnapshot
-
-
-DIV_FLAG_SKIP = 0x02
 
 
 class PreviewNoteFunction(str, Enum):
@@ -38,6 +41,7 @@ class PreviewEvent:
     raw: bytes
     scroll: float
     position: float
+    native_block_index: int = -1
 
     @property
     def note_type(self) -> int:
@@ -74,12 +78,20 @@ class RuntimeEventStream:
     events: tuple[PreviewEvent, ...]
     timing: tuple[PreviewTimingSegment, ...]
     warnings: tuple[str, ...]
+    native_timing: NativeTimingProjection | None = None
 
     @property
     def duration_ms(self) -> float:
         return max((event.time_ms for event in self.events), default=0.0)
 
     def position_at(self, time_ms: float) -> float:
+        """Legacy/debug scroll coordinate retained for compatibility.
+
+        Gameplay note placement uses ``beat_distance_at`` instead.  The native
+        engine does not render from one pre-concatenated event-position clock;
+        LineBase asks PlayBase.GetBlockBeat(Block, Line) every frame.
+        """
+
         if not self.timing:
             return 0.0
         if time_ms < self.timing[0].start_time_ms:
@@ -91,12 +103,32 @@ class RuntimeEventStream:
             selected = segment
         return selected.position_at(time_ms)
 
-    def speed_factor_at(self, time_ms: float) -> float:
-        """Return the engine scroll factor active at ``time_ms``.
+    def native_state_at(self, time_ms: float) -> NativeTimingState | None:
+        return None if self.native_timing is None else self.native_timing.state_at(time_ms)
 
-        The fifth Block float is the visual speed factor (negative values also
-        mark freezes). ``smooth_speed`` does not remove a Block: any non-zero
-        value requests a transition from the preceding factor.
+    def beat_distance_at(
+        self,
+        event: PreviewEvent,
+        time_ms: float,
+        *,
+        state: NativeTimingState | None = None,
+    ) -> float:
+        if self.native_timing is not None and event.native_block_index >= 0:
+            if state is None:
+                state = self.native_timing.state_at(time_ms)
+            return self.native_timing.block_beat_from_state(
+                event.native_block_index,
+                event.row_index,
+                state,
+            )
+        return event.position - self.position_at(time_ms)
+
+    def speed_factor_at(self, time_ms: float) -> float:
+        """Return the preview speed multiplier active at ``time_ms``.
+
+        Speed interpolation remains the pre-hotfix approximation for now.  The
+        source-faithful change in this patch is the Block/Line timing and
+        geometry projection; LineBase velocity behavior is a separate audit.
         """
 
         if not self.timing:
@@ -159,6 +191,8 @@ def build_event_stream(
         raise ValueError("cannot build events from a non-playable preview snapshot")
     if not route.is_executable:
         raise ValueError("cannot build events from an unresolved route")
+
+    native_timing = build_native_timing(snapshot, route)
     events: list[PreviewEvent] = []
     timing: list[PreviewTimingSegment] = []
     warnings: list[str] = []
@@ -168,11 +202,17 @@ def build_event_stream(
         (split, split.block(route.block_id(split.stable_id)))
         for split in snapshot.splits
     ]
+
     for selected_index, (split, block) in enumerate(selected_blocks):
         if block.bpm <= 0.0 or block.beat_split <= 0:
             warnings.append(f"Block {block.stable_id} has invalid BPM or Beat Split")
             continue
+        native_div = native_timing.blocks[selected_index]
         is_skip = bool(block.smooth_speed & DIV_FLAG_SKIP)
+
+        # Preserve the old speed-transition segment model until LineBase
+        # velocity is audited independently.  It no longer controls judgment
+        # times or gameplay Y positions.
         freeze_delay = (
             max(0.0, block.offset_or_delay_ms)
             if block.speed_or_freeze < 0.0 and not is_skip
@@ -183,15 +223,12 @@ def build_event_stream(
                 f"Block {block.stable_id} has no finite Scroll; "
                 "renderer uses one row fraction"
             )
-        safe_scroll = (
-            block.scroll
-            if isfinite(block.scroll)
-            else 1.0 / block.beat_split
-        )
-        row_ms = 60_000.0 / (block.bpm * block.beat_split)
+        safe_scroll = native_div.beat_per_line
+        legacy_row_ms = 60_000.0 / (block.bpm * block.beat_split)
         motion_start = block.start_time_ms + freeze_delay
-        motion_end = motion_start + len(block.rows) * row_ms
+        motion_end = motion_start + len(block.rows) * legacy_row_ms
         end_position = position + len(block.rows) * safe_scroll
+
         if not isfinite(block.speed_or_freeze):
             warnings.append(
                 f"Block {block.stable_id} has a non-finite Speed/Freeze factor; "
@@ -212,6 +249,7 @@ def build_event_stream(
         if not smooth_transition or transition_end <= motion_start:
             start_speed_factor = target_speed_factor
             transition_end = motion_start
+
         timing.append(
             PreviewTimingSegment(
                 split.stable_id,
@@ -229,10 +267,15 @@ def build_event_stream(
                 transition_end,
             )
         )
+
         for row_index, row in enumerate(block.rows):
             if not isinstance(row, (NoteRow, PackedNoteRow)):
                 continue
-            time_ms = motion_start + row_index * row_ms
+            # Step.Judge and LineBase.CreateSplits both use exactly
+            # msStart + line * msPerLine.  For bSkip msPerLine is zero, so all
+            # encoded rows share the Div StartTime while remaining independent
+            # spatial rows and fully judgeable according to note semantics.
+            time_ms = native_timing.judgment_time(selected_index, row_index)
             beat = row_index / block.beat_split
             for lane, cell in enumerate(row.cells):
                 if cell.raw == b"\x00\x00\x00\x00":
@@ -248,13 +291,15 @@ def build_event_stream(
                         cell.raw,
                         block.scroll,
                         position + row_index * safe_scroll,
+                        selected_index,
                     )
                 )
         position = end_position
         previous_speed_factor = target_speed_factor
+
     timing.sort(key=lambda item: (item.start_time_ms, item.split_id, item.block_id))
     events.sort(
-        key=lambda item: (item.time_ms, item.split_id, item.row_index, item.lane)
+        key=lambda item: (item.time_ms, item.native_block_index, item.row_index, item.lane)
     )
     return RuntimeEventStream(
         snapshot.source_name,
@@ -263,4 +308,5 @@ def build_event_stream(
         tuple(events),
         tuple(timing),
         tuple(warnings),
+        native_timing,
     )
