@@ -117,21 +117,31 @@ class NormalDivInsideSkipRouteTests(unittest.TestCase):
             0.5 * normal.beat_per_line,
         )
 
-    def test_normal_div_reaches_each_row_at_its_native_time(self) -> None:
+    def test_normal_div_selects_each_row_inside_its_native_interval(self) -> None:
         snapshot, route = self._snapshot_and_route()
         native = build_native_timing(snapshot, route)
         normal = native.blocks[1]
 
-        for row in (1, 4, 8, 15):
-            time_ms = normal.start_time_ms + row * normal.ms_per_line
+        # GetLine() and Judge() use separate float32 instruction sequences in
+        # the native runtime.  At an exact theoretical row boundary, their
+        # independently rounded values can differ by one float32 tick.  Test
+        # the interior of each row interval instead, where GetLine is
+        # unambiguous and the continuous projection is what the preview needs.
+        for row in (0, 3, 7, 14):
+            time_ms = normal.start_time_ms + (row + 0.5) * normal.ms_per_line
             state = native.state_at(time_ms)
             self.assertEqual(state.block_index, 1)
             self.assertEqual(state.line, row)
-            self.assertAlmostEqual(state.beat, 0.0, places=6)
             self.assertAlmostEqual(
-                native.current_position(time_ms),
-                native.line_position(1, row),
-                places=6,
+                native.current_position(time_ms)
+                - native.line_position(1, row),
+                0.5 * normal.beat_per_line,
+                places=5,
+            )
+            self.assertAlmostEqual(
+                native.block_beat(1, row + 1, time_ms),
+                0.5 * normal.beat_per_line,
+                places=5,
             )
 
 
