@@ -2,9 +2,7 @@ from stepnx.authoring.audio import (
     AudDecodeError,
     AudioAlignment,
     MetronomeBeat,
-    MetronomeClock,
     MetronomeNote,
-    NoteMetronomeClock,
     WaveformEnvelope,
     WaveformError,
     decode_aud,
@@ -107,8 +105,11 @@ from stepnx.authoring.timeline import (
 )
 from stepnx.authoring.timing import (
     BlockTimingValues,
+    MetronomeClock,
+    NoteMetronomeClock,
     ShiftBlockStartTimes,
     TimingEditError,
+    TimingLocation,
     TimingPoint,
     TimingProjection,
 )
@@ -182,6 +183,7 @@ __all__ = [
     "TimelineLayout",
     "TimelineSegment",
     "TimingEditError",
+    "TimingLocation",
     "TimingPoint",
     "TimingProjection",
     "TrailerDiagnostic",
