@@ -47,6 +47,17 @@ class NativeDivTiming:
         return self.n_line * self.beat_per_line
 
     @property
+    def speed(self) -> float:
+        """Return the StepLoader-normalized Div Speed used by gameplay.
+
+        R!SE negates a negative serialized Speed while loading the Div.  Keep
+        the serialized value available for timing semantics, but expose the
+        loaded value here so consumers do not repeat or subtly alter that rule.
+        """
+
+        return -self.raw_speed if self.raw_speed < 0.0 else self.raw_speed
+
+    @property
     def is_skip(self) -> bool:
         return bool(self.flags & DIV_FLAG_SKIP)
 
@@ -134,6 +145,41 @@ class NativeTimingProjection:
         # LineBase.CreateSplits.  Every row of bSkip shares msStart because
         # StepLoader sets msPerLine to zero.
         return div.start_time_ms + line * div.ms_per_line
+
+    def block_speed_at(self, time_ms: float) -> float:
+        """Port R!SE PUMPPlayer.DrawStep block-speed selection/interpolation.
+
+        Only DivFlags bit 0x01 enables Smooth.  A Smooth Div interpolates from
+        the immediately preceding loaded Div Speed, or 1.0 for the first Div,
+        across the interval from the previous Div end to the current Div end.
+        Skip remains an independent 0x02 bit, so flags 2 are never Smooth and
+        flags 3 combine both behaviors.
+        """
+
+        if not self.blocks:
+            return 1.0
+
+        block_index = self.get_block(time_ms)
+        current = self.blocks[block_index]
+        target_speed = current.speed
+        if not current.is_smooth:
+            return target_speed
+
+        if block_index == 0:
+            previous_speed = 1.0
+            previous_end = 0.0
+        else:
+            previous = self.blocks[block_index - 1]
+            previous_speed = previous.speed
+            previous_end = previous.end_time_ms
+
+        current_end = current.end_time_ms
+        if current_end > previous_end:
+            ratio = (time_ms - previous_end) / (current_end - previous_end)
+        else:
+            ratio = 1.0
+        ratio = min(1.0, max(0.0, ratio))
+        return previous_speed + (target_speed - previous_speed) * ratio
 
     def block_start_position(self, block_index: int) -> float:
         """Absolute coordinate equivalent for current/future GetBlockBeat.
