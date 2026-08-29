@@ -3,7 +3,7 @@ from __future__ import annotations
 import struct
 from bisect import bisect_right
 from dataclasses import dataclass
-from math import isfinite
+from math import copysign, inf, isfinite
 
 from stepnx.preview.routes import ResolvedRoute
 from stepnx.preview.snapshot import PreviewSnapshot
@@ -22,8 +22,8 @@ def _f32(value: float) -> float:
 class NativeDivTiming:
     """Runtime timing values produced by the native NX20 StepLoader.
 
-    Names intentionally mirror the R!SE IL2CPP types where useful.  In the
-    loaded Div, the raw BPM slot is replaced by msPerLine.  bSkip therefore
+    Names intentionally mirror the R!SE IL2CPP types where useful. In the
+    loaded Div, the raw BPM slot is replaced by msPerLine. bSkip therefore
     means msPerLine == 0 while BeatPerLine and nLine remain fully meaningful.
     """
 
@@ -50,12 +50,29 @@ class NativeDivTiming:
     def speed(self) -> float:
         """Return the StepLoader-normalized Div Speed used by gameplay.
 
-        R!SE negates a negative serialized Speed while loading the Div.  Keep
+        R!SE negates a negative serialized Speed while loading the Div. Keep
         the serialized value available for timing semantics, but expose the
         loaded value here so consumers do not repeat or subtly alter that rule.
         """
 
         return -self.raw_speed if self.raw_speed < 0.0 else self.raw_speed
+
+    @property
+    def current_gap_ms(self) -> float:
+        """Port Step.currentGap(): Gap * msPerLine / BeatPerLine.
+
+        StepLoader stores Gap in beat-space. The later Step.currentGap getter
+        converts it back into the current Div's millisecond axis. A zero
+        BeatPerLine therefore produces IEEE-754 infinity in the native float
+        calculation; Python needs that edge case represented explicitly.
+        """
+
+        numerator = self.gap_beats * self.ms_per_line
+        if self.beat_per_line == 0.0:
+            if numerator == 0.0:
+                return 0.0
+            return copysign(inf, numerator)
+        return numerator / self.beat_per_line
 
     @property
     def is_skip(self) -> bool:
@@ -78,7 +95,7 @@ class NativeTimingProjection:
     """Source-faithful projection of Step/PlayBase Block-Line timing.
 
     This ports the behavior recovered from R!SE's StepLoader, Step.GetBlock,
-    Step.SetCurrentTime and PlayBase.GetBlockBeat.  It deliberately keeps
+    Step.SetCurrentTime and PlayBase.GetBlockBeat. It deliberately keeps
     judgment time and visual beat distance as separate axes.
     """
 
@@ -92,7 +109,7 @@ class NativeTimingProjection:
         """Port Step.GetBlock(ms, guess).
 
         The binary-search fast path is equivalent when Div end times are
-        nondecreasing.  A literal walk is retained for unusual documents.
+        nondecreasing. A literal walk is retained for unusual documents.
         """
 
         if not self.blocks:
@@ -115,9 +132,9 @@ class NativeTimingProjection:
 
     def get_line(self, time_ms: float, block_index: int) -> int:
         div = self.blocks[block_index]
-        # The IL2CPP method operates on System.Single.  Keeping Python's
+        # The IL2CPP method operates on System.Single. Keeping Python's
         # binary64 arithmetic here can turn an exact native row boundary into
-        # 0.99999999999998 and int() then selects the previous row.  Re-enter
+        # 0.99999999999998 and int() then selects the previous row. Re-enter
         # the float32 domain before the division instead of adding an epsilon.
         delta = _f32(_f32(time_ms) - _f32(div.start_time_ms))
         if delta < 0.0 or div.ms_per_line == 0.0:
@@ -129,9 +146,9 @@ class NativeTimingProjection:
         div = self.blocks[block_index]
         line = self.get_line(time_ms, block_index)
 
-        # PlayBase.Update after Step.SetCurrentTime.  The native code starts
+        # PlayBase.Update after Step.SetCurrentTime. The native code starts
         # Beat at line*BeatPerLine, then subtracts the fractional elapsed-line
-        # distance whenever delta is non-negative.  For a pre-start Div it
+        # distance whenever delta is non-negative. For a pre-start Div it
         # performs that subtraction only when the Div has a nonzero Gap.
         beat = line * div.beat_per_line
         delta = time_ms - div.start_time_ms
@@ -142,14 +159,14 @@ class NativeTimingProjection:
     def judgment_time(self, block_index: int, line: int) -> float:
         div = self.blocks[block_index]
         # This is the exact per-line time used by Step.Judge and by
-        # LineBase.CreateSplits.  Every row of bSkip shares msStart because
+        # LineBase.CreateSplits. Every row of bSkip shares msStart because
         # StepLoader sets msPerLine to zero.
         return div.start_time_ms + line * div.ms_per_line
 
     def block_speed_at(self, time_ms: float) -> float:
         """Port R!SE PUMPPlayer.DrawStep block-speed selection/interpolation.
 
-        Only DivFlags bit 0x01 enables Smooth.  A Smooth Div interpolates from
+        Only DivFlags bit 0x01 enables Smooth. A Smooth Div interpolates from
         the immediately preceding loaded Div Speed, or 1.0 for the first Div,
         across the interval from the previous Div end to the current Div end.
         Skip remains an independent 0x02 bit, so flags 2 are never Smooth and
@@ -181,13 +198,20 @@ class NativeTimingProjection:
         ratio = min(1.0, max(0.0, ratio))
         return previous_speed + (target_speed - previous_speed) * ratio
 
+    def current_gap(self, time_ms: float) -> float:
+        """Return Step.currentGap() for the Div selected at ``time_ms``."""
+
+        if not self.blocks:
+            return 0.0
+        return self.blocks[self.get_block(time_ms)].current_gap_ms
+
     def block_start_position(self, block_index: int) -> float:
         """Absolute coordinate equivalent for current/future GetBlockBeat.
 
         The native private overload uses sumLineSec[target-1] plus the gaps
-        through the target Div.  This coordinate makes the existing viewport's
-        event.position - current_position calculation identical to
-        GetBlockBeat for the current block and blocks ahead.
+        through the target Div. This coordinate makes the preview's absolute
+        event position compatible with GetBlockBeat for all routes, not only
+        routes containing a Skip Div.
         """
 
         sec_before = self.sum_line_sec[block_index - 1] if block_index > 0 else 0.0
@@ -251,9 +275,9 @@ class NativeTimingProjection:
             value -= gap_diff
             return value + target_line * target.beat_per_line
 
-        # target_block > current_block.  sum_line_sec[current_block] includes
+        # target_block > current_block. sum_line_sec[current_block] includes
         # the complete current Div, so the subtraction below contains only the
-        # intervening Divs.  sum_line_gap[target] - sum_line_gap[current]
+        # intervening Divs. sum_line_gap[target] - sum_line_gap[current]
         # contains the gaps from the next Div through the target Div.
         line_sec = (
             self.sum_line_sec[target_block - 1]
@@ -291,7 +315,7 @@ def build_native_timing(
             )
         flags = int(block.smooth_speed) & 0xFF
         is_skip = bool(flags & DIV_FLAG_SKIP)
-        # StepLoader stores this derived value back into a float field.  Round
+        # StepLoader stores this derived value back into a float field. Round
         # at the same point so later GetLine boundary arithmetic matches IL2CPP.
         ms_per_line = (
             0.0
@@ -305,7 +329,7 @@ def build_native_timing(
         )
 
         # StepLoader computes Div.Gap only when msPerLine is positive and the
-        # raw Speed field is positive.  Negative Speed and bSkip both yield 0.
+        # raw Speed field is positive. Negative Speed and bSkip both yield 0.
         if (
             ms_per_line > 0.0
             and block.speed_or_freeze > 0.0
