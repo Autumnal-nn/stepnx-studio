@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from stepnx.preview.commands import GameplayCommand
 from stepnx.preview.events import PreviewEvent, RuntimeEventStream
+from stepnx.preview.speed import RuntimeSpeedState
 
 
 class Judgment(str, Enum):
@@ -90,6 +91,10 @@ class GameplaySession:
     score, combo, and visible judgment advance only after the complete row has
     resolved. STEPFX is deliberately independent: it represents a physical or
     autoplay pad press, not a judgment record.
+
+    R!SE scroll speed is also stateful. The user/high-speed option, active Div
+    block speed and displayed pHighSpeed are kept separately so SetSpeed and
+    SpeedProc no longer collapse into one renderer multiplication.
     """
 
     def __init__(
@@ -105,6 +110,10 @@ class GameplaySession:
         self.autoplay = bool(autoplay)
         self.windows = windows or JudgmentWindows()
         self.time_ms = 0.0
+        self.runtime_modifier = stream.modifier_for_launch_speed(command.speed)
+        self._selected_speed = float(self.runtime_modifier.speed)
+        self._speed_state = self._new_speed_state(0.0)
+        self._speed_block_index = self._block_index_at(0.0)
         self.stats = GameplayStats()
         self.judgments: dict[EventKey, Judgment] = {}
         self.judged_at_ms: dict[EventKey, float] = {}
@@ -124,6 +133,64 @@ class GameplaySession:
         self._event_cursor = 0
         self._miss_cursor = 0
 
+    @property
+    def selected_speed(self) -> float:
+        """Current user/runtime speed target (_modeSpeedExt)."""
+
+        return self._selected_speed
+
+    @property
+    def high_speed(self) -> float:
+        """Current displayed pHighSpeed after block speed and SpeedProc."""
+
+        return self._speed_state.high_speed
+
+    @property
+    def block_speed(self) -> float:
+        return self._speed_state.block_speed
+
+    @property
+    def mode_speed(self) -> float:
+        return self._speed_state.mode_speed
+
+    def _block_index_at(self, time_ms: float) -> int:
+        timing = self.stream.native_timing
+        if timing is None or not timing.blocks:
+            return 0
+        return timing.get_block(time_ms)
+
+    def _block_speed_at(self, time_ms: float) -> float:
+        return self.stream.speed_factor_at(time_ms)
+
+    def _new_speed_state(self, time_ms: float) -> RuntimeSpeedState:
+        return RuntimeSpeedState.initialized(
+            self._selected_speed,
+            self._block_speed_at(time_ms),
+        )
+
+    def _advance_speed(self, previous_time: float, time_ms: float) -> None:
+        if time_ms <= previous_time:
+            return
+        timing = self.stream.native_timing
+        if timing is None or not timing.blocks:
+            self._speed_state.advance(time_ms - previous_time)
+            return
+
+        block_index = timing.get_block(time_ms)
+        block_speed = timing.block_speed_at(time_ms)
+        div = timing.blocks[block_index]
+        block_changed = block_index != self._speed_block_index
+
+        # DrawStep owns Div speed changes. A block transition and every Smooth
+        # update immediately recompute the displayed high speed from the active
+        # block factor instead of feeding that change through SpeedProc.
+        if block_changed or div.is_smooth:
+            self._speed_state.set_block_speed(block_speed, snap=True)
+        else:
+            self._speed_state.set_block_speed(block_speed, snap=False)
+            self._speed_state.advance(time_ms - previous_time)
+        self._speed_block_index = block_index
+
     @staticmethod
     def event_key(event: PreviewEvent) -> EventKey:
         return event.split_id, event.block_id, event.row_index, event.lane
@@ -142,6 +209,8 @@ class GameplaySession:
 
     def reset(self, time_ms: float = 0.0) -> None:
         self.time_ms = float(time_ms)
+        self._speed_state = self._new_speed_state(self.time_ms)
+        self._speed_block_index = self._block_index_at(self.time_ms)
         self.stats = GameplayStats()
         self.judgments.clear()
         self.judged_at_ms.clear()
@@ -239,6 +308,7 @@ class GameplaySession:
         if time_ms < self.time_ms:
             self.reset()
         previous_time = self.time_ms
+        self._advance_speed(previous_time, time_ms)
         self.time_ms = time_ms
         events = self.stream.events
 
@@ -315,3 +385,6 @@ class GameplaySession:
         if not 1 <= digit <= 9:
             raise ValueError("speed digit must be between 1 and 9")
         self.command = self.command.with_speed(digit)
+        self._selected_speed = float(digit)
+        self.runtime_modifier = replace(self.runtime_modifier, speed=self._selected_speed)
+        self._speed_state.set_speed(self._selected_speed)
