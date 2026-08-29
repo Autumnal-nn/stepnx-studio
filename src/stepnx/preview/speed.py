@@ -29,11 +29,22 @@ def _signed_remainder(value: int, divisor: int) -> int:
     return int(value) - quotient * int(divisor)
 
 
-def earthworm_user_speed(time_ms: float, bpm: float, beat_split: int) -> float:
-    """Port DrawStep's Earthworm _modeSpeedExt square-wave selection."""
+def earthworm_user_speed(
+    time_ms: float,
+    loaded_bpm_slot: float,
+    beat_split: int,
+) -> float:
+    """Port DrawStep's Earthworm _modeSpeedExt square-wave selection.
+
+    ``Div_h_t._BPM`` and the ``msPerLine`` property share offset 0x14. The
+    loader therefore replaces the serialized BPM in that slot with msPerLine
+    before DrawStep runs. The native branch compares
+    ``nBeatSplit * loaded _BPM`` against 333.33334, which is the milliseconds
+    per beat for normal Divs and zero for Skip Divs.
+    """
 
     current_ms = trunc(float(time_ms))
-    density = _f32(_f32(bpm) * float(int(beat_split)))
+    density = _f32(_f32(loaded_bpm_slot) * float(int(beat_split)))
     if density >= _f32(EARTHWORM_FAST_THRESHOLD):
         phase = _signed_remainder(current_ms, 500)
         return 3.0 if float(phase) <= 250.0 else 2.0
