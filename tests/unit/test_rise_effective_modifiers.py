@@ -8,9 +8,9 @@ from stepnx.core.commands import InsertMetadata
 from stepnx.preview import (
     AccDecMode,
     ComboDisplay,
-    DirectionMode,
     EffectiveModifier,
     RoutePolicy,
+    SequenceZoneTransform,
     SpeedMode,
     StepParam,
     ThrowMode,
@@ -35,7 +35,7 @@ class RiseEffectiveModifierTests(unittest.TestCase):
         self.assertIs(modifier.speed_mode, SpeedMode.STATIC)
         self.assertIs(modifier.acc_dec, AccDecMode.LINEAR)
         self.assertIs(modifier.visibility, VisibilityMode.VISIBLE)
-        self.assertIs(modifier.direction, DirectionMode.NORMAL)
+        self.assertEqual(modifier.sequence_transform, SequenceZoneTransform.NORMAL)
         self.assertEqual(modifier.perfect_frame, 2.5)
         self.assertEqual(modifier.interval_frame, 2.5)
         self.assertFalse(modifier.combo_per_bank)
@@ -83,20 +83,61 @@ class RiseEffectiveModifierTests(unittest.TestCase):
         modifier = apply_step_params((StepParam(1, 3),), base)
         self.assertIs(modifier.speed_mode, SpeedMode.EARTHWORM)
 
-    def test_direction_maps_to_common_modifier_rotate_and_upside_down_bits(self) -> None:
+    def test_metadata32_is_native_under_attack_drop_bitmask(self) -> None:
         expected = {
-            0: (DirectionMode.NORMAL, False, False),
-            1: (DirectionMode.ROTATE_180, True, False),
-            2: (DirectionMode.UPSIDE_DOWN, False, True),
-            3: (DirectionMode.MIRROR, True, True),
+            0: (SequenceZoneTransform.NORMAL, False, False),
+            1: (SequenceZoneTransform.UNDER_ATTACK, True, False),
+            2: (SequenceZoneTransform.DROP, False, True),
+            3: (
+                SequenceZoneTransform.UNDER_ATTACK | SequenceZoneTransform.DROP,
+                True,
+                True,
+            ),
         }
         for raw, state in expected.items():
             with self.subTest(raw=raw):
                 modifier = apply_step_params((StepParam(32, raw),))
                 self.assertEqual(
-                    (modifier.direction, modifier.rotate_180, modifier.upside_down),
+                    (modifier.sequence_transform, modifier.under_attack, modifier.drop),
                     state,
                 )
+                # R!SE native field-name aliases still expose the same two bits.
+                self.assertEqual(modifier.rotate_180, modifier.under_attack)
+                self.assertEqual(modifier.upside_down, modifier.drop)
+
+    def test_metadata32_mid_is_profile_gated_patch_extension(self) -> None:
+        native = apply_step_params((StepParam(32, 4),))
+        self.assertEqual(native.sequence_transform, SequenceZoneTransform.NORMAL)
+
+        expected = {
+            4: SequenceZoneTransform.MID,
+            5: SequenceZoneTransform.UNDER_ATTACK | SequenceZoneTransform.MID,
+            6: SequenceZoneTransform.DROP | SequenceZoneTransform.MID,
+            7: (
+                SequenceZoneTransform.UNDER_ATTACK
+                | SequenceZoneTransform.DROP
+                | SequenceZoneTransform.MID
+            ),
+        }
+        for raw, transform in expected.items():
+            with self.subTest(raw=raw):
+                patched = apply_step_params(
+                    (StepParam(32, raw),),
+                    allow_mid=True,
+                )
+                self.assertEqual(patched.sequence_transform, transform)
+
+        # The patched decoder intentionally ignores bits above UA/Drop/Mid.
+        patched_high = apply_step_params(
+            (StepParam(32, 0xFF),),
+            allow_mid=True,
+        )
+        self.assertEqual(
+            patched_high.sequence_transform,
+            SequenceZoneTransform.UNDER_ATTACK
+            | SequenceZoneTransform.DROP
+            | SequenceZoneTransform.MID,
+        )
 
     def test_later_lane_and_judge_ids_map_to_named_game_modifier_fields(self) -> None:
         modifier = apply_step_params(
