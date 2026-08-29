@@ -226,16 +226,16 @@ class Phase10AdapterTests(unittest.TestCase):
             / "preview_widget.py"
         )
         text = source.read_text(encoding="utf-8")
+        self.assertIn("native_line_y(", text)
+        self.assertIn("native_screen_y(", text)
         self.assertIn(
-            "base_velocity = native_base_velocity_pixels(self._geometry().note_size)",
+            "base_velocity = native_base_velocity_pixels(geometry.note_size)",
             text,
         )
-        self.assertIn(
-            "pixels = distance * base_velocity * multiplier",
-            text,
-        )
-        self.assertIn("multiplier = self.session.high_speed", text)
+        self.assertIn("self.session.high_speed", text)
         self.assertNotIn("scroll_pitch = self._geometry().lane_spacing", text)
+        self.assertNotIn("** 1.08", text)
+        self.assertNotIn("** 0.92", text)
 
     def test_gameplay_preview_culls_events_after_chart_end(self):
         from pathlib import Path
