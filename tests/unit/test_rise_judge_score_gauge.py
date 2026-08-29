@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import struct
 import unittest
 from dataclasses import replace
 
@@ -26,10 +25,6 @@ from stepnx.preview import (
 from tests.fixture_factory import make_normal_nx20
 
 
-def _f32_bits(value: float) -> int:
-    return struct.unpack("<I", struct.pack("<f", value))[0]
-
-
 def _tap_stream(*, raw: bytes = b"\x43\x03\x00\x00", metadata=()):
     document = parse_bytes(make_normal_nx20(), source="NM.NX", row_storage="compact")
     split = document.splits[0]
@@ -44,6 +39,8 @@ def _tap_stream(*, raw: bytes = b"\x43\x03\x00\x00", metadata=()):
     document = replace(document, splits=(replace(split, blocks=(block,)),))
     block = document.splits[0].blocks[0]
     for row in block.rows:
+        if not hasattr(row, "cells"):
+            continue
         for lane in range(len(row.cells)):
             document = SetNoteAt(row.stable_id, lane, b"\0\0\0\0").apply(document)
     row = document.splits[0].blocks[0].rows[0]
