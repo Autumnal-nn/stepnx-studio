@@ -74,7 +74,9 @@ class GameplayInitializationDialog(QDialog):
         self.command_list.setMinimumHeight(250)
         self.command_items: dict[str, QListWidgetItem] = {}
         for flag in COMMAND_FLAGS:
-            item = QListWidgetItem(f"{flag.code.upper()}  {flag.label}")
+            # Historical PIUTESTER command characters remain an internal
+            # compatibility key. The Studio presents the semantic modifier name.
+            item = QListWidgetItem(flag.label)
             item.setData(Qt.ItemDataRole.UserRole, flag.code)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
@@ -85,7 +87,7 @@ class GameplayInitializationDialog(QDialog):
         form = QFormLayout()
         form.addRow("Chart (.NX):", self.chart_combo)
         form.addRow("Speed:", self.speed_combo)
-        form.addRow("COMMAND flags:", self.command_list)
+        form.addRow("Preview modifiers:", self.command_list)
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
