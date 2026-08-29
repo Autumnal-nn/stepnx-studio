@@ -14,7 +14,7 @@ from stepnx.preview.speed import (
 )
 
 
-# LineBase source defaults recovered from LineBase..ctor RVA 0x63B280.
+# LineBase source defaults recovered from R!SE LineBase..ctor RVA 0x63B280.
 LINE_BASE_Y_MIN = 200.0
 LINE_BASE_Y_MAX = 550.0
 LINE_BASE_X_AMPLITUDE = 20.0
@@ -23,6 +23,16 @@ LINE_BASE_ACC_POW = 1.5
 LINE_BASE_ACC_SCALE = 1.0
 LINE_BASE_ACC_OFFSET = -200.0
 LINE_BASE_PI = 3.1415927410125732
+
+# Historical Prime 2 renderer constants recovered from the supplied `exec`.
+# These deliberately remain separate from the modern R!SE LineBase constants:
+# the two engines really do implement different Snake amplitudes.
+PRIME2_PATH_UNIT = 60.0
+PRIME2_PATH_PI = 3.1415927410125732
+PRIME2_SNAKE_AMPLITUDE = 30.0
+PRIME2_THROW_SPAN = 453.0
+PRIME2_THROW_AMPLITUDE = 96.0  # 64 * 1.5, standard branch
+PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, external-state branch (OPEN)
 
 
 def _clamp01(value: float) -> float:
@@ -38,13 +48,7 @@ def native_acc_dec_offset(
     acc_pow: float = LINE_BASE_ACC_POW,
     acc_scale: float = LINE_BASE_ACC_SCALE,
 ) -> float:
-    """Port LineBase.GetAccDecYOffset's scalar branch.
-
-    R!SE normalizes the current local Y into the serialized LineBase y-range,
-    applies one of two power curves, then scales a separate -200-unit offset.
-    The caller may pass prefab-overridden values; the defaults here are the
-    exact constructor defaults from the IL2CPP binary.
-    """
+    """Port R!SE LineBase.GetAccDecYOffset's scalar branch."""
 
     if mode not in (AccDecMode.ACCELERATION, AccDecMode.DECELERATION):
         return 0.0
@@ -70,13 +74,7 @@ def native_line_local_y(
     acc_pow: float = LINE_BASE_ACC_POW,
     acc_scale: float = LINE_BASE_ACC_SCALE,
 ) -> float:
-    """Return LineBase local Y before NoteMaker applies ``pHighSpeed``.
-
-    This ordering matters. R!SE's LineBase.RePos computes beat displacement and
-    GetAccDecYOffset first; the visible high-speed scale belongs to the parent
-    NoteMaker transform afterward. Applying speed before the curve changes the
-    Acceleration/Deceleration shape and was the old Studio bug.
-    """
+    """Return R!SE LineBase local Y before NoteMaker applies ``pHighSpeed``."""
 
     base_y = float(base_arrow_y) - float(beat_distance) * float(base_velocity)
     return base_y + native_acc_dec_offset(
@@ -101,11 +99,10 @@ def native_line_y(
     acc_pow: float = LINE_BASE_ACC_POW,
     acc_scale: float = LINE_BASE_ACC_SCALE,
 ) -> float:
-    """Return the speed-scaled effective native Y used by the 2-D preview.
+    """Return R!SE's speed-scaled effective native Y.
 
-    The compatibility helper keeps its historical signature but now mirrors the
-    native order: LineBase local placement/AccDec first, parent pHighSpeed scale
-    second around the sequence-zone anchor.
+    Ordering is source-significant: LineBase placement/AccDec happens first and
+    NoteMaker's pHighSpeed parent scale is applied afterward around the receptor.
     """
 
     local_y = native_line_local_y(
@@ -131,12 +128,7 @@ def native_screen_y(
     upside_down: bool = False,
     base_arrow_y: float = BASE_ARROW_Y,
 ) -> float:
-    """Project native LineBase Y into StepNX's scaled preview coordinate.
-
-    ``upside_down`` is retained only for compatibility with older callers.
-    Metadata 32 Drop is now modeled by the sequence-zone affine transform and
-    should not use this flag in the gameplay renderer.
-    """
+    """Project native LineBase Y into StepNX's scaled preview coordinate."""
 
     pixels = (float(base_arrow_y) - float(native_y)) * (
         float(note_size) / NOTE_RENDER_UNIT
@@ -153,18 +145,76 @@ def native_snake_x_offset(
     amplitude: float = LINE_BASE_X_AMPLITUDE,
     wave_rate: float = LINE_BASE_WAVE_RATE,
 ) -> float:
-    """Port the scalar sine path from LineBase.PlaySnakeAnim.
-
-    The runtime may substitute the maximum visible child Y for grouped split
-    objects before reaching this formula. StepNX events are flattened, so this
-    helper deliberately models the directly recovered scalar path only.
-    """
+    """Port modern R!SE LineBase.PlaySnakeAnim (20-unit amplitude)."""
 
     if y_max <= y_min or y >= y_max:
         return 0.0
     t = _clamp01((float(y) - float(y_min)) / (float(y_max) - float(y_min)))
     native_x = sin(t * LINE_BASE_PI * float(wave_rate)) * float(amplitude)
     return native_x * (float(note_size) / NOTE_RENDER_UNIT)
+
+
+def prime2_snake_x_offset(beat_distance: float, note_size: float) -> float:
+    """Port Prime 2's historical Snake path.
+
+    In the supplied Prime 2 executable the dedicated Snake branch computes
+    ``sinf(pi * phase) * 60 * 0.5``. The resulting amplitude is therefore 30,
+    not R!SE's later 20. ``phase`` is the renderer's pre-speed beat-distance
+    value, so speed changes do not alter the horizontal wave frequency.
+    """
+
+    native_x = sin(PRIME2_PATH_PI * float(beat_distance)) * PRIME2_SNAKE_AMPLITUDE
+    return native_x * (float(note_size) / PRIME2_PATH_UNIT)
+
+
+def prime2_throw_y_offset(
+    beat_distance: float,
+    high_speed: float,
+    note_size: float,
+    *,
+    rise: bool,
+    alternate_amplitude: bool = False,
+) -> float:
+    """Port Prime 2's standard Sink/Rise sine path.
+
+    The renderer first forms ``d = beat_distance * 60 * speed`` and then applies
+    ``sin(pi*d/453) * amplitude``. Standard Sink uses +96 and Rise uses -96.
+    Prime 2 also contains an external-state branch selecting +/-300; the state
+    producer is still unidentified, so StepNX never enables it implicitly.
+    """
+
+    displacement = float(beat_distance) * PRIME2_PATH_UNIT * float(high_speed)
+    amplitude = (
+        PRIME2_THROW_ALT_AMPLITUDE
+        if alternate_amplitude
+        else PRIME2_THROW_AMPLITUDE
+    )
+    if rise:
+        amplitude = -amplitude
+    native_y = sin(PRIME2_PATH_PI * displacement / PRIME2_THROW_SPAN) * amplitude
+    return native_y * (float(note_size) / PRIME2_PATH_UNIT)
+
+
+def legacy_exceed_x_offset(
+    vertical_pixels: float,
+    field_width: float,
+    *,
+    from_right: bool,
+    travel_height: float,
+) -> float:
+    """Approximate the historical Exceed diagonal path.
+
+    Prime 2 and Andamiro's own modifier documentation confirm the semantic path:
+    notes approach the receptors diagonally from the opposite player's side.
+    The exact legacy affine coefficient has not yet been recovered from either
+    Prime 2 or PIUTESTER. Keep the approximation isolated here so it cannot be
+    mistaken for the source-exact Snake/Sink/Rise formulas.
+    """
+
+    span = max(1.0, abs(float(travel_height)))
+    progress_from_receptor = _clamp01(abs(float(vertical_pixels)) / span)
+    shift = float(field_width) * 0.5 * progress_from_receptor
+    return shift if from_right else -shift
 
 
 def sequence_zone_affine(
@@ -174,18 +224,7 @@ def sequence_zone_affine(
     *,
     normal_receptor_y: float,
 ) -> tuple[float, float, float, float]:
-    """Return ``(sx, sy, tx, ty)`` for UA/Drop/Mid composition.
-
-    Evidence basis:
-
-    * Under Attack is a 180-degree playfield rotation.
-    * Drop is a vertical reflection (historical 480-space: ``Y -> 480-Y``).
-    * NXA-patched Mid translates the normal receptor anchor to the exact field
-      midpoint before the other independent bits are applied.
-
-    Keeping these as independent affine bits makes value 3 literally UA|Drop
-    and values 4..7 the patched compositions instead of invented enum presets.
-    """
+    """Return ``(sx, sy, tx, ty)`` for UA/Drop/Mid composition."""
 
     flags = SequenceZoneTransform(transform)
     under_attack = bool(flags & SequenceZoneTransform.UNDER_ATTACK)
@@ -200,7 +239,6 @@ def sequence_zone_affine(
 
     if mid:
         local_mid_translation = float(height) / 2.0 - float(normal_receptor_y)
-        # Mid is a local translation performed before the reflection/rotation.
         ty += sy * local_mid_translation
 
     return sx, sy, tx, ty
@@ -215,7 +253,7 @@ def transform_sequence_zone_point(
     *,
     normal_receptor_y: float,
 ) -> tuple[float, float]:
-    """Apply the exact affine composition returned by ``sequence_zone_affine``."""
+    """Apply the affine composition returned by ``sequence_zone_affine``."""
 
     sx, sy, tx, ty = sequence_zone_affine(
         transform,
@@ -227,12 +265,7 @@ def transform_sequence_zone_point(
 
 
 def apply_global_visibility_effect(effect: int, mode: VisibilityMode) -> int:
-    """Port PlayBase.InitData's Header Visibility Step.Change mask.
-
-    Visibility modes 1..3 clear only the low VisualEffect nibble and replace it
-    with Disappear(2), Appear(1), or Hidden(0), preserving ZigZag/high bits.
-    Visible(0) leaves the serialized effect byte untouched.
-    """
+    """Port R!SE PlayBase.InitData's Header Visibility Step.Change mask."""
 
     value = int(effect) & 0xFF
     if mode is VisibilityMode.VISIBLE:
