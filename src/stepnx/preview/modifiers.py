@@ -10,6 +10,7 @@ class SpeedMode(IntEnum):
     STATIC = 0
     EARTHWORM = 1
     RANDOM_VELOCITY = 2
+    AUTO_VELOCITY = 3
 
 
 class AccDecMode(IntEnum):
@@ -22,13 +23,26 @@ class VisibilityMode(IntEnum):
     VISIBLE = 0
     VANISH = 1
     APPEAR = 2
-    VANISH_APPEAR = 3
+    HIDDEN = 3
+
+
+class DirectionMode(IntEnum):
+    NORMAL = 0
+    ROTATE_180 = 1
+    UPSIDE_DOWN = 2
+    MIRROR = 3
 
 
 class ThrowMode(IntEnum):
     FLAT = 0
     SINK = 1
     RISE = 2
+
+
+class ComboDisplay(IntEnum):
+    SINGLE_BANK = 0
+    ALL_BANK = 1
+    ALL_PLAYER = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,16 +64,16 @@ class StepParam:
 
 @dataclass(frozen=True, slots=True)
 class EffectiveModifier:
-    """R!SE state after applying Header StepParams to runtime defaults.
+    """R!SE state after ApplyStepParamToMod has consumed Header StepParams.
 
-    This is intentionally broader than the fields currently rendered by the
-    Studio. ApplyStepParamToMod mutates GameModifier, player/gauge state and a
-    small global option object in one pass. Keeping those effects together
-    gives later preview work one source-derived state instead of rediscovering
-    the same Header parameters independently.
+    Field names mirror the recovered GameModifier/CommonModifier metadata where
+    possible.  State outside those two classes is retained only when the same
+    dispatcher directly writes it.  Merely declared PUMP.Param IDs are not
+    treated as active Header modifiers unless the binary consumes them here.
     """
 
-    # GameModifier.Clear() defaults recovered from GameAssembly.dll.
+    # GameModifier.Clear() defaults recovered from GameAssembly.dll/dump.cs.
+    skins: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
     speed: float = 2.0
     speed_mode: SpeedMode = SpeedMode.STATIC
     acc_dec: AccDecMode = AccDecMode.LINEAR
@@ -70,33 +84,40 @@ class EffectiveModifier:
     throw: ThrowMode = ThrowMode.FLAT
     snake: bool = False
     zigzag: bool = False
-    mirror: bool = False
-    alternate_random: bool = False
+    mirror_turn: bool = False
+    mirror_lr: bool = False
+    random: bool = False
     runner: bool = False
-    legacy_judge_by_note: bool = False
+    judge_bank: bool = False
     perfect_frame: float = 2.5
     interval_frame: float = 2.5
-    reverse_grade: bool = False
-    judge_hide: bool = False
+    judge_reverse: bool = False
+    hide_judge: bool = False
     judge_by_note: bool = False
-    mode_69: int | None = None
-    mode_69_local: bool = False
-    mode_69_global: bool = False
-    parameter_70_a: float = 0.0
-    parameter_70_b: float = 0.0
-    flag_71: bool = False
+    combo_display: ComboDisplay | None = None
+    combo_per_bank: bool = False
+    free_performance: bool = False
+    alt_skin_score_factor: float = 0.0
+    alt_skin_gauge_factor: float = 0.0
 
-    # Proven side effects outside GameModifier.
-    exceed_mode: bool = False
-    nx_mode: bool = False
-    under_attack: bool = False
-    drop: bool = False
-    maximum_lifebar: int | None = None
-    lifebar_display: int | None = None
-    starting_lifebar: int | None = None
+    # CommonModifier.Clear() defaults.
+    disable_bg: bool = False
+    exceed: bool = False
+    nx: bool = False
+    direction: DirectionMode = DirectionMode.NORMAL
+    rotate_180: bool = False
+    upside_down: bool = False
+    merge_combo: bool = False
+    gauge_link_factor: int = 0
+    speed_boost: float = 0.0
+
+    # Other state directly written by ApplyStepParamToMod.
+    level: int | None = None
+    gauge_max: int | None = None
+    gauge_display_max: int | None = None
+    gauge_initial_value: int | None = None
     stage_break: bool | None = None
-    forced_stage_break_miss_combo: int | None = None
-    global_parameter_85: int | None = None
+    miss_combo_break: int | None = None
 
 
 def _first(params: tuple[StepParam, ...], metadata_id: int) -> StepParam | None:
@@ -116,7 +137,7 @@ def _present_signed(params: tuple[StepParam, ...], metadata_id: int) -> int | No
 
 
 def _present_float(params: tuple[StepParam, ...], metadata_id: int) -> float | None:
-    """Port Step.GetParamFloat's bit-preserving int->bytes->float conversion."""
+    """Port Step.GetFloatParam's bit-preserving uint32 -> IEEE-754 conversion."""
 
     param = _first(params, metadata_id)
     if param is None:
@@ -143,12 +164,7 @@ def _enum_value(
 
 
 def _speed_parameter(value: float) -> float:
-    """Port ApplyStepParamToMod's Header speed normalization.
-
-    R!SE first reinterprets the raw uint32 payload as IEEE-754 float. A positive
-    decoded value through 255 is then multiplied by 0.25; zero, negatives and
-    values above 255 are stored directly.
-    """
+    """Port ApplyStepParamToMod's Header Speed normalization."""
 
     if 0.0 < value <= 255.0:
         return value * 0.25
@@ -156,7 +172,7 @@ def _speed_parameter(value: float) -> float:
 
 
 def _judge_parameter(value: int) -> tuple[float, float]:
-    """Port the decimal ID-65 decoder without yet changing preview judgments."""
+    """Port the R!SE decimal ID-65 decoder without consuming it in judgments yet."""
 
     x = value + 5
     quotient = trunc(x / 10)
@@ -166,27 +182,77 @@ def _judge_parameter(value: int) -> tuple[float, float]:
     return perfect_frame, interval_frame
 
 
+def _apply_direction(result: EffectiveModifier, value: int) -> EffectiveModifier:
+    if value not in (0, 1, 2, 3):
+        return result
+    direction = DirectionMode(value)
+    return replace(
+        result,
+        direction=direction,
+        rotate_180=value in (1, 3),
+        upside_down=value in (2, 3),
+    )
+
+
+def _apply_combo_display(result: EffectiveModifier, value: int) -> EffectiveModifier:
+    if value not in (0, 1, 2):
+        return result
+    mode = ComboDisplay(value)
+    return replace(
+        result,
+        combo_display=mode,
+        combo_per_bank=mode is ComboDisplay.SINGLE_BANK,
+        merge_combo=mode is ComboDisplay.ALL_PLAYER,
+    )
+
+
+def _apply_skins(
+    params: tuple[StepParam, ...], result: EffectiveModifier
+) -> EffectiveModifier:
+    skins = list(result.skins)
+    for slot in range(6):
+        value = _present_signed(params, 900 + slot)
+        if value is not None:
+            skins[slot] = value
+        elif result.random_skin != 0:
+            # Native fallback used by ApplyStepParamToMod for unspecified slots.
+            skins[slot] = 254
+    return replace(result, skins=tuple(skins))  # type: ignore[arg-type]
+
+
 def apply_step_params(
     params: tuple[StepParam, ...],
     base: EffectiveModifier | None = None,
 ) -> EffectiveModifier:
-    """Port scalar effects of R!SE ApplyStepParamToMod (RVA 0x659F00).
+    """Port R!SE PlayBase.ApplyStepParamToMod (RVA 0x659F00).
 
-    GameAssembly.dll shows this method reading only the loaded Step's global
-    Header StepParam array at Step+0x28. Split metadata is deliberately not
-    merged here: no source path applying Split+0x18 through this dispatcher has
-    been recovered.
+    The native method reads the loaded Step's global Header StepParam array at
+    Step+0x28. Split metadata is deliberately not merged here: no recovered
+    source path applies Split+0x18 through this dispatcher.
+
+    PUMP.Param contains a few names that are *not* effective Header writes in
+    this routine. mpRunner (51) has no branch here. mpForceBGA (20) calls
+    GetStrParam but discards the result, and mpmSpeedBoost (1110) calls
+    GetFloatParam but discards that result. They are therefore not fabricated
+    as effective state by this projection.
     """
 
     result = EffectiveModifier() if base is None else base
+
+    # mpLevel (1001) is consumed early by the dispatcher for stage/gauge setup.
+    value_i = _present_signed(params, 1001)
+    if value_i is not None:
+        result = replace(result, level=value_i)
 
     value_f = _present_float(params, 0)
     if value_f is not None:
         result = replace(result, speed=_speed_parameter(value_f))
 
-    speed_mode = _enum_value(params, 1, SpeedMode)
-    if speed_mode is not None:
-        result = replace(result, speed_mode=SpeedMode(speed_mode))
+    # Although the enum declares AutoVelocity=3, this dispatcher only branches
+    # for Static/Earthworm/RandomVelocity. Value 3 is handled elsewhere.
+    value_i = _present_signed(params, 1)
+    if value_i in (0, 1, 2):
+        result = replace(result, speed_mode=SpeedMode(value_i))
 
     acc_dec = _enum_value(params, 2, AccDecMode)
     if acc_dec is not None:
@@ -199,16 +265,18 @@ def apply_step_params(
     for metadata_id, field_name in (
         (17, "freedom"),
         (18, "flash"),
+        (21, "exceed"),
+        (22, "nx"),
         (34, "snake"),
         (35, "zigzag"),
-        (48, "mirror"),
-        (49, "alternate_random"),
-        (50, "runner"),
-        (64, "legacy_judge_by_note"),
-        (66, "reverse_grade"),
-        (67, "judge_hide"),
+        (48, "mirror_turn"),
+        (49, "mirror_lr"),
+        (50, "random"),
+        (64, "judge_bank"),
+        (66, "judge_reverse"),
+        (67, "hide_judge"),
         (68, "judge_by_note"),
-        (71, "flag_71"),
+        (71, "free_performance"),
     ):
         enabled = _bool_value(params, metadata_id)
         if enabled is not None:
@@ -217,6 +285,11 @@ def apply_step_params(
     value_i = _present_signed(params, 19)
     if value_i is not None:
         result = replace(result, random_skin=value_i)
+    result = _apply_skins(params, result)
+
+    value_i = _present_signed(params, 32)
+    if value_i is not None:
+        result = _apply_direction(result, value_i)
 
     throw = _enum_value(params, 33, ThrowMode)
     if throw is not None:
@@ -232,39 +305,26 @@ def apply_step_params(
         )
 
     value_i = _present_signed(params, 69)
-    if value_i in (0, 1, 2):
-        # Without dump.cs the public enum name is not safely recoverable.
-        result = replace(
-            result,
-            mode_69=value_i,
-            mode_69_local=value_i == 0,
-            mode_69_global=value_i == 2,
-        )
+    if value_i is not None:
+        result = _apply_combo_display(result, value_i)
 
+    # Param 70 is deliberately declared twice in PUMP.Param. The dispatcher
+    # reads it twice and writes the same (value - 1) delta to both factors.
     value_f = _present_float(params, 70)
     if value_f is not None:
         adjusted = value_f - 1.0
-        result = replace(result, parameter_70_a=adjusted, parameter_70_b=adjusted)
-
-    for metadata_id, field_name in ((21, "exceed_mode"), (22, "nx_mode")):
-        enabled = _bool_value(params, metadata_id)
-        if enabled is not None:
-            result = replace(result, **{field_name: enabled})
-
-    value_i = _present_signed(params, 32)
-    if value_i in (0, 1, 2, 3):
         result = replace(
             result,
-            under_attack=bool(value_i & 0x01),
-            drop=bool(value_i & 0x02),
+            alt_skin_score_factor=adjusted,
+            alt_skin_gauge_factor=adjusted,
         )
 
     for metadata_id, field_name in (
-        (80, "maximum_lifebar"),
-        (81, "lifebar_display"),
-        (82, "starting_lifebar"),
-        (84, "forced_stage_break_miss_combo"),
-        (85, "global_parameter_85"),
+        (80, "gauge_max"),
+        (81, "gauge_display_max"),
+        (82, "gauge_initial_value"),
+        (84, "miss_combo_break"),
+        (85, "gauge_link_factor"),
     ):
         value_i = _present_signed(params, metadata_id)
         if value_i is not None:
@@ -274,8 +334,8 @@ def apply_step_params(
     if enabled is not None:
         result = replace(result, stage_break=enabled)
 
-    # R!SE looks up 1110 but does not store its scalar result in this method.
-    # ID 1111, however, directly multiplies the already-effective Speed.
+    # mpmSpeedBoost (1110) is queried but its return value is discarded by this
+    # routine. mpmSpeedX (1111), however, multiplies GameModifier.Speed.
     value_f = _present_float(params, 1111)
     if value_f is not None:
         result = replace(result, speed=result.speed * value_f)
