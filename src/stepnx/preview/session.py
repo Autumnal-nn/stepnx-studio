@@ -6,6 +6,15 @@ from enum import Enum
 
 from stepnx.preview.commands import GameplayCommand
 from stepnx.preview.events import PreviewEvent, RuntimeEventStream
+from stepnx.preview.gauge import RuntimeGauge
+from stepnx.preview.judge_timing import NativeJudgeTiming
+from stepnx.preview.judgment import (
+    JudgeUnitProjection,
+    judge_note_decision,
+    project_judge_unit,
+    summarize_judge_line,
+)
+from stepnx.preview.scoring import add_score_floor_zero, native_score_delta
 from stepnx.preview.speed import RuntimeSpeedState
 
 
@@ -17,24 +26,9 @@ class Judgment(str, Enum):
     MISS = "MISS"
 
 
-@dataclass(frozen=True, slots=True)
-class JudgmentWindows:
-    perfect_ms: float = 41.67
-    great_ms: float = 83.33
-    good_ms: float = 125.0
-    bad_ms: float = 166.67
-
-    def classify(self, error_ms: float) -> Judgment | None:
-        error = abs(error_ms)
-        if error <= self.perfect_ms:
-            return Judgment.PERFECT
-        if error <= self.great_ms:
-            return Judgment.GREAT
-        if error <= self.good_ms:
-            return Judgment.GOOD
-        if error <= self.bad_ms:
-            return Judgment.BAD
-        return None
+# Public compatibility name. The previous preview exposed JudgmentWindows, but
+# the runtime model is now the asymmetric Step.Judge timing structure.
+JudgmentWindows = NativeJudgeTiming
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,20 +51,6 @@ class StepEffect:
     bank_id: int
 
 
-_SCORES = {
-    Judgment.PERFECT: 1000,
-    Judgment.GREAT: 800,
-    Judgment.GOOD: 500,
-    Judgment.BAD: 200,
-    Judgment.MISS: 0,
-}
-_GAUGE = {
-    Judgment.PERFECT: 8,
-    Judgment.GREAT: 4,
-    Judgment.GOOD: 1,
-    Judgment.BAD: -20,
-    Judgment.MISS: -40,
-}
 _JUDGMENT_RANK = {
     Judgment.PERFECT: 0,
     Judgment.GREAT: 1,
@@ -78,24 +58,19 @@ _JUDGMENT_RANK = {
     Judgment.BAD: 3,
     Judgment.MISS: 4,
 }
+_GRADE_JUDGMENT = {value: key for key, value in _JUDGMENT_RANK.items()}
 
 EventKey = tuple[int, int, int, int]
 GroupKey = tuple[int, int, int, int, int]
 
 
 class GameplaySession:
-    """Mutable runtime state kept strictly outside the canonical document.
+    """Mutable R!SE gameplay state kept outside the canonical document.
 
-    R!SE normally resolves one JudgeLine result per encoded row *and judge
-    bank*. Individual cells remain tracked so a manual chord can arrive over
-    separate key events. When Header JudgeByNote is active the native
-    JudgeNote path marks each note independently, so the grouping key includes
-    the lane instead. Score/gauge values are still the preview approximation;
-    their native JudgeUnit/PostProcess consumers are later parity items.
-
-    R!SE scroll speed is also stateful. The user/high-speed option, active Div
-    block speed and displayed pHighSpeed are kept separately so SetSpeed and
-    SpeedProc no longer collapse into one renderer multiplication.
+    Judgment grouping follows JudgeLine/JudgeNote, timing follows Step.Judge,
+    score follows JudgeStep_PostProcess/GetScore, and gauge follows HPBar. The
+    preview intentionally keeps these runtime projections separate from the
+    editor's historical NXA/Fiesta authoring registries.
     """
 
     def __init__(
@@ -104,18 +79,24 @@ class GameplaySession:
         command: GameplayCommand,
         *,
         autoplay: bool = True,
-        windows: JudgmentWindows | None = None,
+        windows: NativeJudgeTiming | None = None,
     ) -> None:
         self.stream = stream
         self.command = command
         self.autoplay = bool(autoplay)
-        self.windows = windows or JudgmentWindows()
         self.time_ms = 0.0
         self.runtime_modifier = stream.modifier_for_launch_speed(command.speed)
+        self.windows = windows or NativeJudgeTiming.from_modifier(self.runtime_modifier)
         self._selected_speed = float(self.runtime_modifier.speed)
         self._speed_state = self._new_speed_state(0.0)
         self._speed_block_index = self._block_index_at(0.0)
-        self.stats = GameplayStats()
+        self._gauge = RuntimeGauge.from_modifier(
+            self.runtime_modifier,
+            columns=stream.columns,
+        )
+        self._bank_combos = [0, 0, 0, 0]
+        self._bank_max_combos = [0, 0, 0, 0]
+        self.stats = GameplayStats(gauge=self._gauge.life)
         self.judgments: dict[EventKey, Judgment] = {}
         self.judged_at_ms: dict[EventKey, float] = {}
         self.judgment_history: list[tuple[float, PreviewEvent]] = []
@@ -151,6 +132,18 @@ class GameplaySession:
     @property
     def mode_speed(self) -> float:
         return self._speed_state.mode_speed
+
+    @property
+    def gauge_limit(self) -> int:
+        return self._gauge.limit
+
+    @property
+    def gauge_display_max(self) -> int:
+        return self._gauge.display_max
+
+    @property
+    def gauge_factor(self) -> int:
+        return self._gauge.factor
 
     def _block_index_at(self, time_ms: float) -> int:
         timing = self.stream.native_timing
@@ -192,7 +185,12 @@ class GameplaySession:
         return event.split_id, event.block_id, event.row_index, event.lane
 
     def group_key(self, event: PreviewEvent) -> GroupKey:
-        lane_key = event.lane if self.runtime_modifier.judge_by_note else -1
+        # JudgeByNote is one JudgeUnit per cell. Rush/roll longs are also routed
+        # through JudgeNote rather than the aggregate JudgeLine path.
+        judge_note_lane = self.runtime_modifier.judge_by_note or (
+            bool(event.long_kind) and not event.no_rush
+        )
+        lane_key = event.lane if judge_note_lane else -1
         return (
             event.split_id,
             event.block_id,
@@ -203,9 +201,6 @@ class GameplaySession:
 
     @staticmethod
     def is_judged_note(event: PreviewEvent) -> bool:
-        # JudgeLine requires native Type == Normal and skips exact NoJudge.
-        # Rush/roll long notes also satisfy this structural filter but are
-        # routed by JudgeNote rather than the line aggregator.
         return event.base_note_type == 0x03 and not event.no_judge
 
     @staticmethod
@@ -220,7 +215,13 @@ class GameplaySession:
         self.time_ms = float(time_ms)
         self._speed_state = self._new_speed_state(self.time_ms)
         self._speed_block_index = self._block_index_at(self.time_ms)
-        self.stats = GameplayStats()
+        self._gauge = RuntimeGauge.from_modifier(
+            self.runtime_modifier,
+            columns=self.stream.columns,
+        )
+        self._bank_combos[:] = (0, 0, 0, 0)
+        self._bank_max_combos[:] = (0, 0, 0, 0)
+        self.stats = GameplayStats(gauge=self._gauge.life)
         self.judgments.clear()
         self.judged_at_ms.clear()
         self.judgment_history.clear()
@@ -246,23 +247,113 @@ class GameplaySession:
                 if effect.time_ms >= cutoff
             ]
 
-    def _update_stats(self, judgment: Judgment) -> None:
-        current = self.stats
-        combo = (
-            current.combo + 1
-            if judgment in (Judgment.PERFECT, Judgment.GREAT)
-            else 0
+    def _project_group(
+        self,
+        events: tuple[PreviewEvent, ...],
+        judgment: Judgment,
+    ) -> JudgeUnitProjection | None:
+        grade = _JUDGMENT_RANK[judgment]
+        input_grade = -1 if judgment is Judgment.MISS else grade
+        representative = events[0]
+
+        is_rush = bool(representative.long_kind) and not representative.no_rush
+        if self.runtime_modifier.judge_by_note or is_rush:
+            decision = judge_note_decision(
+                representative,
+                input_grade,
+                judge_by_note=self.runtime_modifier.judge_by_note,
+            )
+            if not decision.routed_to_judge_unit and not decision.forced_miss:
+                return None
+            return project_judge_unit(
+                bank=representative.bank,
+                grade=input_grade,
+                visible=decision.visible,
+                no_miss=decision.no_miss,
+                note_count=decision.note_count,
+                long_note_count=decision.long_note_count,
+                alt_skin_count=decision.alt_skin_count,
+                alt_skin_score_factor=self.runtime_modifier.alt_skin_score_factor,
+            )
+
+        summary = summarize_judge_line(events, representative.bank)
+        if not summary.has_judge_unit:
+            return None
+        return project_judge_unit(
+            bank=summary.bank,
+            grade=input_grade,
+            visible=summary.visible,
+            no_miss=summary.no_miss,
+            note_count=summary.note_count,
+            long_note_count=summary.long_note_count,
+            alt_skin_count=summary.alt_skin_count,
+            alt_skin_score_factor=self.runtime_modifier.alt_skin_score_factor,
+            play_sound=summary.play_sound,
         )
+
+    def _increment_combo(self, bank: int) -> int:
+        self._bank_combos[bank] += 1
+        self._bank_max_combos[bank] = max(
+            self._bank_max_combos[bank], self._bank_combos[bank]
+        )
+        if bank != 3:
+            self._bank_combos[3] += 1
+            self._bank_max_combos[3] = max(
+                self._bank_max_combos[3], self._bank_combos[3]
+            )
+        return self._bank_combos[bank]
+
+    def _clear_combo(self, bank: int) -> None:
+        self._bank_combos[bank] = 0
+        self._bank_combos[3] = 0
+
+    def _apply_native_postprocess(
+        self,
+        projection: JudgeUnitProjection,
+    ) -> None:
+        """Apply JudgeStep_PostProcess/GetScore plus JudgeUnit's HPBar update."""
+
+        total_count = projection.total_note_count
+        if total_count <= 0:
+            return
+        grade = projection.judgment
+
+        # JudgeUnit consumes a negative grade as Miss, but bNoMiss bypasses the
+        # gauge and JudgeStep_PostProcess path entirely.
+        if grade == 4 and projection.no_miss:
+            return
+
+        bank = projection.bank
+        if grade <= 1:
+            score_combo = self._increment_combo(bank)
+        elif grade == 2:
+            # Native Good neither increments nor clears combo.
+            score_combo = self._bank_combos[bank]
+        else:
+            self._clear_combo(bank)
+            score_combo = self._bank_combos[bank]
+
+        score_delta = native_score_delta(
+            grade,
+            combo=score_combo,
+            note_count=total_count,
+            ordinary_note_miss=projection.note_count != 0,
+            alt_skin_factor=projection.alt_skin_factor,
+        )
+        score = add_score_floor_zero(self.stats.score, score_delta)
+        self._gauge.apply_grade(grade)
+
+        current = self.stats
         self.stats = GameplayStats(
-            perfect=current.perfect + (judgment is Judgment.PERFECT),
-            great=current.great + (judgment is Judgment.GREAT),
-            good=current.good + (judgment is Judgment.GOOD),
-            bad=current.bad + (judgment is Judgment.BAD),
-            miss=current.miss + (judgment is Judgment.MISS),
-            combo=combo,
-            max_combo=max(current.max_combo, combo),
-            score=current.score + _SCORES[judgment],
-            gauge=min(1000, max(0, current.gauge + _GAUGE[judgment])),
+            perfect=current.perfect + (grade == 0),
+            great=current.great + (grade == 1),
+            good=current.good + (grade == 2),
+            bad=current.bad + (grade == 3),
+            miss=current.miss + (grade == 4),
+            combo=self._bank_combos[3],
+            max_combo=max(current.max_combo, self._bank_max_combos[3]),
+            score=score,
+            gauge=self._gauge.life,
         )
 
     def _finalize_group(self, group_key: GroupKey) -> None:
@@ -287,9 +378,11 @@ class GameplaySession:
         ]
         self._resolved_groups.add(group_key)
         self.judgment_history.append((judged_at, representative))
-        self._update_stats(judgment)
         self.last_judgment = judgment
         self.last_error_ms = max(worst_errors, key=abs) if worst_errors else None
+        projection = self._project_group(events, judgment)
+        if projection is not None:
+            self._apply_native_postprocess(projection)
 
     def _record_event(
         self,
@@ -349,7 +442,7 @@ class GameplaySession:
                     judged_at_ms=event.time_ms,
                 )
 
-        miss_cutoff = time_ms - self.windows.bad_ms
+        miss_cutoff = time_ms - self.windows.late_limit_ms
         while self._miss_cursor < len(events):
             event = events[self._miss_cursor]
             if event.time_ms >= miss_cutoff:
@@ -369,7 +462,7 @@ class GameplaySession:
             if event.lane == lane
             and self.starts_pad_press(event)
             and self.event_key(event) not in self.judgments
-            and abs(event.time_ms - moment) <= self.windows.bad_ms
+            and self.windows.can_judge(moment - event.time_ms)
         ]
         if not candidates:
             self.step_effect_history.append(StepEffect(moment, lane, 0))
@@ -377,9 +470,11 @@ class GameplaySession:
         event = min(candidates, key=lambda item: abs(item.time_ms - moment))
         self._emit_step_effect(event, moment)
         error = moment - event.time_ms
-        judgment = self.windows.classify(error)
-        if judgment is not None:
-            self._record_event(event, judgment, error)
+        grade = self.windows.grade_for_error(error)
+        if grade is None:
+            return None
+        judgment = _GRADE_JUDGMENT[grade]
+        self._record_event(event, judgment, error)
         return judgment
 
     def release(self, lane: int) -> None:
