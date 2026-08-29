@@ -7,10 +7,12 @@ from dataclasses import replace
 from stepnx.codecs.nx20 import parse_bytes
 from stepnx.core.commands import InsertMetadata, SetNoteAt
 from stepnx.preview import (
+    BASE_ARROW_Y,
     COMMAND_FLAGS,
     LINE_BASE_ACC_OFFSET,
     LINE_BASE_ACC_POW,
     LINE_BASE_ACC_SCALE,
+    LINE_BASE_VELOCITY,
     LINE_BASE_WAVE_RATE,
     LINE_BASE_X_AMPLITUDE,
     LINE_BASE_Y_MAX,
@@ -18,6 +20,7 @@ from stepnx.preview import (
     AccDecMode,
     GameplaySession,
     RoutePolicy,
+    SequenceZoneTransform,
     SpeedMode,
     VisibilityMode,
     apply_global_visibility_effect,
@@ -25,12 +28,15 @@ from stepnx.preview import (
     create_preview_snapshot,
     earthworm_user_speed,
     native_acc_dec_offset,
+    native_line_local_y,
+    native_line_y,
     native_snake_x_offset,
     parse_gameplay_command,
     random_velocity_triggers,
     random_velocity_user_speed,
     resolve_route,
     serialize_command_flags,
+    transform_sequence_zone_point,
 )
 from tests.fixture_factory import make_normal_nx20
 
@@ -88,6 +94,22 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             half_pow * -200.0,
         )
 
+    def test_accdec_is_applied_before_high_speed_parent_scale(self) -> None:
+        distance = (BASE_ARROW_Y - (LINE_BASE_Y_MIN + 70.0)) / LINE_BASE_VELOCITY
+        local = native_line_local_y(distance, AccDecMode.ACCELERATION)
+        speed2 = native_line_y(distance, 2.0, AccDecMode.ACCELERATION)
+
+        # pHighSpeed scales the already-curved displacement around the receptor.
+        self.assertAlmostEqual(
+            BASE_ARROW_Y - speed2,
+            2.0 * (BASE_ARROW_Y - local),
+        )
+        # This would differ if speed were incorrectly multiplied into beat
+        # distance before GetAccDecYOffset.
+        wrong_base = BASE_ARROW_Y - distance * LINE_BASE_VELOCITY * 2.0
+        wrong = wrong_base + native_acc_dec_offset(wrong_base, AccDecMode.ACCELERATION)
+        self.assertNotAlmostEqual(speed2, wrong)
+
     def test_snake_uses_native_y_normalization_sine_and_amplitude(self) -> None:
         span = LINE_BASE_Y_MAX - LINE_BASE_Y_MIN
         self.assertAlmostEqual(
@@ -113,6 +135,75 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             places=6,
         )
         self.assertEqual(native_snake_x_offset(LINE_BASE_Y_MAX, 72.0), 0.0)
+
+
+class SequenceZoneTransformTests(unittest.TestCase):
+    def test_native_ua_drop_are_independent_affine_bits(self) -> None:
+        width = 640.0
+        height = 480.0
+        point = (100.0, 413.0)
+
+        self.assertEqual(
+            transform_sequence_zone_point(
+                *point,
+                SequenceZoneTransform.NORMAL,
+                width,
+                height,
+                normal_receptor_y=413.0,
+            ),
+            (100.0, 413.0),
+        )
+        self.assertEqual(
+            transform_sequence_zone_point(
+                *point,
+                SequenceZoneTransform.DROP,
+                width,
+                height,
+                normal_receptor_y=413.0,
+            ),
+            (100.0, 67.0),
+        )
+        self.assertEqual(
+            transform_sequence_zone_point(
+                *point,
+                SequenceZoneTransform.UNDER_ATTACK,
+                width,
+                height,
+                normal_receptor_y=413.0,
+            ),
+            (540.0, 67.0),
+        )
+        self.assertEqual(
+            transform_sequence_zone_point(
+                *point,
+                SequenceZoneTransform.UNDER_ATTACK | SequenceZoneTransform.DROP,
+                width,
+                height,
+                normal_receptor_y=413.0,
+            ),
+            (540.0, 413.0),
+        )
+
+    def test_patched_mid_moves_receptor_to_exact_midpoint_under_all_compositions(self) -> None:
+        width = 640.0
+        height = 480.0
+        receptor = (100.0, 413.0)
+        for base in (
+            SequenceZoneTransform.NORMAL,
+            SequenceZoneTransform.UNDER_ATTACK,
+            SequenceZoneTransform.DROP,
+            SequenceZoneTransform.UNDER_ATTACK | SequenceZoneTransform.DROP,
+        ):
+            with self.subTest(base=base):
+                x, y = transform_sequence_zone_point(
+                    *receptor,
+                    base | SequenceZoneTransform.MID,
+                    width,
+                    height,
+                    normal_receptor_y=413.0,
+                )
+                self.assertEqual(y, 240.0)
+                self.assertEqual(x, 540.0 if base & SequenceZoneTransform.UNDER_ATTACK else 100.0)
 
 
 class RiseVisibilityTests(unittest.TestCase):
@@ -235,16 +326,42 @@ class RiseSpeedModeTests(unittest.TestCase):
 
 class CommandRegistryTests(unittest.TestCase):
     def test_registry_is_complete_unique_and_serializes_in_ui_order(self) -> None:
-        self.assertEqual(len(COMMAND_FLAGS), 13)
+        self.assertEqual(len(COMMAND_FLAGS), 14)
         codes = tuple(flag.code for flag in COMMAND_FLAGS)
         self.assertEqual(len(codes), len(set(codes)))
         self.assertEqual(
             codes,
-            ("v", "n", "w", "f", "m", "r", "u", "j", "d", "a", "x", "s", "e"),
+            (
+                "v",
+                "n",
+                "w",
+                "f",
+                "m",
+                "r",
+                "u",
+                "!",
+                "j",
+                "d",
+                "a",
+                "x",
+                "s",
+                "e",
+            ),
         )
         self.assertEqual(serialize_command_flags(("m", "v", "e")), "vme")
+        self.assertEqual(serialize_command_flags(("!", "u")), "u!")
         with self.assertRaisesRegex(ValueError, "unsupported COMMAND"):
             serialize_command_flags(("v", "?"))
+
+    def test_ua_drop_and_random_are_not_fixed_lane_permutations(self) -> None:
+        command = parse_gameplay_command("ur!")
+        self.assertTrue(command.under_attack)
+        self.assertTrue(command.drop)
+        self.assertTrue(command.randomize)
+        self.assertEqual(command.lane_map(5, seed=123), (0, 1, 2, 3, 4))
+
+        mirror = parse_gameplay_command("m")
+        self.assertEqual(mirror.lane_map(5), (4, 3, 2, 1, 0))
 
 
 if __name__ == "__main__":
