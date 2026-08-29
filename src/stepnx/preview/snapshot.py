@@ -77,9 +77,13 @@ class PreviewSnapshot:
     def effective_modifier(
         self, base: EffectiveModifier | None = None
     ) -> EffectiveModifier:
-        """Apply the R!SE global Header StepParam dispatcher to a base state."""
+        """Apply Header StepParams with profile-gated Metadata 32 extensions."""
 
-        return apply_step_params(self.header_step_params, base)
+        return apply_step_params(
+            self.header_step_params,
+            base,
+            allow_mid=self.profile == "nxa-step5-patched",
+        )
 
 
 def _step_params(entries) -> tuple[StepParam, ...]:
