@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass, replace
 from enum import IntEnum
 from math import trunc
@@ -42,14 +43,18 @@ class StepParam:
         value = self.raw_value & 0xFFFFFFFF
         return value - 0x100000000 if value & 0x80000000 else value
 
+    @property
+    def float_value(self) -> float:
+        return struct.unpack("<f", struct.pack("<I", self.raw_value & 0xFFFFFFFF))[0]
+
 
 @dataclass(frozen=True, slots=True)
 class EffectiveModifier:
     """R!SE state after applying Header StepParams to runtime defaults.
 
     This is intentionally broader than the fields currently rendered by the
-    Studio.  ApplyStepParamToMod mutates GameModifier, player/gauge state and a
-    small global option object in one pass.  Keeping those effects together
+    Studio. ApplyStepParamToMod mutates GameModifier, player/gauge state and a
+    small global option object in one pass. Keeping those effects together
     gives later preview work one source-derived state instead of rediscovering
     the same Header parameters independently.
     """
@@ -94,34 +99,41 @@ class EffectiveModifier:
     global_parameter_85: int | None = None
 
 
-def _first_signed(params: tuple[StepParam, ...], metadata_id: int) -> int | None:
-    """Port R!SE's first-match StepParam lookup.
-
-    The native lookup walks the serialized int array from the beginning in
-    (id, value) pairs.  Duplicate metadata is therefore first-wins, not the
-    last-wins behavior a dict conversion would accidentally introduce.
-    """
+def _first(params: tuple[StepParam, ...], metadata_id: int) -> StepParam | None:
+    """Port R!SE's first-match StepParam lookup."""
 
     for param in params:
         if param.metadata_id == metadata_id:
-            return param.signed_value
+            return param
     return None
 
 
-def _present(params: tuple[StepParam, ...], metadata_id: int) -> int | None:
-    value = _first_signed(params, metadata_id)
-    return None if value is None or value == -1 else value
+def _present_signed(params: tuple[StepParam, ...], metadata_id: int) -> int | None:
+    param = _first(params, metadata_id)
+    if param is None or param.signed_value == -1:
+        return None
+    return param.signed_value
+
+
+def _present_float(params: tuple[StepParam, ...], metadata_id: int) -> float | None:
+    """Port Step.GetParamFloat's bit-preserving int->bytes->float conversion."""
+
+    param = _first(params, metadata_id)
+    if param is None:
+        return None
+    value = param.float_value
+    return None if value == -1.0 else value
 
 
 def _bool_value(params: tuple[StepParam, ...], metadata_id: int) -> bool | None:
-    value = _present(params, metadata_id)
+    value = _present_signed(params, metadata_id)
     return None if value is None else value != 0
 
 
 def _enum_value(
     params: tuple[StepParam, ...], metadata_id: int, enum_type: type[IntEnum]
 ) -> IntEnum | None:
-    value = _present(params, metadata_id)
+    value = _present_signed(params, metadata_id)
     if value is None:
         return None
     try:
@@ -130,17 +142,17 @@ def _enum_value(
         return None
 
 
-def _speed_parameter(value: int) -> float:
-    """Port ApplyStepParamToMod's unusual Header speed conversion.
+def _speed_parameter(value: float) -> float:
+    """Port ApplyStepParamToMod's Header speed normalization.
 
-    Positive values through 255 use the historical quarter-speed encoding.
-    Zero, negatives other than the -1 sentinel, and values above 255 are stored
-    as their direct numeric float value by the R!SE runtime.
+    R!SE first reinterprets the raw uint32 payload as IEEE-754 float. A positive
+    decoded value through 255 is then multiplied by 0.25; zero, negatives and
+    values above 255 are stored directly.
     """
 
-    if 0 < value <= 255:
+    if 0.0 < value <= 255.0:
         return value * 0.25
-    return float(value)
+    return value
 
 
 def _judge_parameter(value: int) -> tuple[float, float]:
@@ -158,19 +170,19 @@ def apply_step_params(
     params: tuple[StepParam, ...],
     base: EffectiveModifier | None = None,
 ) -> EffectiveModifier:
-    """Port the scalar effects of R!SE ApplyStepParamToMod (RVA 0x659F00).
+    """Port scalar effects of R!SE ApplyStepParamToMod (RVA 0x659F00).
 
     GameAssembly.dll shows this method reading only the loaded Step's global
-    Header StepParam array at Step+0x28.  Split metadata is deliberately not
+    Header StepParam array at Step+0x28. Split metadata is deliberately not
     merged here: no source path applying Split+0x18 through this dispatcher has
     been recovered.
     """
 
     result = EffectiveModifier() if base is None else base
 
-    value = _present(params, 0)
-    if value is not None:
-        result = replace(result, speed=_speed_parameter(value))
+    value_f = _present_float(params, 0)
+    if value_f is not None:
+        result = replace(result, speed=_speed_parameter(value_f))
 
     speed_mode = _enum_value(params, 1, SpeedMode)
     if speed_mode is not None:
@@ -202,54 +214,49 @@ def apply_step_params(
         if enabled is not None:
             result = replace(result, **{field_name: enabled})
 
-    value = _present(params, 19)
-    if value is not None:
-        result = replace(result, random_skin=value)
+    value_i = _present_signed(params, 19)
+    if value_i is not None:
+        result = replace(result, random_skin=value_i)
 
     throw = _enum_value(params, 33, ThrowMode)
     if throw is not None:
         result = replace(result, throw=ThrowMode(throw))
 
-    value = _present(params, 65)
-    if value is not None:
-        perfect_frame, interval_frame = _judge_parameter(value)
+    value_i = _present_signed(params, 65)
+    if value_i is not None:
+        perfect_frame, interval_frame = _judge_parameter(value_i)
         result = replace(
             result,
             perfect_frame=perfect_frame,
             interval_frame=interval_frame,
         )
 
-    value = _present(params, 69)
-    if value in (0, 1, 2):
-        # The binary exposes the state transition but, without dump.cs, the
-        # field's public enum name is not safely recoverable.  Preserve it
-        # neutrally instead of inventing a label.
+    value_i = _present_signed(params, 69)
+    if value_i in (0, 1, 2):
+        # Without dump.cs the public enum name is not safely recoverable.
         result = replace(
             result,
-            mode_69=value,
-            mode_69_local=value == 0,
-            mode_69_global=value == 2,
+            mode_69=value_i,
+            mode_69_local=value_i == 0,
+            mode_69_global=value_i == 2,
         )
 
-    value = _present(params, 70)
-    if value is not None:
-        adjusted = float(value) - 1.0
+    value_f = _present_float(params, 70)
+    if value_f is not None:
+        adjusted = value_f - 1.0
         result = replace(result, parameter_70_a=adjusted, parameter_70_b=adjusted)
 
-    for metadata_id, field_name in (
-        (21, "exceed_mode"),
-        (22, "nx_mode"),
-    ):
+    for metadata_id, field_name in ((21, "exceed_mode"), (22, "nx_mode")):
         enabled = _bool_value(params, metadata_id)
         if enabled is not None:
             result = replace(result, **{field_name: enabled})
 
-    value = _present(params, 32)
-    if value in (0, 1, 2, 3):
+    value_i = _present_signed(params, 32)
+    if value_i in (0, 1, 2, 3):
         result = replace(
             result,
-            under_attack=bool(value & 0x01),
-            drop=bool(value & 0x02),
+            under_attack=bool(value_i & 0x01),
+            drop=bool(value_i & 0x02),
         )
 
     for metadata_id, field_name in (
@@ -259,9 +266,9 @@ def apply_step_params(
         (84, "forced_stage_break_miss_combo"),
         (85, "global_parameter_85"),
     ):
-        value = _present(params, metadata_id)
-        if value is not None:
-            result = replace(result, **{field_name: value})
+        value_i = _present_signed(params, metadata_id)
+        if value_i is not None:
+            result = replace(result, **{field_name: value_i})
 
     enabled = _bool_value(params, 83)
     if enabled is not None:
@@ -269,8 +276,8 @@ def apply_step_params(
 
     # R!SE looks up 1110 but does not store its scalar result in this method.
     # ID 1111, however, directly multiplies the already-effective Speed.
-    value = _present(params, 1111)
-    if value is not None:
-        result = replace(result, speed=result.speed * float(value))
+    value_f = _present_float(params, 1111)
+    if value_f is not None:
+        result = replace(result, speed=result.speed * value_f)
 
     return result
