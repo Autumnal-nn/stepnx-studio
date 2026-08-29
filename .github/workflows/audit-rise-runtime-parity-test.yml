@@ -1,7 +1,9 @@
 name: Audit RISE Runtime Parity Test
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - audit/rise-runtime-parity-item45-work
 
 permissions:
   contents: read
