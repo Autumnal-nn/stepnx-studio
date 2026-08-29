@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
-    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QVBoxLayout,
 )
+
+from stepnx.preview.commands import COMMAND_FLAGS, serialize_command_flags
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +31,13 @@ class PreviewLaunchOptions:
 
 class GameplayInitializationDialog(QDialog):
     """Collect every gameplay-launch option in one deliberately small dialog."""
+
+    _EXCLUSIVE_COMMAND_PEERS = {
+        "d": "a",
+        "a": "d",
+        "s": "e",
+        "e": "s",
+    }
 
     def __init__(
         self,
@@ -54,16 +65,27 @@ class GameplayInitializationDialog(QDialog):
         selected = self.chart_combo.findData(current.document_index)
         if selected >= 0:
             self.chart_combo.setCurrentIndex(selected)
+
         self.speed_combo = QComboBox(self)
         for speed in range(1, 10):
             self.speed_combo.addItem(f"{speed}x", speed)
-        self.command_edit = QLineEdit(self)
-        self.command_edit.setPlaceholderText("Optional COMMAND flags")
+
+        self.command_list = QListWidget(self)
+        self.command_list.setMinimumHeight(250)
+        self.command_items: dict[str, QListWidgetItem] = {}
+        for flag in COMMAND_FLAGS:
+            item = QListWidgetItem(f"{flag.code.upper()}  {flag.label}")
+            item.setData(Qt.ItemDataRole.UserRole, flag.code)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.command_list.addItem(item)
+            self.command_items[flag.code] = item
+        self.command_list.itemChanged.connect(self._command_item_changed)
 
         form = QFormLayout()
         form.addRow("Chart (.NX):", self.chart_combo)
         form.addRow("Speed:", self.speed_combo)
-        form.addRow("COMMAND:", self.command_edit)
+        form.addRow("COMMAND flags:", self.command_list)
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -76,6 +98,24 @@ class GameplayInitializationDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(self.buttons)
 
+    def _command_item_changed(self, item: QListWidgetItem) -> None:
+        if item.checkState() is not Qt.CheckState.Checked:
+            return
+        code = str(item.data(Qt.ItemDataRole.UserRole))
+        peer = self._EXCLUSIVE_COMMAND_PEERS.get(code)
+        if peer is None:
+            return
+        peer_item = self.command_items[peer]
+        if peer_item.checkState() is Qt.CheckState.Checked:
+            peer_item.setCheckState(Qt.CheckState.Unchecked)
+
+    def selected_command_codes(self) -> tuple[str, ...]:
+        return tuple(
+            flag.code
+            for flag in COMMAND_FLAGS
+            if self.command_items[flag.code].checkState() is Qt.CheckState.Checked
+        )
+
     def options(self) -> PreviewLaunchOptions:
         document_index = self.chart_combo.currentData()
         if document_index is None:
@@ -83,5 +123,5 @@ class GameplayInitializationDialog(QDialog):
         return PreviewLaunchOptions(
             document_index=int(document_index),
             speed=int(self.speed_combo.currentData()),
-            command=self.command_edit.text(),
+            command=serialize_command_flags(self.selected_command_codes()),
         )
