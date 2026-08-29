@@ -64,3 +64,9 @@ The Studio preview now treats:
 - Exceed as a separately labelled approximation until its exact legacy affine coefficient is recovered.
 
 No proprietary executable bytes or game assets are copied into the repository.
+
+## Visual validation follow-up
+
+- NX20 Snake Path `221/222` boundary convergence was visually validated against legacy gameplay on 2026-08-29. The phase-zero identity convergence is locked; later preview work must not replace it without contradictory runtime/capture evidence.
+- Legacy Appear/Vanish remains a continuous fade, but its spatial window is compact around the judge line. StepNX now scales that window to `1.5 * rendered note size` instead of viewport height; the exact legacy easing curve remains approximate.
+- PIUTESTER/NX2 compatibility command `^` is restored to the selector as **NX Mode**. It is distinct from `x` / Exceed. No visual consumer is invented until source evidence establishes its rendering behavior.

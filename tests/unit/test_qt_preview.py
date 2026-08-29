@@ -88,6 +88,18 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
 
+    def test_legacy_visibility_fade_is_local_to_note_scale(self) -> None:
+        widget = self._widget("v")
+        try:
+            widget.resize(640, 480)
+            self.assertAlmostEqual(
+                widget._visibility_fade_distance(),
+                widget._geometry().note_size * 1.5,
+            )
+            self.assertLess(widget._visibility_fade_distance(), widget.height() * 0.25)
+        finally:
+            widget.close()
+
     def test_event_culling_uses_chart_time_without_mutating_stream(self) -> None:
         widget = self._widget()
         try:
@@ -157,15 +169,17 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 tuple(dialog.command_list.item(i).text() for i in range(dialog.command_list.count())),
                 tuple(flag.label for flag in COMMAND_FLAGS),
             )
+            self.assertEqual(dialog.command_items["^"].text(), "NX Mode")
 
             dialog.chart_combo.setCurrentText("S17.NX")
             dialog.speed_combo.setCurrentIndex(7)
             dialog.command_items["v"].setCheckState(Qt.CheckState.Checked)
             dialog.command_items["m"].setCheckState(Qt.CheckState.Checked)
+            dialog.command_items["^"].setCheckState(Qt.CheckState.Checked)
             options = dialog.options()
             self.assertEqual(options.document_index, 2)
             self.assertEqual(options.speed, 8)
-            self.assertEqual(options.command, "vm")
+            self.assertEqual(options.command, "vm^")
         finally:
             dialog.close()
 

@@ -32,6 +32,7 @@ COMMAND_FLAGS = (
     CommandFlag("d", "deceleration", "Deceleration"),
     CommandFlag("a", "acceleration", "Acceleration"),
     CommandFlag("x", "exceed_mode", "Exceed"),
+    CommandFlag("^", "nx_mode", "NX Mode"),
     CommandFlag("(", "sink", "Sink"),
     CommandFlag(")", "rise", "Rise"),
     CommandFlag("z", "snake", "Snake"),
@@ -69,6 +70,7 @@ class GameplayCommand:
     deceleration: bool = False
     acceleration: bool = False
     exceed_mode: bool = False
+    nx_mode: bool = False
     sink: bool = False
     rise: bool = False
     snake: bool = False
@@ -103,7 +105,7 @@ class GameplayCommand:
     def pending_effects(self) -> tuple[str, ...]:
         """Return parsed flags that still have no complete runtime projection."""
 
-        return ()
+        return ("^",) if self.nx_mode else ()
 
     def with_speed(self, speed: int) -> GameplayCommand:
         if not 1 <= speed <= 9:

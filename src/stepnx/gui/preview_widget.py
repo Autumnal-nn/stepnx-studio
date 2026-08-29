@@ -378,6 +378,12 @@ class GameplayPreviewWidget(QWidget):
         )
         return centre_x, centre_y, self._geometry().note_size * scale
 
+    def _visibility_fade_distance(self) -> float:
+        # Legacy Appear/Vanish is a local transition around the receptor.
+        # FFF11 capture is consistent with roughly one-and-a-half rendered
+        # note widths, not the former viewport-height ramp.
+        return max(1.0, self._geometry().note_size * 1.5)
+
     def _event_opacity(self, event: PreviewEvent) -> float:
         _, local_y, _ = self._event_render_geometry(event)
         _, sy, _, ty = self._sequence_affine()
@@ -386,7 +392,7 @@ class GameplayPreviewWidget(QWidget):
         return self.command.note_opacity(
             int(event.visibility),
             distance=abs(screen_y - receptor_y),
-            fade_distance=max(1.0, float(self.height()) * 0.42),
+            fade_distance=self._visibility_fade_distance(),
             time_ms=self._chart_time_ms,
         )
 

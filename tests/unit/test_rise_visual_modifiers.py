@@ -447,7 +447,7 @@ class RiseSpeedModeTests(unittest.TestCase):
 
 class CommandRegistryTests(unittest.TestCase):
     def test_registry_is_complete_unique_and_serializes_in_ui_order(self) -> None:
-        self.assertEqual(len(COMMAND_FLAGS), 18)
+        self.assertEqual(len(COMMAND_FLAGS), 19)
         codes = tuple(flag.code for flag in COMMAND_FLAGS)
         self.assertEqual(len(codes), len(set(codes)))
         self.assertEqual(
@@ -466,6 +466,7 @@ class CommandRegistryTests(unittest.TestCase):
                 "d",
                 "a",
                 "x",
+                "^",
                 "(",
                 ")",
                 "z",
@@ -475,6 +476,11 @@ class CommandRegistryTests(unittest.TestCase):
         )
         self.assertEqual(serialize_command_flags(("m", "v", "e")), "vme")
         self.assertEqual(serialize_command_flags(("!", "u")), "u!")
+        self.assertEqual(serialize_command_flags(("^", "x")), "x^")
+        nx = parse_gameplay_command("x^")
+        self.assertTrue(nx.exceed_mode)
+        self.assertTrue(nx.nx_mode)
+        self.assertEqual(nx.pending_effects, ("^",))
         with self.assertRaisesRegex(ValueError, "unsupported COMMAND"):
             serialize_command_flags(("v", "?"))
 
