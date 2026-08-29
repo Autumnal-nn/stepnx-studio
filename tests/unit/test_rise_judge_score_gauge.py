@@ -78,9 +78,9 @@ class RiseJudgeTimingTests(unittest.TestCase):
         stream = _tap_stream(metadata=((65, 701),))
         timing = NativeJudgeTiming.from_modifier(stream.effective_modifier)
 
-        self.assertAlmostEqual(stream.effective_modifier.perfect_frame, 0.4)
+        self.assertAlmostEqual(stream.effective_modifier.perfect_frame, 0.5)
         self.assertAlmostEqual(stream.effective_modifier.interval_frame, 2.0)
-        self.assertAlmostEqual(timing.perfect_ms, 0.4 * JUDGE_FRAME_MS)
+        self.assertAlmostEqual(timing.perfect_ms, 0.5 * JUDGE_FRAME_MS)
         self.assertAlmostEqual(timing.interval_ms, 2.0 * JUDGE_FRAME_MS)
 
     def test_speedboost_scales_whole_judge_frame_only_when_prepopulated(self) -> None:
