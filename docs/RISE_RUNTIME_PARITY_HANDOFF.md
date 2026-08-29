@@ -6,7 +6,7 @@ This file is the continuity anchor for continuing the StepNX Studio audit agains
 
 Primary audit branch: `audit/rise-runtime-parity`
 
-The visual-modifier implementation was developed on `audit/rise-runtime-parity-item45-work`, validated repository-wide, then promoted into the primary audit branch after the temporary CI workflow was removed.
+The visual-modifier implementation was developed and validated on `audit/rise-runtime-parity-item45-work`. The validated work tree is ready for promotion into the primary audit branch after the temporary CI workflow is removed.
 
 ## Primary-source policy
 
