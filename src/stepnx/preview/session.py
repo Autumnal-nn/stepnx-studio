@@ -18,6 +18,7 @@ from stepnx.preview.judgment import (
 from stepnx.preview.modifiers import SpeedMode
 from stepnx.preview.scoring import add_score_floor_zero, native_score_delta
 from stepnx.preview.speed import (
+    DRAW_STEP_INTERVAL_MS,
     RuntimeSpeedState,
     earthworm_user_speed,
     random_velocity_triggers,
@@ -97,9 +98,9 @@ class GameplaySession:
         self._selected_speed = float(self.runtime_modifier.speed)
         self._speed_state = self._new_speed_state(0.0)
         self._speed_block_index = self._block_index_at(0.0)
+        self._draw_step_accumulator_ms = 0.0
         self._random_velocity_seed = stream.route.seed or 0
         self._random_velocity_rng = random.Random(self._random_velocity_seed)
-        self._random_velocity_line_key: tuple[int, int] | None = None
         self._gauge = RuntimeGauge.from_modifier(
             self.runtime_modifier,
             columns=stream.columns,
@@ -192,34 +193,26 @@ class GameplaySession:
             self._speed_state.set_speed(
                 earthworm_user_speed(time_ms, div.bpm, div.beat_split)
             )
-            self._random_velocity_line_key = None
             return
         if mode is not SpeedMode.RANDOM_VELOCITY:
-            self._random_velocity_line_key = None
             return
 
         state = timing.state_at(time_ms)
-        key = (state.block_index, state.line)
         if not random_velocity_triggers(state.line):
-            self._random_velocity_line_key = None
-            return
-        if key == self._random_velocity_line_key:
             return
 
-        # DrawStep's line gate and %4+1 conversion are exact. The Unity RNG
-        # stream and repeated-per-frame rerolls on the qualifying line are not
-        # recoverable from the available state, so StepNX uses one deterministic
-        # reroll on line entry. This is the remaining RandomVelocity approximation.
+        # DrawStep rerolls on every update while the current line satisfies the
+        # exact Line % 48 gate. The cadence, gate and signed %4+1 conversion are
+        # source-exact; only Unity's RNG stream remains approximated here.
         random_value = self._random_velocity_rng.randrange(0, 0x7FFFFFFF)
         self._speed_state.set_speed(random_velocity_user_speed(random_value))
-        self._random_velocity_line_key = key
 
-    def _advance_speed(self, previous_time: float, time_ms: float) -> None:
-        if time_ms <= previous_time:
-            return
+    def _draw_step_speed_tick(self, time_ms: float) -> None:
+        """Project one PUMPPlayer.DrawStep / SpeedProc cadence tick."""
+
         timing = self.stream.native_timing
         if timing is None or not timing.blocks:
-            self._speed_state.advance(time_ms - previous_time)
+            self._speed_state.advance(DRAW_STEP_INTERVAL_MS)
             return
 
         block_index = timing.get_block(time_ms)
@@ -240,8 +233,31 @@ class GameplaySession:
 
         self._apply_speed_mode(time_ms, block_index)
         if not div.is_smooth:
-            self._speed_state.advance(time_ms - previous_time)
+            self._speed_state.advance(DRAW_STEP_INTERVAL_MS)
         self._speed_block_index = block_index
+
+    def _advance_speed(self, previous_time: float, time_ms: float) -> None:
+        if time_ms <= previous_time:
+            return
+        timing = self.stream.native_timing
+        if timing is None or not timing.blocks:
+            self._speed_state.advance(time_ms - previous_time)
+            return
+
+        delta_ms = float(time_ms) - float(previous_time)
+        interval = float(DRAW_STEP_INTERVAL_MS)
+        accumulated = self._draw_step_accumulator_ms + delta_ms
+        next_tick = float(previous_time) + (
+            interval - self._draw_step_accumulator_ms
+        )
+        epsilon = 1e-9
+
+        while accumulated + epsilon >= interval:
+            self._draw_step_speed_tick(next_tick)
+            accumulated -= interval
+            next_tick += interval
+
+        self._draw_step_accumulator_ms = max(0.0, accumulated)
 
     @staticmethod
     def event_key(event: PreviewEvent) -> EventKey:
@@ -278,8 +294,8 @@ class GameplaySession:
         self.time_ms = float(time_ms)
         self._speed_state = self._new_speed_state(self.time_ms)
         self._speed_block_index = self._block_index_at(self.time_ms)
+        self._draw_step_accumulator_ms = 0.0
         self._random_velocity_rng = random.Random(self._random_velocity_seed)
-        self._random_velocity_line_key = None
         self._gauge = RuntimeGauge.from_modifier(
             self.runtime_modifier,
             columns=self.stream.columns,
