@@ -45,7 +45,61 @@ class PreviewEvent:
 
     @property
     def note_type(self) -> int:
+        """Historical low-nibble note type used by preview drawing."""
         return self.raw[0] & 0x0F
+
+    @property
+    def attribute(self) -> int:
+        return self.raw[0]
+
+    @property
+    def visual_effect(self) -> int:
+        return self.raw[1]
+
+    @property
+    def bank_param(self) -> int:
+        return self.raw[2] | (self.raw[3] << 8)
+
+    @property
+    def base_note_type(self) -> int:
+        """PIUMobileStepDLL.Attributes.TypeMask (low two bits)."""
+        return self.attribute & 0x03
+
+    @property
+    def judge_mask(self) -> int:
+        return self.attribute & 0xE0
+
+    @property
+    def no_judge(self) -> bool:
+        return self.judge_mask == 0x20
+
+    @property
+    def no_rush(self) -> bool:
+        return bool(self.attribute & 0x10)
+
+    @property
+    def long_kind(self) -> int:
+        return self.attribute & 0x0C
+
+    @property
+    def long_flags(self) -> int:
+        return self.attribute & 0x1C
+
+    @property
+    def y_table(self) -> int:
+        return self.visual_effect & 0x0F
+
+    @property
+    def param(self) -> int:
+        return self.bank_param & 0x3FFF
+
+    @property
+    def bank(self) -> int:
+        return self.bank_param >> 14
+
+    @property
+    def visible_for_judge(self) -> bool:
+        return bool(self.visual_effect & 0x01)
 
     @property
     def function(self) -> PreviewNoteFunction:
