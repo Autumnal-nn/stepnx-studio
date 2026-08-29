@@ -3,7 +3,7 @@ name: Audit RISE Runtime Parity Test
 on:
   push:
     branches:
-      - audit/rise-runtime-parity-item2-work
+      - audit/rise-runtime-parity-item45-work
 
 permissions:
   contents: read
