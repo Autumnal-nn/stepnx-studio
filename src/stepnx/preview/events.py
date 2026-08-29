@@ -14,6 +14,7 @@ from stepnx.preview.native_timing import (
 )
 from stepnx.preview.routes import ResolvedRoute
 from stepnx.preview.snapshot import PreviewSnapshot
+from stepnx.preview.visuals import apply_global_visibility_effect
 
 
 class PreviewNoteFunction(str, Enum):
@@ -241,6 +242,17 @@ class PreviewTimingSegment:
         )
 
 
+def _runtime_raw(raw: bytes, modifier: EffectiveModifier) -> bytes:
+    """Project PlayBase.InitData mutations without touching canonical NX bytes."""
+
+    if len(raw) != 4:
+        return raw
+    visual = apply_global_visibility_effect(raw[1], modifier.visibility)
+    if visual == raw[1]:
+        return raw
+    return bytes((raw[0], visual, raw[2], raw[3]))
+
+
 def build_event_stream(
     snapshot: PreviewSnapshot, route: ResolvedRoute
 ) -> RuntimeEventStream:
@@ -252,6 +264,7 @@ def build_event_stream(
         raise ValueError("cannot build events from an unresolved route")
 
     native_timing = build_native_timing(snapshot, route)
+    runtime_modifier = snapshot.effective_modifier()
     events: list[PreviewEvent] = []
     timing: list[PreviewTimingSegment] = []
     warnings: list[str] = []
@@ -320,7 +333,7 @@ def build_event_stream(
                         block.stable_id,
                         row_index,
                         lane,
-                        cell.raw,
+                        _runtime_raw(cell.raw, runtime_modifier),
                         block.scroll,
                         event_position,
                         selected_index,
@@ -340,7 +353,7 @@ def build_event_stream(
         tuple(timing),
         tuple(warnings),
         native_timing,
-        snapshot.effective_modifier(),
+        runtime_modifier,
         snapshot.header_step_params,
         int(snapshot.start_column),
         int(snapshot.columns),
