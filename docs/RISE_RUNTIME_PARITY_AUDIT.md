@@ -115,12 +115,12 @@ if rawSpeed < 0:
 |---|---|---|---|---|
 | RV-001 | Base note Y projection | MATCH | `LineBase.RePos()` uses `PlayBase.GetBlockBeat(block,line) * _baseVelocity`. | Renderer uses native beat distance and recovered base velocity. |
 | RV-002 | Accel / Decel | FIXED scalar path | `LineBase.GetAccDecYOffset()` normalizes Y over `_yMin=200`..`_yMax=550`; Accel is `(1-pow(t,1.5))*-200`, Decel is `pow(1-t,1.5)*-200`, then `_accScale=1`. | Synthetic pixel powers were removed. The flattened preview cannot exactly reproduce `TryGetMaxVisibleSplitLocalY` aggregation for grouped split children, so that grouping detail remains an explicit presentation limitation. |
-| RV-003 | Snake | FIXED scalar path | `LineBase.PlaySnakeAnim()` uses the same visible-Y normalization, native float pi, `waveRate=2`, `xAmplitude=20`, and resets above `_yMax`. | Header `bSnake` now drives the recovered sine path. The old Earthworm-as-horizontal-sine behavior was removed. Grouped-child max-Y aggregation remains flattened. |
-| RV-004 | Earthworm | FIXED | `PUMPPlayer.DrawStep()` reads `Step.msCurTime`, multiplies `Div.nBeatSplit` by the loaded offset-0x14 `_BPM` slot, which `StepLoader` has overwritten with `msPerLine`, then selects 500 ms 3x/2x or 360 ms 2x/1x square waves around the 333.33334 threshold. Skip loads the slot as zero. | Earthworm is a SpeedMode that updates `_modeSpeedExt` and then follows `_modeSpeed`/`SpeedProc`; it no longer moves notes horizontally. |
-| RV-005 | Random Velocity | APPROXIMATION | DrawStep gate is exact `Line % 48 == 0`; native RNG result is converted with signed `% 4 + 1` before updating `_modeSpeedExt`. | Gate and conversion are exact. Studio uses one deterministic reroll on qualifying-line entry because the Unity RNG stream and native repeated-per-frame reroll cadence have not been recovered. |
+| RV-003 | Snake | OPEN in R!SE / FIXED historical projection | The current R!SE image preserves Snake state and a 20-unit LineBase helper, but this audit has no validated gameplay consumer making that dormant path authoritative. Prime 2 `exec` proves the historical runtime path `sin(pi*phase) * 60 * 0.5`, i.e. amplitude 30. | StepNX deliberately ignores the dormant R!SE 20-unit implementation and uses the Prime 2 30-unit path for Snake visualization, including Header Snake state. Path-modified long shafts are sampled along the same trajectory. |
+| RV-004 | Earthworm | FIXED | `PUMPPlayer.DrawStep()` reads `Step.msCurTime`, multiplies `Div.nBeatSplit` by the loaded offset-0x14 `_BPM` slot, which `StepLoader` has overwritten with `msPerLine`, then selects 500 ms 3x/2x or 360 ms 2x/1x square waves around the 333.33334 threshold. Skip loads the slot as zero. | Earthworm is evaluated on an internal 1/60 s DrawStep cadence, independent of UI `advance()` chunk size, updates `_modeSpeedExt`, and then follows `_modeSpeed`/`SpeedProc`; it no longer moves notes horizontally. |
+| RV-005 | Random Velocity | APPROXIMATION only for RNG stream | DrawStep gate is exact `Line % 48 == 0`; native RNG result is converted with signed `% 4 + 1` before updating `_modeSpeedExt`, and DrawStep rerolls on each update while the qualifying line remains current. | Gate, 1/60 s cadence, repeated qualifying-line reroll, and `%4+1` conversion are implemented. Python's deterministic RNG substitutes for the unrecovered Unity RNG sequence, which is the remaining approximation. |
 | RV-006 | Header Visibility | FIXED state / APPROXIMATION presentation | `PlayBase.InitData` rewrites only the low `VisualEffect` nibble: Vanish=2, Appear=1, Hidden=0; high bits such as `Effects.bZigZag=0x10` survive. | Runtime event bytes receive the rewrite without mutating the canonical NX document. Exact Animator fade curves remain asset-dependent; preview opacity is therefore not claimed pixel-perfect. |
 | RV-007 | ZigZag | OPEN | `Effects.bZigZag=0x10`, Header `GameModifier.bZigZag`, and Div params 221/222 are named in metadata. | No source-supported gameplay transform consumer has been recovered strongly enough to replace this with a guessed animation. State/raw bits remain preserved. |
-| RV-008 | Throw | OPEN | Flat/Sink/Rise state and `LineBase.PlayThrowAnim()` are recovered, but movement is Animator/asset driven. | No synthetic transform is introduced. |
+| RV-008 | Throw | FIXED historical compatibility projection | R!SE exposes Flat/Sink/Rise and `LineBase.PlayThrowAnim()` but delegates movement to Animator/assets. Prime 2 provides a reproducible historical sine path: span 453, amplitude 96, with Rise reversing the sign. | Preview uses the Prime 2 path as an explicit compatibility projection for Sink/Rise. Path-modified long shafts follow the sampled curve. The unidentified Prime 2 alternate 300-unit producer is not enabled. |
 
 ## Editor / authoring
 
@@ -131,7 +131,7 @@ if rawSpeed < 0:
 | RE-003 | Scroll Factor / BeatPerLine | MATCH storage | Native BeatPerLine is the raw spatial-per-line float. | Raw Scroll preserved; Real Scroll remains an editor convenience. |
 | RE-004 | Div flag editing | FIXED | Native byte is a flags field. | Smooth/Skip independent; upper bits preserved. |
 | RE-005 | Cross-generation ID reuse | MATCH separation | Same metadata number can mean different things across NXA, Fiesta-era engines and R!SE. | Runtime projection does not rewrite historical authoring profiles. |
-| RE-006 | Gameplay COMMAND launch UI | FIXED | The supported auxiliary command set is finite and already parsed as named flags; launch speed is a separate runtime control. | Free-text COMMAND entry was replaced with 13 checkable codes. D/A and S/E are mutually exclusive in the selector; legacy string parsing remains only for compatibility/non-UI callers. |
+| RE-006 | Gameplay COMMAND launch UI | FIXED | The supported auxiliary command set is finite and already parsed as named flags; launch speed is a separate runtime control. | Free-text COMMAND entry was replaced with 18 semantic checkable modifiers. Acceleration/Deceleration and Random Velocity/Earthworm are mutually exclusive in the selector; legacy character parsing remains only for compatibility/non-UI callers. |
 
 ## Source anchors
 
@@ -189,8 +189,8 @@ The visual pass deliberately leaves these unresolved rather than guessing:
 
 1. exact ZigZag transform consumer, including the relationship among `Effects.bZigZag`, Header `bZigZag`, and Div params 221/222;
 2. Throw Animator/asset movement;
-3. exact Random Velocity Unity RNG stream and qualifying-line reroll cadence;
-4. exact Animator curves for Appear/Vanish presentation;
+3. exact Random Velocity Unity RNG stream; cadence and repeated DrawStep rerolls are now implemented;
+4. exact Animator/material curves for Appear/Vanish presentation;
 5. real producer of `CommonModifier.SpeedBoost`;
 6. challenge-mode HPBar.Add branch;
 7. forced-judgment Div 999 consumer;

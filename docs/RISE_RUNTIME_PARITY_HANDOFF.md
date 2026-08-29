@@ -319,16 +319,16 @@ The previous synthetic pixel powers were removed. `TryGetMaxVisibleSplitLocalY` 
 
 ### Snake
 
-`LineBase.PlaySnakeAnim` RVA `0x6390A0` uses the same visible-Y range plus:
+The current R!SE image preserves Snake state plus a 20-unit `LineBase` helper, but no validated gameplay consumer for that state was recovered. Per the audit policy, that dormant implementation is **not** treated as preview behavior.
+
+Prime 2 is the historical runtime arbiter. Its rendering path proves:
 
 ```text
-xAmplitude = 20
-waveRate   = 2
-pi         = 3.1415927410125732f
-xOffset    = sin(t * pi * waveRate) * xAmplitude
+xOffset = sin(pi * phase) * 60 * 0.5
+        = sin(pi * phase) * 30
 ```
 
-Header `bSnake` now drives this path. Earthworm no longer masquerades as horizontal sine motion.
+StepNX therefore uses the Prime 2 30-unit path for Snake visualization, including loaded Header Snake state. Long-note shafts are sampled along the path instead of remaining straight endpoint rectangles. Earthworm remains a separate speed mode.
 
 ### Header Visibility
 
@@ -366,7 +366,7 @@ The two square waves are:
 <  333.33334: msCurTime % 360 <= 180 -> 2x, else 1x
 ```
 
-These values update `_modeSpeedExt`, then `_modeSpeed = _modeSpeedExt * _blockSpeed`, then non-Smooth display changes pass through SpeedProc.
+These values update `_modeSpeedExt`, then `_modeSpeed = _modeSpeedExt * _blockSpeed`, then non-Smooth display changes pass through SpeedProc. StepNX evaluates this on the native 1/60 s DrawStep cadence, independent of the caller's `advance()` chunk size.
 
 ### Random Velocity
 
@@ -377,26 +377,22 @@ Line % 48 == 0
 native RNG result % 4 + 1
 ```
 
-before writing `_modeSpeedExt`. StepNX uses the exact line gate and signed modulo conversion. The exact Unity RNG stream and native repeated-per-frame rerolls while a qualifying line remains current were not recovered, so the preview uses one deterministic reroll on line entry and marks Random Velocity approximate for that reason.
+before writing `_modeSpeedExt`. StepNX uses the exact line gate, 1/60 s DrawStep cadence, repeated rerolls while a qualifying line remains current, and signed modulo conversion. The exact Unity RNG stream is still unrecovered, so a deterministic Python RNG supplies the sequence; that sequence is the remaining approximation.
 
 ### COMMAND launch selector
 
-The gameplay initialization dialog no longer accepts arbitrary free text. It exposes the 13 known auxiliary codes as checkable entries:
+The gameplay initialization dialog no longer accepts arbitrary free text. It exposes 18 semantic modifier choices: Vanish, Appear, Non-Step, Flash, Freedom, Mirror, Random, Under Attack, Drop, Judge Reverse, Deceleration, Acceleration, Exceed, Sink, Rise, Snake, Random Velocity and Earthworm.
 
-```text
-V N W F M R U J D A X S E
-```
-
-Speed remains a separate 1x..9x selector. D/A and S/E are mutually exclusive in the UI because each pair targets one enum-like runtime mode. Legacy string parsing remains for tests and non-UI compatibility.
+Speed remains a separate 1x..9x selector. Acceleration/Deceleration and Random Velocity/Earthworm are mutually exclusive in the UI because each pair targets one enum-like runtime mode. Historical command characters remain internal compatibility keys for tests and non-UI callers.
 
 ### Deliberately unresolved visual state
 
 Do not invent transforms for:
 
 - ZigZag: `Effects.bZigZag=0x10`, Header `bZigZag`, and Div params 221/222 are known, but a sufficiently strong direct gameplay consumer has not been recovered;
-- Throw: Flat/Sink/Rise is known and `LineBase.PlayThrowAnim` exists, but movement depends on Animator/assets;
-- exact Appear/Vanish Animator fade curves;
-- exact Random Velocity Unity RNG/cadence.
+- R!SE's exact Throw Animator/asset movement; the preview intentionally uses the recovered Prime 2 sine path as a historical compatibility projection;
+- exact Appear/Vanish Animator/material fade curves;
+- exact Random Velocity Unity RNG sequence.
 
 ## Final validation checkpoint
 
