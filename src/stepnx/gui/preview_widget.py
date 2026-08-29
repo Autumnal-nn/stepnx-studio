@@ -28,13 +28,17 @@ from stepnx.preview.modifiers import AccDecMode, SequenceZoneTransform, ThrowMod
 from stepnx.preview.session import GameplaySession, Judgment
 from stepnx.preview.speed import native_base_velocity_pixels
 from stepnx.preview.visuals import (
+    LEGACY_ACCEL_LIMIT,
+    LEGACY_ACCDEC_PATH_UNIT,
     LINE_BASE_ACC_OFFSET,
+    legacy_acc_dec_distance,
     legacy_exceed_x_offset,
     native_line_local_y,
     native_line_y,
     native_screen_y,
     prime2_snake_x_offset,
     prime2_throw_y_offset,
+    prime2_zigzag_lane_position,
     sequence_zone_affine,
 )
 
@@ -196,16 +200,34 @@ class GameplayPreviewWidget(QWidget):
         """Return the shared horizontal centre for one source lane."""
         return self._geometry().lane_center(self._visual_lane(source_lane))
 
-    def _effective_acc_dec(self) -> AccDecMode:
-        mode = self.session.runtime_modifier.acc_dec
-        # COMMAND D/A target the same mutually-exclusive mode. Preserve input
-        # order for non-UI callers; the launch selector prevents both at once.
+    def _lane_position_x(self, visual_lane_position: float) -> float:
+        """Project a fractional visual-lane coordinate into the playfield."""
+
+        if self.columns <= 1:
+            return self.lane_center(0)
+        lane_map = self._lane_map()
+        first = self.lane_center(lane_map[0])
+        second = self.lane_center(lane_map[1])
+        return first + float(visual_lane_position) * (second - first)
+
+    def _legacy_command_acc_dec(self) -> AccDecMode:
+        """Resolve PIUTESTER/NX2 A/D without conflating it with R!SE Header 2."""
+
+        mode = AccDecMode.LINEAR
         for character in self.command.raw:
             if character == "d":
                 mode = AccDecMode.DECELERATION
             elif character == "a":
                 mode = AccDecMode.ACCELERATION
         return mode
+
+    def _effective_acc_dec(self) -> AccDecMode:
+        legacy = self._legacy_command_acc_dec()
+        return (
+            legacy
+            if legacy is not AccDecMode.LINEAR
+            else self.session.runtime_modifier.acc_dec
+        )
 
     def _effective_throw(self) -> ThrowMode:
         mode = self.session.runtime_modifier.throw
@@ -221,15 +243,17 @@ class GameplayPreviewWidget(QWidget):
         return self.stream.beat_distance_at(event, self._chart_time_ms)
 
     def _event_local_y(self, event: PreviewEvent) -> float:
+        # Header ID 2 remains the modern R!SE LineBase curve. Historical A/D
+        # commands use a distinct Prime/NXA renderer and are applied in screen Y.
         return native_line_local_y(
-            self._event_beat_distance(event), self._effective_acc_dec()
+            self._event_beat_distance(event), self.session.runtime_modifier.acc_dec
         )
 
     def _event_native_y(self, event: PreviewEvent) -> float:
         return native_line_y(
             self._event_beat_distance(event),
             self.session.high_speed,
-            self._effective_acc_dec(),
+            self.session.runtime_modifier.acc_dec,
         )
 
     def _event_throw_y_offset(self, event: PreviewEvent) -> float:
@@ -243,17 +267,47 @@ class GameplayPreviewWidget(QWidget):
             rise=mode is ThrowMode.RISE,
         )
 
-    def _event_y(self, event: PreviewEvent) -> float:
+    def _base_screen_y_for_beat_distance(self, beat_distance: float) -> float:
         geometry = self._geometry()
+        legacy_mode = self._legacy_command_acc_dec()
+        if legacy_mode is not AccDecMode.LINEAR:
+            return self._receptor_y() + legacy_acc_dec_distance(
+                beat_distance,
+                self.session.high_speed,
+                geometry.note_size,
+                legacy_mode,
+            )
+        native_y = native_line_y(
+            beat_distance,
+            self.session.high_speed,
+            self.session.runtime_modifier.acc_dec,
+        )
         return native_screen_y(
-            self._event_native_y(event),
+            native_y,
             self._receptor_y(),
             geometry.note_size,
+        )
+
+    def _event_y(self, event: PreviewEvent) -> float:
+        return self._base_screen_y_for_beat_distance(
+            self._event_beat_distance(event)
         ) + self._event_throw_y_offset(event)
 
     def _event_x_offset(self, event: PreviewEvent) -> float:
         geometry = self._geometry()
         offset = 0.0
+
+        if self.session.runtime_modifier.zigzag:
+            visual_lane = self._visual_lane(event.lane)
+            lane_position = prime2_zigzag_lane_position(
+                visual_lane,
+                self._event_beat_distance(event),
+                self.columns,
+                self.stream.route.seed or 0,
+                start=self.stream.split_param(event.split_id, 222, 1.0),
+                interval=self.stream.split_param(event.split_id, 221, 1.0),
+            )
+            offset += self._lane_position_x(lane_position) - self.lane_center(event.lane)
 
         # The R!SE build preserves Snake state/constants but has no validated
         # gameplay consumer for that state. Do not promote its dormant 20-unit
@@ -283,6 +337,7 @@ class GameplayPreviewWidget(QWidget):
         return bool(
             self.command.snake
             or self.session.runtime_modifier.snake
+            or self.session.runtime_modifier.zigzag
             or self.command.exceed_mode
             or self.session.runtime_modifier.exceed
             or self._effective_throw() is not ThrowMode.FLAT
@@ -290,16 +345,7 @@ class GameplayPreviewWidget(QWidget):
 
     def _screen_y_for_beat_distance(self, beat_distance: float) -> float:
         geometry = self._geometry()
-        native_y = native_line_y(
-            beat_distance,
-            self.session.high_speed,
-            self._effective_acc_dec(),
-        )
-        y = native_screen_y(
-            native_y,
-            self._receptor_y(),
-            geometry.note_size,
-        )
+        y = self._base_screen_y_for_beat_distance(beat_distance)
         mode = self._effective_throw()
         if mode is not ThrowMode.FLAT:
             y += prime2_throw_y_offset(
@@ -311,9 +357,21 @@ class GameplayPreviewWidget(QWidget):
         return y
 
     def _path_x_for_beat_distance(
-        self, beat_distance: float, lane: int, y: float
+        self, beat_distance: float, lane: int, y: float, split_id: int | None = None
     ) -> float:
         geometry = self._geometry()
+        base_x = self.lane_center(lane)
+        if self.session.runtime_modifier.zigzag and split_id is not None:
+            visual_lane = self._visual_lane(lane)
+            lane_position = prime2_zigzag_lane_position(
+                visual_lane,
+                beat_distance,
+                self.columns,
+                self.stream.route.seed or 0,
+                start=self.stream.split_param(split_id, 222, 1.0),
+                interval=self.stream.split_param(split_id, 221, 1.0),
+            )
+            base_x = self._lane_position_x(lane_position)
         offset = 0.0
         if self.command.snake or self.session.runtime_modifier.snake:
             offset += prime2_snake_x_offset(beat_distance, geometry.note_size)
@@ -326,7 +384,7 @@ class GameplayPreviewWidget(QWidget):
                     from_right=lane < centre_lane,
                     travel_height=float(self.height()),
                 )
-        return self.lane_center(lane) + offset
+        return base_x + offset
 
     def _event_opacity(self, event: PreviewEvent) -> float:
         distance = abs(self._event_y(event) - self._receptor_y())
@@ -345,6 +403,10 @@ class GameplayPreviewWidget(QWidget):
         margin = 130.0 + abs(LINE_BASE_ACC_OFFSET) * (
             geometry.note_size / 72.0
         )
+        if self._legacy_command_acc_dec() is not AccDecMode.LINEAR:
+            margin += LEGACY_ACCEL_LIMIT * (
+                geometry.note_size / LEGACY_ACCDEC_PATH_UNIT
+            )
         if self._effective_throw() is not ThrowMode.FLAT:
             margin += 100.0 * (geometry.note_size / 72.0)
         if self._sequence_transform() & SequenceZoneTransform.MID:
@@ -552,7 +614,7 @@ class GameplayPreviewWidget(QWidget):
 
             # Path modifiers cannot be represented by stretching one vertical atlas
             # strip between transformed endpoints. Sample the same trajectory used
-            # by note heads so Snake/Throw/Exceed longs remain continuous.
+            # by note heads so Snake/Throw/Exceed/ZigZag longs remain continuous.
             if self._path_modifiers_active():
                 start_distance = self._event_beat_distance(head)
                 end_distance = self._event_beat_distance(tail)
@@ -566,7 +628,9 @@ class GameplayPreviewWidget(QWidget):
                     ratio = index / max(1, sample_count - 1)
                     distance = start_distance + (end_distance - start_distance) * ratio
                     y = self._screen_y_for_beat_distance(distance)
-                    x = self._path_x_for_beat_distance(distance, tail.lane, y)
+                    x = self._path_x_for_beat_distance(
+                        distance, tail.lane, y, tail.split_id
+                    )
                     if -120.0 <= y <= self.height() + 120.0:
                         visible = True
                     if index == 0:

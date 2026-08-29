@@ -73,7 +73,9 @@ class GameplayInitializationDialog(QDialog):
             self.speed_combo.addItem(f"{speed}x", speed)
 
         self.command_list = QListWidget(self)
-        self.command_list.setMinimumHeight(250)
+        # Keep the complete semantic modifier set visible. A 250px list hid the
+        # final entries on common Windows font metrics and looked like missing flags.
+        self.command_list.setMinimumHeight(max(250, len(COMMAND_FLAGS) * 22))
         self.command_items: dict[str, QListWidgetItem] = {}
         for flag in COMMAND_FLAGS:
             # Historical PIUTESTER command characters remain an internal

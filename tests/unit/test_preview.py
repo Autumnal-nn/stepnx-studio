@@ -76,7 +76,7 @@ class GameplayCommandTests(unittest.TestCase):
 
     def test_command_effects_report_only_remaining_unprojected_behavior(self) -> None:
         command = parse_gameplay_command("vadenswfjx")
-        self.assertEqual(command.approximate_effects, ("V", "X", "S"))
+        self.assertEqual(command.approximate_effects, ("V", "X"))
         self.assertEqual(command.pending_effects, ())
         self.assertEqual(parse_gameplay_command("u").pending_effects, ())
 

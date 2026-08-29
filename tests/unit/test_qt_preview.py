@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offs
 
 try:
     from PySide6.QtCore import QEvent, QPoint, Qt
-    from PySide6.QtGui import QImage, QKeyEvent, QPainter
+    from PySide6.QtGui import QImage, QKeyEvent, QPainter, QTransform
     from PySide6.QtWidgets import QApplication
 
     from stepnx.codecs.nx20 import parse_bytes
@@ -19,10 +19,12 @@ try:
     from stepnx.gui.preview_widget import GameplayPreviewWidget
     from stepnx.preview import (
         COMMAND_FLAGS,
+        AccDecMode,
         RoutePolicy,
         SequenceZoneTransform,
         build_event_stream,
         create_preview_snapshot,
+        legacy_acc_dec_distance,
         parse_gameplay_command,
         resolve_route,
     )
@@ -142,6 +144,9 @@ class QtGameplayPreviewTests(unittest.TestCase):
         try:
             self.assertEqual(dialog.chart_combo.currentText(), "D18.NX")
             self.assertEqual(dialog.command_list.count(), len(COMMAND_FLAGS))
+            self.assertGreaterEqual(
+                dialog.command_list.minimumHeight(), len(COMMAND_FLAGS) * 22
+            )
             self.assertEqual(
                 tuple(dialog.command_items),
                 tuple(flag.code for flag in COMMAND_FLAGS),
@@ -224,6 +229,47 @@ class QtGameplayPreviewTests(unittest.TestCase):
             ua.close()
             drop.close()
             both.close()
+
+    def test_under_attack_rotates_note_coordinates_with_the_playfield(self) -> None:
+        widget = self._widget("u")
+        try:
+            widget.resize(640, 480)
+            event = widget.stream.events[0]
+            local = QPoint(
+                round(widget.lane_center(event.lane)),
+                round(widget._event_y(event)),
+            )
+            sx, sy, tx, ty = widget._sequence_affine()
+            mapped = QTransform(sx, 0.0, 0.0, sy, tx, ty).map(local)
+            self.assertEqual(mapped.x(), widget.width() - local.x())
+            self.assertEqual(mapped.y(), widget.height() - local.y())
+            # The same QPainter transform is active while drawPixmap runs, so
+            # note artwork rotates with its position instead of only moving the bar.
+        finally:
+            widget.close()
+
+    def test_legacy_command_accdec_uses_prime_nxa_curve_not_rise_header_curve(self) -> None:
+        acceleration = self._widget("a")
+        deceleration = self._widget("d")
+        try:
+            for widget, mode in (
+                (acceleration, AccDecMode.ACCELERATION),
+                (deceleration, AccDecMode.DECELERATION),
+            ):
+                widget.resize(640, 480)
+                distance = 100.0 / 60.0
+                expected = widget._receptor_y() + legacy_acc_dec_distance(
+                    distance,
+                    widget.session.high_speed,
+                    widget._geometry().note_size,
+                    mode,
+                )
+                self.assertAlmostEqual(
+                    widget._screen_y_for_beat_distance(distance), expected, places=5
+                )
+        finally:
+            acceleration.close()
+            deceleration.close()
 
     def test_lane_geometry_centres_assets_on_native_sequence_zone_anchors(self) -> None:
         widget = self._widget()

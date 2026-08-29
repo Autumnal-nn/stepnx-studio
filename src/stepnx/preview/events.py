@@ -221,6 +221,21 @@ class RuntimeEventStream:
     header_step_params: tuple[StepParam, ...] = ()
     start_column: int = 0
     columns: int = 5
+    split_step_params: tuple[tuple[int, tuple[StepParam, ...]], ...] = ()
+
+    def split_param(
+        self, split_id: int, metadata_id: int, default: float = 1.0
+    ) -> float:
+        """Return the first matching Split StepParam as a signed float."""
+
+        for current_split_id, params in self.split_step_params:
+            if current_split_id != int(split_id):
+                continue
+            for param in params:
+                if param.metadata_id == int(metadata_id):
+                    return float(param.signed_value)
+            break
+        return float(default)
 
     @property
     def duration_ms(self) -> float:
@@ -465,4 +480,5 @@ def build_event_stream(
         snapshot.header_step_params,
         int(snapshot.start_column),
         int(snapshot.columns),
+        tuple((split.stable_id, split.step_params) for split in snapshot.splits),
     )

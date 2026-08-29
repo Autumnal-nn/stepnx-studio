@@ -19,6 +19,7 @@ from stepnx.preview import (
     PRIME2_SNAKE_AMPLITUDE,
     PRIME2_THROW_AMPLITUDE,
     PRIME2_THROW_SPAN,
+    PRIME2_ZIGZAG_KEYFRAME_COUNT,
     AccDecMode,
     GameplaySession,
     RoutePolicy,
@@ -29,12 +30,15 @@ from stepnx.preview import (
     build_event_stream,
     create_preview_snapshot,
     earthworm_user_speed,
+    legacy_acc_dec_distance,
     native_acc_dec_offset,
     native_line_local_y,
     native_line_y,
     parse_gameplay_command,
     prime2_snake_x_offset,
     prime2_throw_y_offset,
+    prime2_zigzag_keyframes,
+    prime2_zigzag_lane_position,
     random_velocity_triggers,
     random_velocity_user_speed,
     resolve_route,
@@ -108,6 +112,72 @@ class RiseLineBaseVisualTests(unittest.TestCase):
         wrong_base = BASE_ARROW_Y - distance * LINE_BASE_VELOCITY * 2.0
         wrong = wrong_base + native_acc_dec_offset(wrong_base, AccDecMode.ACCELERATION)
         self.assertNotAlmostEqual(speed2, wrong)
+
+    def test_prime_and_nxa_legacy_accdec_formulas_match_recovered_constants(self) -> None:
+        # Both supplied executables map mode 2 to x^3/1600 (Deceleration) and
+        # mode 1 to 600 - 50000/(x+83.33333587646484) (Acceleration).
+        self.assertAlmostEqual(
+            legacy_acc_dec_distance(0.0, 1.0, 60.0, AccDecMode.ACCELERATION),
+            600.0 - 50000.0 / 83.33333587646484,
+            places=10,
+        )
+        self.assertAlmostEqual(
+            legacy_acc_dec_distance(0.0, 1.0, 60.0, AccDecMode.DECELERATION),
+            0.0,
+            places=5,
+        )
+        beat_for_x100 = 100.0 / 60.0
+        self.assertAlmostEqual(
+            legacy_acc_dec_distance(
+                beat_for_x100, 1.0, 60.0, AccDecMode.DECELERATION
+            ),
+            625.0,
+            places=5,
+        )
+        self.assertAlmostEqual(
+            legacy_acc_dec_distance(
+                beat_for_x100, 1.0, 60.0, AccDecMode.ACCELERATION
+            ),
+            600.0 - 50000.0 / (100.0 + 83.33333587646484),
+            places=5,
+        )
+
+    def test_prime_zigzag_uses_nine_permutation_keyframes_and_div_phase(self) -> None:
+        frames = prime2_zigzag_keyframes(5, 123)
+        self.assertEqual(len(frames), PRIME2_ZIGZAG_KEYFRAME_COUNT)
+        for frame in frames:
+            self.assertEqual(sorted(frame), list(range(5)))
+
+        lane = 2
+        self.assertEqual(
+            prime2_zigzag_lane_position(lane, 1.0, 5, 123, start=1.0, interval=2.0),
+            float(lane),
+        )
+        halfway = prime2_zigzag_lane_position(
+            lane, 2.0, 5, 123, start=1.0, interval=2.0
+        )
+        self.assertAlmostEqual(
+            halfway, (frames[0][lane] + frames[1][lane]) / 2.0
+        )
+        self.assertEqual(
+            prime2_zigzag_lane_position(
+                lane, 100.0, 5, 123, start=1.0, interval=2.0
+            ),
+            float(frames[-1][lane]),
+        )
+
+    def test_runtime_stream_preserves_split_221_222_for_zigzag(self) -> None:
+        document = parse_bytes(make_normal_nx20(), source="NM.NX")
+        split = document.splits[0]
+        document = InsertMetadata.from_ints(split.stable_id, 221, 3).apply(document)
+        document = InsertMetadata.from_ints(split.stable_id, 222, 5).apply(document)
+        snapshot = create_preview_snapshot(document)
+        stream = build_event_stream(
+            snapshot, resolve_route(snapshot, RoutePolicy.MANUAL)
+        )
+        self.assertEqual(stream.split_param(split.stable_id, 221), 3.0)
+        self.assertEqual(stream.split_param(split.stable_id, 222), 5.0)
+        self.assertEqual(stream.split_param(split.stable_id, 999, 7.0), 7.0)
 
     def test_prime2_arbitrates_legacy_snake_at_thirty_units(self) -> None:
         # Supplied Prime 2 exec: sinf(pi*phase) * 60.0 * 0.5.

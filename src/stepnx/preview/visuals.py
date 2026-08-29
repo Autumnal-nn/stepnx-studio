@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from math import pow, sin
 
 from stepnx.preview.modifiers import (
@@ -33,6 +34,25 @@ PRIME2_SNAKE_AMPLITUDE = 30.0
 PRIME2_THROW_SPAN = 453.0
 PRIME2_THROW_AMPLITUDE = 96.0  # 64 * 1.5, standard branch
 PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, external-state branch (OPEN)
+
+# Prime 1 and NXA use the same legacy Acceleration/Deceleration renderer.
+# Prime uses SSE at 0x806D350..0x806D809; NXA uses x87 at
+# 0x8093475..0x809377C. Their constants and mode mapping agree exactly.
+LEGACY_ACCDEC_PATH_UNIT = 60.0
+LEGACY_DECEL_DIVISOR = 1600.0
+LEGACY_ACCEL_BIAS = 83.33333587646484
+LEGACY_ACCEL_NUMERATOR = 50000.0
+LEGACY_ACCEL_LIMIT = 600.0
+LEGACY_ACCEL_RECEPTOR_Y = 413.0
+LEGACY_ACCEL_SENTINEL_Y = 16384.0
+
+# Prime 1 path_zigzag consumer at 0x806D6EF. Div 222 is the start,
+# Div 221 the keyframe interval; both default to one. Nine permutation
+# keyframes cover phase 0..8. The permutation builder uses this MSVC-style LCG.
+PRIME2_ZIGZAG_PHASE_LIMIT = 8.0
+PRIME2_ZIGZAG_KEYFRAME_COUNT = 9
+PRIME2_ZIGZAG_LCG_MULTIPLIER = 0x0019660D
+PRIME2_ZIGZAG_LCG_INCREMENT = 0x3C6EF35F
 
 
 def _clamp01(value: float) -> float:
@@ -193,6 +213,116 @@ def prime2_throw_y_offset(
         amplitude = -amplitude
     native_y = sin(PRIME2_PATH_PI * displacement / PRIME2_THROW_SPAN) * amplitude
     return native_y * (float(note_size) / PRIME2_PATH_UNIT)
+
+
+def legacy_acc_dec_distance(
+    beat_distance: float,
+    high_speed: float,
+    note_size: float,
+    mode: AccDecMode,
+) -> float:
+    """Return the historical Prime/NXA distance from the receptor in pixels.
+
+    Both executables first form ``x = beat_distance * 60 * high_speed``.
+    Mode 2 (Deceleration) uses ``x^3 / 1600``. Mode 1 (Acceleration) uses
+    ``600 - 50000 / (x + 83.33333587646484)``. NXA's non-positive
+    denominator branch writes the same 16384 sentinel used by Prime's renderer;
+    converting that native Y back to receptor-relative distance preserves the
+    off-screen behavior without inventing a clamp.
+    """
+
+    x = float(beat_distance) * LEGACY_ACCDEC_PATH_UNIT * float(high_speed)
+    if mode is AccDecMode.DECELERATION:
+        native_distance = (x * x * x) / LEGACY_DECEL_DIVISOR
+    elif mode is AccDecMode.ACCELERATION:
+        denominator = x + LEGACY_ACCEL_BIAS
+        if denominator <= 0.0:
+            native_distance = LEGACY_ACCEL_RECEPTOR_Y - LEGACY_ACCEL_SENTINEL_Y
+        else:
+            native_distance = (
+                LEGACY_ACCEL_LIMIT - LEGACY_ACCEL_NUMERATOR / denominator
+            )
+    else:
+        native_distance = x
+    return native_distance * (float(note_size) / LEGACY_ACCDEC_PATH_UNIT)
+
+
+@lru_cache(maxsize=256)
+def prime2_zigzag_keyframes(
+    columns: int, seed: int
+) -> tuple[tuple[int, ...], ...]:
+    """Build Prime 1's nine deterministic ZigZag permutation keyframes.
+
+    The native seed also includes an engine-owned per-player contribution that
+    is not available to the standalone preview. StepNX supplies the resolved
+    route seed, while preserving the recovered 32-bit LCG and Fisher-Yates
+    selection exactly. Geometry and interpolation are therefore native; only
+    the initial random state is preview-local.
+    """
+
+    count = int(columns)
+    if count <= 0:
+        return ()
+    state = int(seed) & 0xFFFFFFFF
+    frames: list[tuple[int, ...]] = []
+    for _ in range(PRIME2_ZIGZAG_KEYFRAME_COUNT):
+        candidates = list(range(count))
+        output = [0] * count
+        for remaining in range(count, 0, -1):
+            state = (
+                state * PRIME2_ZIGZAG_LCG_MULTIPLIER
+                + PRIME2_ZIGZAG_LCG_INCREMENT
+            ) & 0xFFFFFFFF
+            pick = (state >> 8) % remaining
+            output[remaining - 1] = candidates[pick]
+            candidates[pick] = candidates[remaining - 1]
+        frames.append(tuple(output))
+    return tuple(frames)
+
+
+def prime2_zigzag_lane_position(
+    source_lane: int,
+    beat_distance: float,
+    columns: int,
+    seed: int,
+    *,
+    start: float = 1.0,
+    interval: float = 1.0,
+) -> float:
+    """Port Prime 1's path_zigzag lane interpolation consumer.
+
+    Before Div 222's start value the lane is unchanged. Afterwards the renderer
+    interpolates between nine permutation maps at the Div 221 interval and
+    clamps phase >= 8 to keyframe eight.
+    """
+
+    lane = int(source_lane)
+    count = int(columns)
+    if not 0 <= lane < count:
+        return float(lane)
+    distance = float(beat_distance)
+    start_value = float(start)
+    if distance <= start_value:
+        return float(lane)
+
+    frames = prime2_zigzag_keyframes(count, int(seed))
+    if not frames:
+        return float(lane)
+    interval_value = float(interval)
+    if interval_value <= 0.0:
+        return float(frames[-1][lane])
+    phase = (distance - start_value) / interval_value
+    if phase >= PRIME2_ZIGZAG_PHASE_LIMIT:
+        return float(frames[-1][lane])
+    if phase <= 0.0:
+        return float(lane)
+    lower = int(phase)
+    fraction = phase - float(lower)
+    upper = min(lower + 1, PRIME2_ZIGZAG_KEYFRAME_COUNT - 1)
+    return (
+        float(frames[lower][lane]) * (1.0 - fraction)
+        + float(frames[upper][lane]) * fraction
+    )
 
 
 def legacy_exceed_x_offset(
