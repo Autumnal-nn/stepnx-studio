@@ -100,10 +100,12 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             20.0,
             places=6,
         )
+        # R!SE uses its float32 pi constant, so mathematical pi leaves a tiny
+        # nonzero residue at the half-cycle instead of an exact Python zero.
         self.assertAlmostEqual(
             native_snake_x_offset(LINE_BASE_Y_MIN + span * 0.50, 72.0),
             0.0,
-            places=6,
+            delta=2.0e-6,
         )
         self.assertAlmostEqual(
             native_snake_x_offset(LINE_BASE_Y_MIN + span * 0.75, 72.0),
