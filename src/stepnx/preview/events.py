@@ -6,6 +6,7 @@ from math import isfinite
 
 from stepnx.core.model import NoteRow, PackedNoteRow
 from stepnx.core.validation import Severity
+from stepnx.preview.modifiers import EffectiveModifier
 from stepnx.preview.native_timing import (
     NativeTimingProjection,
     NativeTimingState,
@@ -78,6 +79,7 @@ class RuntimeEventStream:
     timing: tuple[PreviewTimingSegment, ...]
     warnings: tuple[str, ...]
     native_timing: NativeTimingProjection | None = None
+    effective_modifier: EffectiveModifier | None = None
 
     @property
     def duration_ms(self) -> float:
@@ -235,7 +237,7 @@ def build_event_stream(
             if not isinstance(row, (NoteRow, PackedNoteRow)):
                 continue
             # Step.Judge and LineBase.CreateSplits both use exactly
-            # msStart + line * msPerLine.  For bSkip msPerLine is zero, so all
+            # msStart + line * msPerLine. For bSkip msPerLine is zero, so all
             # encoded rows share the Div StartTime while remaining independent
             # spatial rows and fully judgeable according to note semantics.
             time_ms = native_timing.judgment_time(selected_index, row_index)
@@ -276,4 +278,5 @@ def build_event_stream(
         tuple(timing),
         tuple(warnings),
         native_timing,
+        snapshot.effective_modifier(),
     )
