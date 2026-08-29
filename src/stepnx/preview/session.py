@@ -80,17 +80,18 @@ _JUDGMENT_RANK = {
 }
 
 EventKey = tuple[int, int, int, int]
-RowKey = tuple[int, int, int]
+GroupKey = tuple[int, int, int, int, int]
 
 
 class GameplaySession:
     """Mutable runtime state kept strictly outside the canonical document.
 
-    NXA normally resolves one judgment per encoded row. Individual cells are
-    still tracked so manual chords can arrive on separate key events, but the
-    score, combo, and visible judgment advance only after the complete row has
-    resolved. STEPFX is deliberately independent: it represents a physical or
-    autoplay pad press, not a judgment record.
+    R!SE normally resolves one JudgeLine result per encoded row *and judge
+    bank*. Individual cells remain tracked so a manual chord can arrive over
+    separate key events. When Header JudgeByNote is active the native
+    JudgeNote path marks each note independently, so the grouping key includes
+    the lane instead. Score/gauge values are still the preview approximation;
+    their native JudgeUnit/PostProcess consumers are later parity items.
 
     R!SE scroll speed is also stateful. The user/high-speed option, active Div
     block speed and displayed pHighSpeed are kept separately so SetSpeed and
@@ -124,25 +125,23 @@ class GameplaySession:
         self.pressed_lanes: set[int] = set()
         self._pressed_since: dict[int, float] = {}
         self._errors: dict[EventKey, float | None] = {}
-        groups: dict[RowKey, list[PreviewEvent]] = defaultdict(list)
+        groups: dict[GroupKey, list[PreviewEvent]] = defaultdict(list)
         for event in stream.events:
             if self.is_judged_note(event):
-                groups[self.row_key(event)].append(event)
+                groups[self.group_key(event)].append(event)
         self._groups = {key: tuple(events) for key, events in groups.items()}
-        self._resolved_groups: set[RowKey] = set()
+        self._resolved_groups: set[GroupKey] = set()
         self._event_cursor = 0
         self._miss_cursor = 0
 
     @property
     def selected_speed(self) -> float:
         """Current user/runtime speed target (_modeSpeedExt)."""
-
         return self._selected_speed
 
     @property
     def high_speed(self) -> float:
         """Current displayed pHighSpeed after block speed and SpeedProc."""
-
         return self._speed_state.high_speed
 
     @property
@@ -181,9 +180,6 @@ class GameplaySession:
         div = timing.blocks[block_index]
         block_changed = block_index != self._speed_block_index
 
-        # DrawStep owns Div speed changes. A block transition and every Smooth
-        # update immediately recompute the displayed high speed from the active
-        # block factor instead of feeding that change through SpeedProc.
         if block_changed or div.is_smooth:
             self._speed_state.set_block_speed(block_speed, snap=True)
         else:
@@ -195,17 +191,30 @@ class GameplaySession:
     def event_key(event: PreviewEvent) -> EventKey:
         return event.split_id, event.block_id, event.row_index, event.lane
 
-    @staticmethod
-    def row_key(event: PreviewEvent) -> RowKey:
-        return event.split_id, event.block_id, event.row_index
+    def group_key(self, event: PreviewEvent) -> GroupKey:
+        lane_key = event.lane if self.runtime_modifier.judge_by_note else -1
+        return (
+            event.split_id,
+            event.block_id,
+            event.row_index,
+            event.bank,
+            lane_key,
+        )
 
     @staticmethod
     def is_judged_note(event: PreviewEvent) -> bool:
-        return event.note_type in (0x3, 0x7, 0xB, 0xF) and event.registers
+        # JudgeLine requires native Type == Normal and skips exact NoJudge.
+        # Rush/roll long notes also satisfy this structural filter but are
+        # routed by JudgeNote rather than the line aggregator.
+        return event.base_note_type == 0x03 and not event.no_judge
 
     @staticmethod
     def starts_pad_press(event: PreviewEvent) -> bool:
-        return event.note_type in (0x3, 0x7) and event.registers
+        return (
+            event.note_type in (0x3, 0x7)
+            and event.base_note_type == 0x03
+            and not event.no_judge
+        )
 
     def reset(self, time_ms: float = 0.0) -> None:
         self.time_ms = float(time_ms)
@@ -256,10 +265,10 @@ class GameplaySession:
             gauge=min(1000, max(0, current.gauge + _GAUGE[judgment])),
         )
 
-    def _finalize_row(self, row_key: RowKey) -> None:
-        if row_key in self._resolved_groups:
+    def _finalize_group(self, group_key: GroupKey) -> None:
+        if group_key in self._resolved_groups:
             return
-        events = self._groups[row_key]
+        events = self._groups[group_key]
         if any(self.event_key(event) not in self.judgments for event in events):
             return
         judgment = max(
@@ -276,7 +285,7 @@ class GameplaySession:
             if self.judgments[self.event_key(event)] is judgment
             and self._errors[self.event_key(event)] is not None
         ]
-        self._resolved_groups.add(row_key)
+        self._resolved_groups.add(group_key)
         self.judgment_history.append((judged_at, representative))
         self._update_stats(judgment)
         self.last_judgment = judgment
@@ -297,7 +306,7 @@ class GameplaySession:
         judged_at = self.time_ms if judged_at_ms is None else float(judged_at_ms)
         self.judged_at_ms[key] = judged_at
         self._errors[key] = error_ms
-        self._finalize_row(self.row_key(event))
+        self._finalize_group(self.group_key(event))
 
     def _held_at(self, event: PreviewEvent) -> bool:
         pressed_at = self._pressed_since.get(event.lane)
