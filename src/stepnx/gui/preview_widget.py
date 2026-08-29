@@ -24,15 +24,18 @@ from stepnx.preview.events import (
     RuntimeEventStream,
 )
 from stepnx.preview.geometry import PlayfieldGeometry
-from stepnx.preview.modifiers import AccDecMode, SequenceZoneTransform
+from stepnx.preview.modifiers import AccDecMode, SequenceZoneTransform, ThrowMode
 from stepnx.preview.session import GameplaySession, Judgment
 from stepnx.preview.speed import native_base_velocity_pixels
 from stepnx.preview.visuals import (
     LINE_BASE_ACC_OFFSET,
+    legacy_exceed_x_offset,
     native_line_local_y,
     native_line_y,
     native_screen_y,
     native_snake_x_offset,
+    prime2_snake_x_offset,
+    prime2_throw_y_offset,
     sequence_zone_affine,
 )
 
@@ -205,16 +208,40 @@ class GameplayPreviewWidget(QWidget):
                 mode = AccDecMode.ACCELERATION
         return mode
 
+    def _effective_throw(self) -> ThrowMode:
+        mode = self.session.runtime_modifier.throw
+        # Historical COMMAND Sink/Rise target the same three-state path family.
+        for character in self.command.raw:
+            if character == "(":
+                mode = ThrowMode.SINK
+            elif character == ")":
+                mode = ThrowMode.RISE
+        return mode
+
+    def _event_beat_distance(self, event: PreviewEvent) -> float:
+        return self.stream.beat_distance_at(event, self._chart_time_ms)
+
     def _event_local_y(self, event: PreviewEvent) -> float:
-        distance = self.stream.beat_distance_at(event, self._chart_time_ms)
-        return native_line_local_y(distance, self._effective_acc_dec())
+        return native_line_local_y(
+            self._event_beat_distance(event), self._effective_acc_dec()
+        )
 
     def _event_native_y(self, event: PreviewEvent) -> float:
-        distance = self.stream.beat_distance_at(event, self._chart_time_ms)
         return native_line_y(
-            distance,
+            self._event_beat_distance(event),
             self.session.high_speed,
             self._effective_acc_dec(),
+        )
+
+    def _event_throw_y_offset(self, event: PreviewEvent) -> float:
+        mode = self._effective_throw()
+        if mode is ThrowMode.FLAT:
+            return 0.0
+        return prime2_throw_y_offset(
+            self._event_beat_distance(event),
+            self.session.high_speed,
+            self._geometry().note_size,
+            rise=mode is ThrowMode.RISE,
         )
 
     def _event_y(self, event: PreviewEvent) -> float:
@@ -223,18 +250,40 @@ class GameplayPreviewWidget(QWidget):
             self._event_native_y(event),
             self._receptor_y(),
             geometry.note_size,
-        )
+        ) + self._event_throw_y_offset(event)
 
     def _event_x_offset(self, event: PreviewEvent) -> float:
-        # Header bSnake has a direct LineBase.PlaySnakeAnim consumer. The old
-        # preview incorrectly attached this sine motion to COMMAND Earthworm;
-        # Earthworm is a speed mode and is now handled by GameplaySession.
-        if not self.session.runtime_modifier.snake:
-            return 0.0
-        return native_snake_x_offset(
-            self._event_local_y(event),
-            self._geometry().note_size,
-        )
+        geometry = self._geometry()
+        offset = 0.0
+
+        # R!SE Header Snake is source-exact and uses a 20-unit LineBase sine.
+        if self.session.runtime_modifier.snake:
+            offset += native_snake_x_offset(
+                self._event_local_y(event),
+                geometry.note_size,
+            )
+
+        # The legacy/NX2 Snake path is distinct. Prime 2 establishes the final
+        # amplitude as 60 * 0.5 = 30 units, so do not reuse R!SE's 20 here.
+        if self.command.snake:
+            offset += prime2_snake_x_offset(
+                self._event_beat_distance(event),
+                geometry.note_size,
+            )
+
+        # Exceed's exact coefficient remains unrecovered. Keep its historical
+        # diagonal semantics isolated as an explicit approximation rather than
+        # folding it into Mirror, UA, or lane mapping.
+        if self.command.exceed_mode or self.session.runtime_modifier.exceed:
+            centre_lane = (self.columns - 1) / 2.0
+            if event.lane != centre_lane:
+                offset += legacy_exceed_x_offset(
+                    self._event_y(event) - self._receptor_y(),
+                    geometry.field_width,
+                    from_right=event.lane < centre_lane,
+                    travel_height=float(self.height()),
+                )
+        return offset
 
     def _event_opacity(self, event: PreviewEvent) -> float:
         distance = abs(self._event_y(event) - self._receptor_y())
@@ -253,6 +302,8 @@ class GameplayPreviewWidget(QWidget):
         margin = 130.0 + abs(LINE_BASE_ACC_OFFSET) * (
             geometry.note_size / 72.0
         )
+        if self._effective_throw() is not ThrowMode.FLAT:
+            margin += 100.0 * (geometry.note_size / 72.0)
         if self._sequence_transform() & SequenceZoneTransform.MID:
             margin += abs(float(self.height()) / 2.0 - self._receptor_y())
         timing = self.stream.timing
@@ -658,7 +709,8 @@ class GameplayPreviewWidget(QWidget):
             ),
             (
                 f"SPEEDMODE {self.session.speed_mode.name}  "
-                f"ACCDEC {self._effective_acc_dec().name}"
+                f"ACCDEC {self._effective_acc_dec().name}  "
+                f"THROW {self._effective_throw().name}"
             ),
             f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms",
             (
