@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from stepnx.authoring.semantics import ConditionClause, DivisionTrigger, project_routes
 from stepnx.core.model import NX20Document, Row
 from stepnx.core.validation import Severity, validate
+from stepnx.preview.modifiers import EffectiveModifier, StepParam, apply_step_params
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,7 @@ class PreviewSplit:
     random_at_trigger: bool
     force_select: bool
     group: int
+    step_params: tuple[StepParam, ...]
     blocks: tuple[PreviewBlock, ...]
 
     def block(self, stable_id: int) -> PreviewBlock:
@@ -64,12 +66,26 @@ class PreviewSnapshot:
     columns: int
     splits: tuple[PreviewSplit, ...]
     diagnostics: tuple[PreviewDiagnostic, ...]
+    header_step_params: tuple[StepParam, ...] = ()
 
     def split(self, stable_id: int) -> PreviewSplit:
         for split in self.splits:
             if split.stable_id == stable_id:
                 return split
         raise KeyError(stable_id)
+
+    def effective_modifier(
+        self, base: EffectiveModifier | None = None
+    ) -> EffectiveModifier:
+        """Apply the R!SE global Header StepParam dispatcher to a base state."""
+
+        return apply_step_params(self.header_step_params, base)
+
+
+def _step_params(entries) -> tuple[StepParam, ...]:
+    return tuple(
+        StepParam(int(entry.meta_id.value), int(entry.value.value)) for entry in entries
+    )
 
 
 def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
@@ -132,6 +148,7 @@ def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
                 bool(raw & 0x40),
                 bool(raw & 0x20),
                 raw & 0x1F,
+                _step_params(split.metadata),
                 tuple(blocks),
             )
         )
@@ -143,4 +160,5 @@ def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
         int(document.columns.value),
         tuple(splits),
         tuple(diagnostics),
+        _step_params(document.header_metadata),
     )
