@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import random
 from bisect import bisect_left, bisect_right
 from collections import deque
 from time import perf_counter
@@ -17,8 +16,15 @@ from stepnx.preview.events import (
     RuntimeEventStream,
 )
 from stepnx.preview.geometry import PlayfieldGeometry
+from stepnx.preview.modifiers import AccDecMode
 from stepnx.preview.session import GameplaySession, Judgment
 from stepnx.preview.speed import native_base_velocity_pixels
+from stepnx.preview.visuals import (
+    LINE_BASE_ACC_OFFSET,
+    native_line_y,
+    native_screen_y,
+    native_snake_x_offset,
+)
 
 _FALLBACK_COLORS = {
     0x1: QColor("#df8b42"),
@@ -134,8 +140,11 @@ class GameplayPreviewWidget(QWidget):
     def _geometry(self) -> PlayfieldGeometry:
         return PlayfieldGeometry(max(1.0, float(self.width())), self.columns)
 
+    def _is_upside_down(self) -> bool:
+        return self.command.upside_down or self.session.runtime_modifier.upside_down
+
     def _receptor_y(self) -> float:
-        return float(self.height() - 82) if self.command.upside_down else 82.0
+        return float(self.height() - 82) if self._is_upside_down() else 82.0
 
     def _lane_map(self) -> tuple[int, ...]:
         return self.command.lane_map(self.columns, seed=self.stream.route.seed or 0)
@@ -150,31 +159,44 @@ class GameplayPreviewWidget(QWidget):
         """Return the shared horizontal centre for one source lane."""
         return self._geometry().lane_center(self._visual_lane(source_lane))
 
-    def _event_y(self, event: PreviewEvent) -> float:
-        receptor_y = self._receptor_y()
+    def _effective_acc_dec(self) -> AccDecMode:
+        mode = self.session.runtime_modifier.acc_dec
+        # COMMAND D/A target the same mutually-exclusive mode. Preserve input
+        # order for non-UI callers; the launch selector prevents both at once.
+        for character in self.command.raw:
+            if character == "d":
+                mode = AccDecMode.DECELERATION
+            elif character == "a":
+                mode = AccDecMode.ACCELERATION
+        return mode
+
+    def _event_native_y(self, event: PreviewEvent) -> float:
         distance = self.stream.beat_distance_at(event, self._chart_time_ms)
-        multiplier = self.session.high_speed
-        if self.command.random_velocity:
-            seed = (
-                event.split_id * 1_000_003
-                + event.block_id * 10_007
-                + event.row_index * 101
-                + event.lane
-            )
-            multiplier *= random.Random(seed).uniform(0.65, 1.35)
-        base_velocity = native_base_velocity_pixels(self._geometry().note_size)
-        pixels = distance * base_velocity * multiplier
-        if self.command.acceleration:
-            pixels = math.copysign(abs(pixels) ** 1.08, pixels)
-        elif self.command.deceleration:
-            pixels = math.copysign(abs(pixels) ** 0.92, pixels)
-        return receptor_y - pixels if self.command.upside_down else receptor_y + pixels
+        return native_line_y(
+            distance,
+            self.session.high_speed,
+            self._effective_acc_dec(),
+        )
+
+    def _event_y(self, event: PreviewEvent) -> float:
+        geometry = self._geometry()
+        return native_screen_y(
+            self._event_native_y(event),
+            self._receptor_y(),
+            geometry.note_size,
+            upside_down=self._is_upside_down(),
+        )
 
     def _event_x_offset(self, event: PreviewEvent) -> float:
-        if not self.command.earthworm:
+        # Header bSnake has a direct LineBase.PlaySnakeAnim consumer. The old
+        # preview incorrectly attached this sine motion to COMMAND Earthworm;
+        # Earthworm is a speed mode and is now handled by GameplaySession.
+        if not self.session.runtime_modifier.snake:
             return 0.0
-        phase = event.position * 0.9 + self._chart_time_ms / 280.0
-        return math.sin(phase) * 18.0
+        return native_snake_x_offset(
+            self._event_native_y(event),
+            self._geometry().note_size,
+        )
 
     def _event_opacity(self, event: PreviewEvent) -> float:
         distance = abs(self._event_y(event) - self._receptor_y())
@@ -186,7 +208,13 @@ class GameplayPreviewWidget(QWidget):
         )
 
     def visible_events(self) -> tuple[PreviewEvent, ...]:
-        margin = 130.0
+        geometry = self._geometry()
+        # Accel/Decel can add up to 200 native Y units outside the linear
+        # projection. Include that exact bound in culling so transformed notes
+        # are not discarded before _event_y() evaluates them.
+        margin = 130.0 + abs(LINE_BASE_ACC_OFFSET) * (
+            geometry.note_size / 72.0
+        )
         timing = self.stream.timing
         if not timing or not self.stream.events:
             return ()
@@ -196,7 +224,7 @@ class GameplayPreviewWidget(QWidget):
             return ()
         current_position = self.stream.position_at(self._chart_time_ms)
         multiplier = max(0.001, abs(self.session.high_speed))
-        base_velocity = native_base_velocity_pixels(self._geometry().note_size)
+        base_velocity = native_base_velocity_pixels(geometry.note_size)
         visible_position = (self.height() + margin + abs(self._receptor_y())) / (
             base_velocity * multiplier
         )
@@ -443,7 +471,7 @@ class GameplayPreviewWidget(QWidget):
         geometry: PlayfieldGeometry,
         receptor_y: float,
     ) -> None:
-        if self.command.freedom:
+        if self.command.freedom or self.session.runtime_modifier.freedom:
             return
         bank = None if self._noteskin_pack is None else self._noteskin_pack.bank(0)
         if bank is not None and bank.base is not None:
@@ -558,7 +586,9 @@ class GameplayPreviewWidget(QWidget):
         self._paint_cost_ms = (painted_at - paint_started) * 1000.0
 
     def _judgment_text(self, judgment: Judgment) -> str:
-        if not self.command.judge_reverse:
+        if not (
+            self.command.judge_reverse or self.session.runtime_modifier.judge_reverse
+        ):
             return judgment.value
         return {
             Judgment.PERFECT: Judgment.MISS,
@@ -582,13 +612,20 @@ class GameplayPreviewWidget(QWidget):
                 f"TIME {self._chart_time_ms:10.3f} ms   POS {position:9.3f}  "
                 f"BLOCK {speed_factor:7.3f}  HIGH {self.session.high_speed:7.3f}"
             ),
+            (
+                f"SPEEDMODE {self.session.speed_mode.name}  "
+                f"ACCDEC {self._effective_acc_dec().name}"
+            ),
             f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms",
             (
                 "LOCAL P/G/GD/B/M "
                 f"{stats.perfect}/{stats.great}/{stats.good}/{stats.bad}/{stats.miss}"
             ),
             f"LOCAL COMBO {stats.combo}  MAX {stats.max_combo}  SCORE {stats.score}",
-            f"LOCAL GAUGE {stats.gauge}/1000  ROUTE {self.stream.route.policy.value}",
+            (
+                f"LOCAL GAUGE {stats.gauge}/{self.session.gauge_limit}  "
+                f"ROUTE {self.stream.route.policy.value}"
+            ),
             (
                 f"AUTO {int(self.session.autoplay)}  "
                 f"GUIDE {int(self._show_guide)}  WORLD {int(self._world_tour)}"
