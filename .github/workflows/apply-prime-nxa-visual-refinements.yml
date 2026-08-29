@@ -1,0 +1,260 @@
+name: Apply Prime/NXA visual refinements
+
+on:
+  push:
+    branches:
+      - audit/rise-visual-command-re
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Install Prime/NXA visual refinement workflow'
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/rise-visual-command-re
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply Prime/NXA recovered visual paths
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'expected source fragment not found in {path}: {old[:100]!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          visuals = 'src/stepnx/preview/visuals.py'
+          replace_once(
+              visuals,
+              'from __future__ import annotations\n\nfrom math import pow, sin\n',
+              'from __future__ import annotations\n\nfrom functools import lru_cache\nfrom math import pow, sin\n',
+          )
+          replace_once(
+              visuals,
+              '''PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, external-state branch (OPEN)\n\n\ndef _clamp01(value: float) -> float:\n''',
+              '''PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, external-state branch (OPEN)\n\n# Prime 1 and NXA use the same legacy Acceleration/Deceleration renderer.\n# Prime uses SSE at 0x806D350..0x806D809; NXA uses x87 at\n# 0x8093475..0x809377C. Their constants and mode mapping agree exactly.\nLEGACY_ACCDEC_PATH_UNIT = 60.0\nLEGACY_DECEL_DIVISOR = 1600.0\nLEGACY_ACCEL_BIAS = 83.33333587646484\nLEGACY_ACCEL_NUMERATOR = 50000.0\nLEGACY_ACCEL_LIMIT = 600.0\nLEGACY_ACCEL_RECEPTOR_Y = 413.0\nLEGACY_ACCEL_SENTINEL_Y = 16384.0\n\n# Prime 1 path_zigzag consumer at 0x806D6EF. Div 222 is the start,\n# Div 221 the keyframe interval; both default to one. Nine permutation\n# keyframes cover phase 0..8. The permutation builder uses this MSVC-style LCG.\nPRIME2_ZIGZAG_PHASE_LIMIT = 8.0\nPRIME2_ZIGZAG_KEYFRAME_COUNT = 9\nPRIME2_ZIGZAG_LCG_MULTIPLIER = 0x0019660D\nPRIME2_ZIGZAG_LCG_INCREMENT = 0x3C6EF35F\n\n\ndef _clamp01(value: float) -> float:\n''',
+          )
+          replace_once(
+              visuals,
+              '''def legacy_exceed_x_offset(\n''',
+              '''def legacy_acc_dec_distance(\n    beat_distance: float,\n    high_speed: float,\n    note_size: float,\n    mode: AccDecMode,\n) -> float:\n    \"\"\"Return the historical Prime/NXA distance from the receptor in pixels.\n\n    Both executables first form ``x = beat_distance * 60 * high_speed``.\n    Mode 2 (Deceleration) uses ``x^3 / 1600``. Mode 1 (Acceleration) uses\n    ``600 - 50000 / (x + 83.33333587646484)``. NXA's non-positive\n    denominator branch writes the same 16384 sentinel used by Prime's renderer;\n    converting that native Y back to receptor-relative distance preserves the\n    off-screen behavior without inventing a clamp.\n    \"\"\"\n\n    x = float(beat_distance) * LEGACY_ACCDEC_PATH_UNIT * float(high_speed)\n    if mode is AccDecMode.DECELERATION:\n        native_distance = (x * x * x) / LEGACY_DECEL_DIVISOR\n    elif mode is AccDecMode.ACCELERATION:\n        denominator = x + LEGACY_ACCEL_BIAS\n        if denominator <= 0.0:\n            native_distance = LEGACY_ACCEL_RECEPTOR_Y - LEGACY_ACCEL_SENTINEL_Y\n        else:\n            native_distance = (\n                LEGACY_ACCEL_LIMIT - LEGACY_ACCEL_NUMERATOR / denominator\n            )\n    else:\n        native_distance = x\n    return native_distance * (float(note_size) / LEGACY_ACCDEC_PATH_UNIT)\n\n\n@lru_cache(maxsize=256)\ndef prime2_zigzag_keyframes(\n    columns: int, seed: int\n) -> tuple[tuple[int, ...], ...]:\n    \"\"\"Build Prime 1's nine deterministic ZigZag permutation keyframes.\n\n    The native seed also includes an engine-owned per-player contribution that\n    is not available to the standalone preview. StepNX supplies the resolved\n    route seed, while preserving the recovered 32-bit LCG and Fisher-Yates\n    selection exactly. Geometry and interpolation are therefore native; only\n    the initial random state is preview-local.\n    \"\"\"\n\n    count = int(columns)\n    if count <= 0:\n        return ()\n    state = int(seed) & 0xFFFFFFFF\n    frames: list[tuple[int, ...]] = []\n    for _ in range(PRIME2_ZIGZAG_KEYFRAME_COUNT):\n        candidates = list(range(count))\n        output = [0] * count\n        for remaining in range(count, 0, -1):\n            state = (\n                state * PRIME2_ZIGZAG_LCG_MULTIPLIER\n                + PRIME2_ZIGZAG_LCG_INCREMENT\n            ) & 0xFFFFFFFF\n            pick = (state >> 8) % remaining\n            output[remaining - 1] = candidates[pick]\n            candidates[pick] = candidates[remaining - 1]\n        frames.append(tuple(output))\n    return tuple(frames)\n\n\ndef prime2_zigzag_lane_position(\n    source_lane: int,\n    beat_distance: float,\n    columns: int,\n    seed: int,\n    *,\n    start: float = 1.0,\n    interval: float = 1.0,\n) -> float:\n    \"\"\"Port Prime 1's path_zigzag lane interpolation consumer.\n\n    Before Div 222's start value the lane is unchanged. Afterwards the renderer\n    interpolates between nine permutation maps at the Div 221 interval and\n    clamps phase >= 8 to keyframe eight.\n    \"\"\"\n\n    lane = int(source_lane)\n    count = int(columns)\n    if not 0 <= lane < count:\n        return float(lane)\n    distance = float(beat_distance)\n    start_value = float(start)\n    if distance <= start_value:\n        return float(lane)\n\n    frames = prime2_zigzag_keyframes(count, int(seed))\n    if not frames:\n        return float(lane)\n    interval_value = float(interval)\n    if interval_value <= 0.0:\n        return float(frames[-1][lane])\n    phase = (distance - start_value) / interval_value\n    if phase >= PRIME2_ZIGZAG_PHASE_LIMIT:\n        return float(frames[-1][lane])\n    if phase <= 0.0:\n        return float(lane)\n    lower = int(phase)\n    fraction = phase - float(lower)\n    upper = min(lower + 1, PRIME2_ZIGZAG_KEYFRAME_COUNT - 1)\n    return (\n        float(frames[lower][lane]) * (1.0 - fraction)\n        + float(frames[upper][lane]) * fraction\n    )\n\n\ndef legacy_exceed_x_offset(\n''',
+          )
+
+          events = 'src/stepnx/preview/events.py'
+          replace_once(
+              events,
+              '''    start_column: int = 0\n    columns: int = 5\n\n    @property\n''',
+              '''    start_column: int = 0\n    columns: int = 5\n    split_step_params: tuple[tuple[int, tuple[StepParam, ...]], ...] = ()\n\n    def split_param(\n        self, split_id: int, metadata_id: int, default: float = 1.0\n    ) -> float:\n        \"\"\"Return the first matching Split StepParam as a signed float.\"\"\"\n\n        for current_split_id, params in self.split_step_params:\n            if current_split_id != int(split_id):\n                continue\n            for param in params:\n                if param.metadata_id == int(metadata_id):\n                    return float(param.signed_value)\n            break\n        return float(default)\n\n    @property\n''',
+          )
+          replace_once(
+              events,
+              '''        int(snapshot.start_column),\n        int(snapshot.columns),\n    )\n''',
+              '''        int(snapshot.start_column),\n        int(snapshot.columns),\n        tuple((split.stable_id, split.step_params) for split in snapshot.splits),\n    )\n''',
+          )
+
+          widget = 'src/stepnx/gui/preview_widget.py'
+          replace_once(
+              widget,
+              '''    LINE_BASE_ACC_OFFSET,\n    legacy_exceed_x_offset,\n''',
+              '''    LEGACY_ACCEL_LIMIT,\n    LEGACY_ACCDEC_PATH_UNIT,\n    LINE_BASE_ACC_OFFSET,\n    legacy_acc_dec_distance,\n    legacy_exceed_x_offset,\n''',
+          )
+          replace_once(
+              widget,
+              '''    prime2_snake_x_offset,\n    prime2_throw_y_offset,\n''',
+              '''    prime2_snake_x_offset,\n    prime2_throw_y_offset,\n    prime2_zigzag_lane_position,\n''',
+          )
+          replace_once(
+              widget,
+              '''    def lane_center(self, source_lane: int) -> float:\n        \"\"\"Return the shared horizontal centre for one source lane.\"\"\"\n        return self._geometry().lane_center(self._visual_lane(source_lane))\n\n    def _effective_acc_dec(self) -> AccDecMode:\n        mode = self.session.runtime_modifier.acc_dec\n        # COMMAND D/A target the same mutually-exclusive mode. Preserve input\n        # order for non-UI callers; the launch selector prevents both at once.\n        for character in self.command.raw:\n            if character == \"d\":\n                mode = AccDecMode.DECELERATION\n            elif character == \"a\":\n                mode = AccDecMode.ACCELERATION\n        return mode\n''',
+              '''    def lane_center(self, source_lane: int) -> float:\n        \"\"\"Return the shared horizontal centre for one source lane.\"\"\"\n        return self._geometry().lane_center(self._visual_lane(source_lane))\n\n    def _lane_position_x(self, visual_lane_position: float) -> float:\n        \"\"\"Project a fractional visual-lane coordinate into the playfield.\"\"\"\n\n        if self.columns <= 1:\n            return self.lane_center(0)\n        lane_map = self._lane_map()\n        first = self.lane_center(lane_map[0])\n        second = self.lane_center(lane_map[1])\n        return first + float(visual_lane_position) * (second - first)\n\n    def _legacy_command_acc_dec(self) -> AccDecMode:\n        \"\"\"Resolve PIUTESTER/NX2 A/D without conflating it with R!SE Header 2.\"\"\"\n\n        mode = AccDecMode.LINEAR\n        for character in self.command.raw:\n            if character == \"d\":\n                mode = AccDecMode.DECELERATION\n            elif character == \"a\":\n                mode = AccDecMode.ACCELERATION\n        return mode\n\n    def _effective_acc_dec(self) -> AccDecMode:\n        legacy = self._legacy_command_acc_dec()\n        return (\n            legacy\n            if legacy is not AccDecMode.LINEAR\n            else self.session.runtime_modifier.acc_dec\n        )\n''',
+          )
+          replace_once(
+              widget,
+              '''    def _event_local_y(self, event: PreviewEvent) -> float:\n        return native_line_local_y(\n            self._event_beat_distance(event), self._effective_acc_dec()\n        )\n\n    def _event_native_y(self, event: PreviewEvent) -> float:\n        return native_line_y(\n            self._event_beat_distance(event),\n            self.session.high_speed,\n            self._effective_acc_dec(),\n        )\n''',
+              '''    def _event_local_y(self, event: PreviewEvent) -> float:\n        # Header ID 2 remains the modern R!SE LineBase curve. Historical A/D\n        # commands use a distinct Prime/NXA renderer and are applied in screen Y.\n        return native_line_local_y(\n            self._event_beat_distance(event), self.session.runtime_modifier.acc_dec\n        )\n\n    def _event_native_y(self, event: PreviewEvent) -> float:\n        return native_line_y(\n            self._event_beat_distance(event),\n            self.session.high_speed,\n            self.session.runtime_modifier.acc_dec,\n        )\n''',
+          )
+          replace_once(
+              widget,
+              '''    def _event_y(self, event: PreviewEvent) -> float:\n        geometry = self._geometry()\n        return native_screen_y(\n            self._event_native_y(event),\n            self._receptor_y(),\n            geometry.note_size,\n        ) + self._event_throw_y_offset(event)\n''',
+              '''    def _base_screen_y_for_beat_distance(self, beat_distance: float) -> float:\n        geometry = self._geometry()\n        legacy_mode = self._legacy_command_acc_dec()\n        if legacy_mode is not AccDecMode.LINEAR:\n            return self._receptor_y() + legacy_acc_dec_distance(\n                beat_distance,\n                self.session.high_speed,\n                geometry.note_size,\n                legacy_mode,\n            )\n        native_y = native_line_y(\n            beat_distance,\n            self.session.high_speed,\n            self.session.runtime_modifier.acc_dec,\n        )\n        return native_screen_y(\n            native_y,\n            self._receptor_y(),\n            geometry.note_size,\n        )\n\n    def _event_y(self, event: PreviewEvent) -> float:\n        return self._base_screen_y_for_beat_distance(\n            self._event_beat_distance(event)\n        ) + self._event_throw_y_offset(event)\n''',
+          )
+          replace_once(
+              widget,
+              '''    def _event_x_offset(self, event: PreviewEvent) -> float:\n        geometry = self._geometry()\n        offset = 0.0\n\n        # The R!SE build preserves Snake state/constants but has no validated\n''',
+              '''    def _event_x_offset(self, event: PreviewEvent) -> float:\n        geometry = self._geometry()\n        offset = 0.0\n\n        if self.session.runtime_modifier.zigzag:\n            visual_lane = self._visual_lane(event.lane)\n            lane_position = prime2_zigzag_lane_position(\n                visual_lane,\n                self._event_beat_distance(event),\n                self.columns,\n                self.stream.route.seed or 0,\n                start=self.stream.split_param(event.split_id, 222, 1.0),\n                interval=self.stream.split_param(event.split_id, 221, 1.0),\n            )\n            offset += self._lane_position_x(lane_position) - self.lane_center(event.lane)\n\n        # The R!SE build preserves Snake state/constants but has no validated\n''',
+          )
+          replace_once(
+              widget,
+              '''            self.command.snake\n            or self.session.runtime_modifier.snake\n            or self.command.exceed_mode\n''',
+              '''            self.command.snake\n            or self.session.runtime_modifier.snake\n            or self.session.runtime_modifier.zigzag\n            or self.command.exceed_mode\n''',
+          )
+          replace_once(
+              widget,
+              '''    def _screen_y_for_beat_distance(self, beat_distance: float) -> float:\n        geometry = self._geometry()\n        native_y = native_line_y(\n            beat_distance,\n            self.session.high_speed,\n            self._effective_acc_dec(),\n        )\n        y = native_screen_y(\n            native_y,\n            self._receptor_y(),\n            geometry.note_size,\n        )\n        mode = self._effective_throw()\n''',
+              '''    def _screen_y_for_beat_distance(self, beat_distance: float) -> float:\n        geometry = self._geometry()\n        y = self._base_screen_y_for_beat_distance(beat_distance)\n        mode = self._effective_throw()\n''',
+          )
+          replace_once(
+              widget,
+              '''    def _path_x_for_beat_distance(\n        self, beat_distance: float, lane: int, y: float\n    ) -> float:\n        geometry = self._geometry()\n        offset = 0.0\n        if self.command.snake or self.session.runtime_modifier.snake:\n''',
+              '''    def _path_x_for_beat_distance(\n        self, beat_distance: float, lane: int, y: float, split_id: int | None = None\n    ) -> float:\n        geometry = self._geometry()\n        base_x = self.lane_center(lane)\n        if self.session.runtime_modifier.zigzag and split_id is not None:\n            visual_lane = self._visual_lane(lane)\n            lane_position = prime2_zigzag_lane_position(\n                visual_lane,\n                beat_distance,\n                self.columns,\n                self.stream.route.seed or 0,\n                start=self.stream.split_param(split_id, 222, 1.0),\n                interval=self.stream.split_param(split_id, 221, 1.0),\n            )\n            base_x = self._lane_position_x(lane_position)\n        offset = 0.0\n        if self.command.snake or self.session.runtime_modifier.snake:\n''',
+          )
+          replace_once(
+              widget,
+              '''        return self.lane_center(lane) + offset\n\n    def _event_opacity''',
+              '''        return base_x + offset\n\n    def _event_opacity''',
+          )
+          replace_once(
+              widget,
+              '''        margin = 130.0 + abs(LINE_BASE_ACC_OFFSET) * (\n            geometry.note_size / 72.0\n        )\n''',
+              '''        margin = 130.0 + abs(LINE_BASE_ACC_OFFSET) * (\n            geometry.note_size / 72.0\n        )\n        if self._legacy_command_acc_dec() is not AccDecMode.LINEAR:\n            margin += LEGACY_ACCEL_LIMIT * (\n                geometry.note_size / LEGACY_ACCDEC_PATH_UNIT\n            )\n''',
+          )
+          replace_once(
+              widget,
+              '''                    x = self._path_x_for_beat_distance(distance, tail.lane, y)\n''',
+              '''                    x = self._path_x_for_beat_distance(\n                        distance, tail.lane, y, tail.split_id\n                    )\n''',
+          )
+          replace_once(
+              widget,
+              '''            # by note heads so Snake/Throw/Exceed longs remain continuous.\n''',
+              '''            # by note heads so Snake/Throw/Exceed/ZigZag longs remain continuous.\n''',
+          )
+
+          commands = 'src/stepnx/preview/commands.py'
+          replace_once(
+              commands,
+              '''            (\"X\", self.exceed_mode),\n            # R!SE gate/cadence/conversion are exact; Unity RNG sequence remains approximate.\n            (\"S\", self.random_velocity),\n''',
+              '''            (\"X\", self.exceed_mode),\n''',
+          )
+
+          dialog = 'src/stepnx/gui/preview_dialog.py'
+          replace_once(
+              dialog,
+              '''        self.command_list = QListWidget(self)\n        self.command_list.setMinimumHeight(250)\n''',
+              '''        self.command_list = QListWidget(self)\n        # Keep the complete semantic modifier set visible. A 250px list hid the\n        # final entries on common Windows font metrics and looked like missing flags.\n        self.command_list.setMinimumHeight(max(250, len(COMMAND_FLAGS) * 22))\n''',
+          )
+
+          init_file = 'src/stepnx/preview/__init__.py'
+          replace_once(
+              init_file,
+              '''    PRIME2_THROW_SPAN,\n    apply_global_visibility_effect,\n    legacy_exceed_x_offset,\n''',
+              '''    PRIME2_THROW_SPAN,\n    PRIME2_ZIGZAG_KEYFRAME_COUNT,\n    PRIME2_ZIGZAG_PHASE_LIMIT,\n    apply_global_visibility_effect,\n    legacy_acc_dec_distance,\n    legacy_exceed_x_offset,\n''',
+          )
+          replace_once(
+              init_file,
+              '''    prime2_snake_x_offset,\n    prime2_throw_y_offset,\n''',
+              '''    prime2_snake_x_offset,\n    prime2_throw_y_offset,\n    prime2_zigzag_keyframes,\n    prime2_zigzag_lane_position,\n''',
+          )
+          replace_once(
+              init_file,
+              '''    \"PRIME2_THROW_SPAN\",\n    \"PlayfieldGeometry\",\n''',
+              '''    \"PRIME2_THROW_SPAN\",\n    \"PRIME2_ZIGZAG_KEYFRAME_COUNT\",\n    \"PRIME2_ZIGZAG_PHASE_LIMIT\",\n    \"PlayfieldGeometry\",\n''',
+          )
+          replace_once(
+              init_file,
+              '''    \"judge_note_decision\",\n    \"legacy_exceed_x_offset\",\n''',
+              '''    \"judge_note_decision\",\n    \"legacy_acc_dec_distance\",\n    \"legacy_exceed_x_offset\",\n''',
+          )
+          replace_once(
+              init_file,
+              '''    \"prime2_snake_x_offset\",\n    \"prime2_throw_y_offset\",\n''',
+              '''    \"prime2_snake_x_offset\",\n    \"prime2_throw_y_offset\",\n    \"prime2_zigzag_keyframes\",\n    \"prime2_zigzag_lane_position\",\n''',
+          )
+
+          preview_tests = 'tests/unit/test_preview.py'
+          replace_once(
+              preview_tests,
+              '''        self.assertEqual(command.approximate_effects, (\"V\", \"X\", \"S\"))\n''',
+              '''        self.assertEqual(command.approximate_effects, (\"V\", \"X\"))\n''',
+          )
+
+          visual_tests = 'tests/unit/test_rise_visual_modifiers.py'
+          replace_once(
+              visual_tests,
+              '''    PRIME2_THROW_AMPLITUDE,\n    PRIME2_THROW_SPAN,\n''',
+              '''    PRIME2_THROW_AMPLITUDE,\n    PRIME2_THROW_SPAN,\n    PRIME2_ZIGZAG_KEYFRAME_COUNT,\n''',
+          )
+          replace_once(
+              visual_tests,
+              '''    earthworm_user_speed,\n    native_acc_dec_offset,\n''',
+              '''    earthworm_user_speed,\n    legacy_acc_dec_distance,\n    native_acc_dec_offset,\n''',
+          )
+          replace_once(
+              visual_tests,
+              '''    prime2_snake_x_offset,\n    prime2_throw_y_offset,\n''',
+              '''    prime2_snake_x_offset,\n    prime2_throw_y_offset,\n    prime2_zigzag_keyframes,\n    prime2_zigzag_lane_position,\n''',
+          )
+          replace_once(
+              visual_tests,
+              '''    def test_prime2_arbitrates_legacy_snake_at_thirty_units(self) -> None:\n''',
+              '''    def test_prime_and_nxa_legacy_accdec_formulas_match_recovered_constants(self) -> None:\n        # Both supplied executables map mode 2 to x^3/1600 (Deceleration) and\n        # mode 1 to 600 - 50000/(x+83.33333587646484) (Acceleration).\n        self.assertAlmostEqual(\n            legacy_acc_dec_distance(0.0, 1.0, 60.0, AccDecMode.ACCELERATION),\n            0.0,\n            places=5,\n        )\n        self.assertAlmostEqual(\n            legacy_acc_dec_distance(0.0, 1.0, 60.0, AccDecMode.DECELERATION),\n            0.0,\n            places=5,\n        )\n        beat_for_x100 = 100.0 / 60.0\n        self.assertAlmostEqual(\n            legacy_acc_dec_distance(\n                beat_for_x100, 1.0, 60.0, AccDecMode.DECELERATION\n            ),\n            625.0,\n            places=5,\n        )\n        self.assertAlmostEqual(\n            legacy_acc_dec_distance(\n                beat_for_x100, 1.0, 60.0, AccDecMode.ACCELERATION\n            ),\n            600.0 - 50000.0 / (100.0 + 83.33333587646484),\n            places=5,\n        )\n\n    def test_prime_zigzag_uses_nine_permutation_keyframes_and_div_phase(self) -> None:\n        frames = prime2_zigzag_keyframes(5, 123)\n        self.assertEqual(len(frames), PRIME2_ZIGZAG_KEYFRAME_COUNT)\n        for frame in frames:\n            self.assertEqual(sorted(frame), list(range(5)))\n\n        lane = 2\n        self.assertEqual(\n            prime2_zigzag_lane_position(lane, 1.0, 5, 123, start=1.0, interval=2.0),\n            float(lane),\n        )\n        halfway = prime2_zigzag_lane_position(\n            lane, 2.0, 5, 123, start=1.0, interval=2.0\n        )\n        self.assertAlmostEqual(\n            halfway, (frames[0][lane] + frames[1][lane]) / 2.0\n        )\n        self.assertEqual(\n            prime2_zigzag_lane_position(\n                lane, 100.0, 5, 123, start=1.0, interval=2.0\n            ),\n            float(frames[-1][lane]),\n        )\n\n    def test_runtime_stream_preserves_split_221_222_for_zigzag(self) -> None:\n        document = parse_bytes(make_normal_nx20(), source=\"NM.NX\")\n        split = document.splits[0]\n        document = InsertMetadata.from_ints(split.stable_id, 221, 3).apply(document)\n        document = InsertMetadata.from_ints(split.stable_id, 222, 5).apply(document)\n        snapshot = create_preview_snapshot(document)\n        stream = build_event_stream(\n            snapshot, resolve_route(snapshot, RoutePolicy.MANUAL)\n        )\n        self.assertEqual(stream.split_param(split.stable_id, 221), 3.0)\n        self.assertEqual(stream.split_param(split.stable_id, 222), 5.0)\n        self.assertEqual(stream.split_param(split.stable_id, 999, 7.0), 7.0)\n\n    def test_prime2_arbitrates_legacy_snake_at_thirty_units(self) -> None:\n''',
+          )
+
+          qt_tests = 'tests/unit/test_qt_preview.py'
+          replace_once(
+              qt_tests,
+              '''    from PySide6.QtGui import QImage, QKeyEvent, QPainter\n''',
+              '''    from PySide6.QtGui import QImage, QKeyEvent, QPainter, QTransform\n''',
+          )
+          replace_once(
+              qt_tests,
+              '''        COMMAND_FLAGS,\n        RoutePolicy,\n''',
+              '''        COMMAND_FLAGS,\n        AccDecMode,\n        RoutePolicy,\n''',
+          )
+          replace_once(
+              qt_tests,
+              '''        create_preview_snapshot,\n        parse_gameplay_command,\n''',
+              '''        create_preview_snapshot,\n        legacy_acc_dec_distance,\n        parse_gameplay_command,\n''',
+          )
+          replace_once(
+              qt_tests,
+              '''            self.assertEqual(dialog.command_list.count(), len(COMMAND_FLAGS))\n''',
+              '''            self.assertEqual(dialog.command_list.count(), len(COMMAND_FLAGS))\n            self.assertGreaterEqual(\n                dialog.command_list.minimumHeight(), len(COMMAND_FLAGS) * 22\n            )\n''',
+          )
+          replace_once(
+              qt_tests,
+              '''    def test_lane_geometry_centres_assets_on_native_sequence_zone_anchors(self) -> None:\n''',
+              '''    def test_under_attack_rotates_note_coordinates_with_the_playfield(self) -> None:\n        widget = self._widget(\"u\")\n        try:\n            widget.resize(640, 480)\n            event = widget.stream.events[0]\n            local = QPoint(\n                round(widget.lane_center(event.lane)),\n                round(widget._event_y(event)),\n            )\n            sx, sy, tx, ty = widget._sequence_affine()\n            mapped = QTransform(sx, 0.0, 0.0, sy, tx, ty).map(local)\n            self.assertEqual(mapped.x(), widget.width() - local.x())\n            self.assertEqual(mapped.y(), widget.height() - local.y())\n            # The same QPainter transform is active while drawPixmap runs, so\n            # note artwork rotates with its position instead of only moving the bar.\n        finally:\n            widget.close()\n\n    def test_legacy_command_accdec_uses_prime_nxa_curve_not_rise_header_curve(self) -> None:\n        acceleration = self._widget(\"a\")\n        deceleration = self._widget(\"d\")\n        try:\n            for widget, mode in (\n                (acceleration, AccDecMode.ACCELERATION),\n                (deceleration, AccDecMode.DECELERATION),\n            ):\n                widget.resize(640, 480)\n                distance = 100.0 / 60.0\n                expected = widget._receptor_y() + legacy_acc_dec_distance(\n                    distance,\n                    widget.session.high_speed,\n                    widget._geometry().note_size,\n                    mode,\n                )\n                self.assertAlmostEqual(\n                    widget._screen_y_for_beat_distance(distance), expected, places=5\n                )\n        finally:\n            acceleration.close()\n            deceleration.close()\n\n    def test_lane_geometry_centres_assets_on_native_sequence_zone_anchors(self) -> None:\n''',
+          )
+          PY
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 \
+            libgl1 \
+            libopengl0 \
+            libpulse0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-xinerama0
+      - name: Install StepNX Studio with GUI dependencies
+        run: python -m pip install -e '.[gui]'
+      - name: Run complete repository suite
+        run: python -m unittest discover -s tests -v
+      - name: Commit refinement and remove one-shot workflow
+        run: |
+          git config user.name 'OpenAI'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/apply-prime-nxa-visual-refinements.yml
+          git add src/stepnx/preview/visuals.py \
+                  src/stepnx/preview/events.py \
+                  src/stepnx/preview/commands.py \
+                  src/stepnx/preview/__init__.py \
+                  src/stepnx/gui/preview_widget.py \
+                  src/stepnx/gui/preview_dialog.py \
+                  tests/unit/test_preview.py \
+                  tests/unit/test_rise_visual_modifiers.py \
+                  tests/unit/test_qt_preview.py
+          git diff --cached --check
+          git commit -m 'Refine legacy visual modifiers from Prime and NXA'
+          git push origin HEAD:audit/rise-visual-command-re
