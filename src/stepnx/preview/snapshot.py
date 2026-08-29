@@ -26,6 +26,7 @@ class PreviewBlock:
     conditions: tuple[ConditionClause, ...]
     triggers: tuple[DivisionTrigger, ...]
     brain_question_count: int
+    step_params: tuple[StepParam, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +141,7 @@ def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
                     () if branch is None else branch.conditions,
                     () if branch is None else branch.triggers,
                     max(0, question_count),
+                    _step_params(block.divisions),
                 )
             )
         raw = int(split.raw_select.value)

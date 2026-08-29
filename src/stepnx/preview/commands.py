@@ -129,35 +129,33 @@ class GameplayCommand:
         self,
         visibility: int,
         *,
-        distance: float,
-        fade_distance: float,
+        screen_y: float,
+        screen_midline: float,
         time_ms: float,
     ) -> float:
-        """Render loaded note visibility plus COMMAND-only display effects.
+        """Render legacy display modes around the physical screen midline.
 
-        Header Visibility has already rewritten the runtime event's VisualEffect
-        nibble before this function is called. Exact Unity material curves remain
-        asset-dependent; PIUTESTER/NX2 command semantics are represented as the
-        same independent Vanish/Appear bits, where both active means Hidden.
+        Vanish is visible on the approach half and disappears after crossing the
+        centre line. Appear is the inverse. Header Visibility has already
+        rewritten the event's low VisualEffect bits before this function runs.
         """
 
         if self.nonstep or visibility == 0 or (self.vanish and self.appear):
             return 0.0
-        span = max(1.0, float(fade_distance))
-        normalized = max(0.0, float(distance)) / span
-        if visibility == 1:  # Appear
-            opacity = 1.0 - normalized
-        elif visibility == 2:  # Vanish
-            opacity = normalized
-        else:  # Visible and unknown high-bit combinations
+        below_midline = float(screen_y) >= float(screen_midline)
+        if visibility == 1:  # Appear: visible only after crossing centre.
+            opacity = 0.0 if below_midline else 1.0
+        elif visibility == 2:  # Vanish: visible only before crossing centre.
+            opacity = 1.0 if below_midline else 0.0
+        else:
             opacity = 1.0
         if self.appear:
-            opacity = min(opacity, 1.0 - normalized)
+            opacity = min(opacity, 0.0 if below_midline else 1.0)
         if self.vanish:
-            opacity = min(opacity, normalized)
+            opacity = min(opacity, 1.0 if below_midline else 0.0)
         if self.flash and int(float(time_ms) // 100.0) % 2:
             opacity = 0.0
-        return min(1.0, max(0.0, opacity))
+        return opacity
 
 
 def parse_gameplay_command(value: str) -> GameplayCommand:

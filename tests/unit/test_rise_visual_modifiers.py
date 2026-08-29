@@ -18,6 +18,7 @@ from stepnx.preview import (
     LINE_BASE_Y_MIN,
     PRIME2_SNAKE_AMPLITUDE,
     PRIME2_THROW_AMPLITUDE,
+    PRIME2_THROW_CAMERA_EYE_Z,
     PRIME2_THROW_SPAN,
     PRIME2_ZIGZAG_KEYFRAME_COUNT,
     AccDecMode,
@@ -36,7 +37,9 @@ from stepnx.preview import (
     native_line_y,
     parse_gameplay_command,
     prime2_snake_x_offset,
+    prime2_throw_perspective_scale,
     prime2_throw_y_offset,
+    prime2_throw_z_offset,
     prime2_zigzag_keyframes,
     prime2_zigzag_lane_position,
     random_velocity_triggers,
@@ -166,18 +169,18 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             float(frames[-1][lane]),
         )
 
-    def test_runtime_stream_preserves_split_221_222_for_zigzag(self) -> None:
+    def test_runtime_stream_preserves_block_221_222_for_zigzag(self) -> None:
         document = parse_bytes(make_normal_nx20(), source="NM.NX")
-        split = document.splits[0]
-        document = InsertMetadata.from_ints(split.stable_id, 221, 3).apply(document)
-        document = InsertMetadata.from_ints(split.stable_id, 222, 5).apply(document)
+        block = document.splits[0].blocks[0]
+        document = InsertMetadata.from_ints(block.stable_id, 221, 3).apply(document)
+        document = InsertMetadata.from_ints(block.stable_id, 222, 5).apply(document)
         snapshot = create_preview_snapshot(document)
         stream = build_event_stream(
             snapshot, resolve_route(snapshot, RoutePolicy.MANUAL)
         )
-        self.assertEqual(stream.split_param(split.stable_id, 221), 3.0)
-        self.assertEqual(stream.split_param(split.stable_id, 222), 5.0)
-        self.assertEqual(stream.split_param(split.stable_id, 999, 7.0), 7.0)
+        self.assertEqual(stream.block_param(block.stable_id, 221), 3.0)
+        self.assertEqual(stream.block_param(block.stable_id, 222), 5.0)
+        self.assertEqual(stream.block_param(block.stable_id, 999, 7.0), 7.0)
 
     def test_prime2_arbitrates_legacy_snake_at_thirty_units(self) -> None:
         # Supplied Prime 2 exec: sinf(pi*phase) * 60.0 * 0.5.
@@ -185,18 +188,43 @@ class RiseLineBaseVisualTests(unittest.TestCase):
         self.assertAlmostEqual(prime2_snake_x_offset(0.5, 60.0), 30.0, places=5)
         self.assertAlmostEqual(prime2_snake_x_offset(1.5, 60.0), -30.0, places=5)
 
-    def test_prime2_sink_and_rise_are_opposite_sine_offsets(self) -> None:
+    def test_prime2_sink_and_rise_are_opposite_z_depths(self) -> None:
         self.assertEqual(PRIME2_THROW_SPAN, 453.0)
         self.assertEqual(PRIME2_THROW_AMPLITUDE, 96.0)
+        self.assertEqual(PRIME2_THROW_CAMERA_EYE_Z, 600.0)
         half_peak_beat = PRIME2_THROW_SPAN / (2.0 * 60.0 * 1.0)
-        sink = prime2_throw_y_offset(
-            half_peak_beat, 1.0, 60.0, rise=False
+        sink_z = prime2_throw_z_offset(half_peak_beat, 1.0, rise=False)
+        rise_z = prime2_throw_z_offset(half_peak_beat, 1.0, rise=True)
+        self.assertAlmostEqual(sink_z, 96.0, places=5)
+        self.assertAlmostEqual(rise_z, -96.0, places=5)
+        self.assertGreater(prime2_throw_perspective_scale(sink_z), 1.0)
+        self.assertLess(prime2_throw_perspective_scale(rise_z), 1.0)
+        # Compatibility wrapper retains the old scalar API but is not used as Y.
+        self.assertAlmostEqual(
+            prime2_throw_y_offset(half_peak_beat, 1.0, 60.0, rise=False),
+            96.0,
+            places=5,
         )
-        rise = prime2_throw_y_offset(
-            half_peak_beat, 1.0, 60.0, rise=True
-        )
-        self.assertAlmostEqual(sink, 96.0, places=5)
-        self.assertAlmostEqual(rise, -96.0, places=5)
+
+    def test_legacy_vanish_and_appear_switch_at_screen_midline(self) -> None:
+        vanish = parse_gameplay_command("v")
+        appear = parse_gameplay_command("p")
+        for y, vanish_expected, appear_expected in (
+            (300.0, 1.0, 0.0),
+            (239.0, 0.0, 1.0),
+        ):
+            self.assertEqual(
+                vanish.note_opacity(
+                    3, screen_y=y, screen_midline=240.0, time_ms=0.0
+                ),
+                vanish_expected,
+            )
+            self.assertEqual(
+                appear.note_opacity(
+                    3, screen_y=y, screen_midline=240.0, time_ms=0.0
+                ),
+                appear_expected,
+            )
 
 
 class SequenceZoneTransformTests(unittest.TestCase):
@@ -459,8 +487,8 @@ class CommandRegistryTests(unittest.TestCase):
         self.assertEqual(
             command.note_opacity(
                 3,
-                distance=100.0,
-                fade_distance=400.0,
+                screen_y=300.0,
+                screen_midline=240.0,
                 time_ms=0.0,
             ),
             0.0,

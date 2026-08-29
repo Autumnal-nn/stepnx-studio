@@ -34,6 +34,8 @@ PRIME2_SNAKE_AMPLITUDE = 30.0
 PRIME2_THROW_SPAN = 453.0
 PRIME2_THROW_AMPLITUDE = 96.0  # 64 * 1.5, standard branch
 PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, external-state branch (OPEN)
+PRIME2_THROW_CAMERA_FOV = 43.60300064086914
+PRIME2_THROW_CAMERA_EYE_Z = 600.0
 
 # Prime 1 and NXA use the same legacy Acceleration/Deceleration renderer.
 # Prime uses SSE at 0x806D350..0x806D809; NXA uses x87 at
@@ -187,20 +189,18 @@ def prime2_snake_x_offset(beat_distance: float, note_size: float) -> float:
     return native_x * (float(note_size) / PRIME2_PATH_UNIT)
 
 
-def prime2_throw_y_offset(
+def prime2_throw_z_offset(
     beat_distance: float,
     high_speed: float,
-    note_size: float,
     *,
     rise: bool,
     alternate_amplitude: bool = False,
 ) -> float:
-    """Port Prime 2's standard Sink/Rise sine path.
+    """Return Prime's native Sink/Rise Z coordinate.
 
-    The renderer first forms ``d = beat_distance * 60 * speed`` and then applies
-    ``sin(pi*d/453) * amplitude``. Standard Sink uses +96 and Rise uses -96.
-    Prime 2 also contains an external-state branch selecting +/-300; the state
-    producer is still unidentified, so StepNX never enables it implicitly.
+    `piu_prime` writes the recovered sine term into the third coordinate of all
+    four arrow vertices at 0x806DEAE/BD/CC/E1. It is therefore depth, not a Y
+    offset. Standard amplitude is 96; the unidentified alternate branch is 300.
     """
 
     displacement = float(beat_distance) * PRIME2_PATH_UNIT * float(high_speed)
@@ -211,8 +211,46 @@ def prime2_throw_y_offset(
     )
     if rise:
         amplitude = -amplitude
-    native_y = sin(PRIME2_PATH_PI * displacement / PRIME2_THROW_SPAN) * amplitude
-    return native_y * (float(note_size) / PRIME2_PATH_UNIT)
+    return sin(PRIME2_PATH_PI * displacement / PRIME2_THROW_SPAN) * amplitude
+
+
+def prime2_throw_perspective_scale(
+    z: float, *, eye_z: float = PRIME2_THROW_CAMERA_EYE_Z
+) -> float:
+    """Project Prime's uniform arrow Z into the 2-D preview scale.
+
+    Prime sets `gluPerspective(43.603..., aspect, .1, 5000)` and uses a
+    `gluLookAt` eye distance of 600 for the native 480-high gameplay viewport.
+    A quad translated uniformly in Z therefore scales about screen centre by
+    ``eye_z / (eye_z - z)``.
+    """
+
+    denominator = float(eye_z) - float(z)
+    if denominator <= 1.0:
+        return float(eye_z)
+    return float(eye_z) / denominator
+
+
+def prime2_throw_y_offset(
+    beat_distance: float,
+    high_speed: float,
+    note_size: float,
+    *,
+    rise: bool,
+    alternate_amplitude: bool = False,
+) -> float:
+    """Compatibility wrapper for the old, incorrectly named helper.
+
+    This returns the historical scaled sine magnitude only. Rendering must use
+    `prime2_throw_z_offset` plus perspective projection; the value is not Y.
+    """
+
+    return prime2_throw_z_offset(
+        beat_distance,
+        high_speed,
+        rise=rise,
+        alternate_amplitude=alternate_amplitude,
+    ) * (float(note_size) / PRIME2_PATH_UNIT)
 
 
 def legacy_acc_dec_distance(

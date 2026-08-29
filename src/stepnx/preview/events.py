@@ -222,6 +222,7 @@ class RuntimeEventStream:
     start_column: int = 0
     columns: int = 5
     split_step_params: tuple[tuple[int, tuple[StepParam, ...]], ...] = ()
+    block_step_params: tuple[tuple[int, tuple[StepParam, ...]], ...] = ()
 
     def split_param(
         self, split_id: int, metadata_id: int, default: float = 1.0
@@ -230,6 +231,20 @@ class RuntimeEventStream:
 
         for current_split_id, params in self.split_step_params:
             if current_split_id != int(split_id):
+                continue
+            for param in params:
+                if param.metadata_id == int(metadata_id):
+                    return float(param.signed_value)
+            break
+        return float(default)
+
+    def block_param(
+        self, block_id: int, metadata_id: int, default: float = 1.0
+    ) -> float:
+        """Return the first matching Div/Block StepParam as a signed float."""
+
+        for current_block_id, params in self.block_step_params:
+            if current_block_id != int(block_id):
                 continue
             for param in params:
                 if param.metadata_id == int(metadata_id):
@@ -481,4 +496,9 @@ def build_event_stream(
         int(snapshot.start_column),
         int(snapshot.columns),
         tuple((split.stable_id, split.step_params) for split in snapshot.splits),
+        tuple(
+            (block.stable_id, block.step_params)
+            for split in snapshot.splits
+            for block in split.blocks
+        ),
     )

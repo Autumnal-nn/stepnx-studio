@@ -271,6 +271,89 @@ class QtGameplayPreviewTests(unittest.TestCase):
             acceleration.close()
             deceleration.close()
 
+    def test_single_exceed_keeps_one_player_side_even_for_centre_lane(self) -> None:
+        p1 = self._widget("x")
+        p2_base = self._widget("x")
+        p2 = GameplayPreviewWidget(
+            p2_base.stream,
+            columns=5,
+            start_column=5,
+            command=parse_gameplay_command("x"),
+        )
+        try:
+            for widget in (p1, p2):
+                widget.resize(640, 480)
+                event = replace(widget.stream.events[0], lane=2)
+                # A centred lane is still diagonal: P1 approaches from the
+                # right, P2 from the left.
+                if widget is p1:
+                    self.assertGreater(widget._event_x_offset(event), 0.0)
+                else:
+                    self.assertLess(widget._event_x_offset(event), 0.0)
+        finally:
+            p1.close()
+            p2.close()
+            p2_base.close()
+
+    def test_throw_projects_depth_instead_of_adding_y_offset(self) -> None:
+        sink = self._widget("(")
+        try:
+            sink.resize(640, 480)
+            event = sink.stream.events[0]
+            base_y = sink._event_y(event)
+            _, projected_y, rendered_size = sink._event_render_geometry(event)
+            self.assertAlmostEqual(
+                sink._screen_y_for_beat_distance(sink._event_beat_distance(event)),
+                base_y,
+            )
+            # Perspective changes both position about screen centre and sprite
+            # size. A fake vertical offset could not satisfy this invariant.
+            if abs(sink._event_beat_distance(event)) > 1e-6:
+                self.assertNotAlmostEqual(projected_y, base_y)
+                self.assertNotAlmostEqual(rendered_size, sink._geometry().note_size)
+        finally:
+            sink.close()
+
+    def test_single_exceed_keeps_one_player_side_even_for_centre_lane(self) -> None:
+        p1 = self._widget("x")
+        p2_base = self._widget("x")
+        p2 = GameplayPreviewWidget(
+            p2_base.stream,
+            columns=5,
+            start_column=5,
+            command=parse_gameplay_command("x"),
+        )
+        try:
+            for widget in (p1, p2):
+                widget.resize(640, 480)
+                # Row zero is exactly at the receptor in this fixture. Use the
+                # next native row so Exceed has non-zero travel to project.
+                event = replace(widget.stream.events[0], lane=2, row_index=1)
+                if widget is p1:
+                    self.assertGreater(widget._event_x_offset(event), 0.0)
+                else:
+                    self.assertLess(widget._event_x_offset(event), 0.0)
+        finally:
+            p1.close()
+            p2.close()
+            p2_base.close()
+
+    def test_throw_projects_depth_instead_of_adding_y_offset(self) -> None:
+        sink = self._widget("(")
+        try:
+            sink.resize(640, 480)
+            event = replace(sink.stream.events[0], row_index=1)
+            base_y = sink._event_y(event)
+            _, projected_y, rendered_size = sink._event_render_geometry(event)
+            self.assertAlmostEqual(
+                sink._screen_y_for_beat_distance(sink._event_beat_distance(event)),
+                base_y,
+            )
+            self.assertNotAlmostEqual(projected_y, base_y)
+            self.assertNotAlmostEqual(rendered_size, sink._geometry().note_size)
+        finally:
+            sink.close()
+
     def test_lane_geometry_centres_assets_on_native_sequence_zone_anchors(self) -> None:
         widget = self._widget()
         try:

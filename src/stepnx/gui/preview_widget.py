@@ -37,7 +37,8 @@ from stepnx.preview.visuals import (
     native_line_y,
     native_screen_y,
     prime2_snake_x_offset,
-    prime2_throw_y_offset,
+    prime2_throw_perspective_scale,
+    prime2_throw_z_offset,
     prime2_zigzag_lane_position,
     sequence_zone_affine,
 )
@@ -102,6 +103,11 @@ class GameplayPreviewWidget(QWidget):
         self._world_tour = False
         self._event_times = tuple(event.time_ms for event in stream.events)
         self._hold_pairs = self._pair_holds(stream.events)
+        self._hold_pair_by_event = {
+            event: (head, tail)
+            for head, tail in self._hold_pairs
+            for event in (head, tail)
+        }
         self._paint_timestamps: deque[float] = deque(maxlen=120)
         self._paint_cost_ms = 0.0
         self.setMinimumSize(420, 360)
@@ -256,15 +262,39 @@ class GameplayPreviewWidget(QWidget):
             self.session.runtime_modifier.acc_dec,
         )
 
-    def _event_throw_y_offset(self, event: PreviewEvent) -> float:
+    def _path_anchor(
+        self, event: PreviewEvent
+    ) -> tuple[PreviewEvent, float]:
+        """Return the rigid path anchor used by legacy long notes."""
+
+        pair = self._hold_pair_by_event.get(event)
+        if pair is None:
+            return event, self._event_beat_distance(event)
+        head, tail = pair
+        if head.time_ms <= self._chart_time_ms <= tail.time_ms:
+            return head, 0.0
+        return head, self._event_beat_distance(head)
+
+    def _throw_projection(
+        self, x: float, y: float, beat_distance: float
+    ) -> tuple[float, float, float]:
+        """Project Prime's uniform Z depth around the screen centre."""
+
         mode = self._effective_throw()
         if mode is ThrowMode.FLAT:
-            return 0.0
-        return prime2_throw_y_offset(
-            self._event_beat_distance(event),
+            return float(x), float(y), 1.0
+        z = prime2_throw_z_offset(
+            beat_distance,
             self.session.high_speed,
-            self._geometry().note_size,
             rise=mode is ThrowMode.RISE,
+        )
+        scale = prime2_throw_perspective_scale(z)
+        centre_x = float(self.width()) / 2.0
+        centre_y = float(self.height()) / 2.0
+        return (
+            centre_x + (float(x) - centre_x) * scale,
+            centre_y + (float(y) - centre_y) * scale,
+            scale,
         )
 
     def _base_screen_y_for_beat_distance(self, beat_distance: float) -> float:
@@ -289,109 +319,68 @@ class GameplayPreviewWidget(QWidget):
         )
 
     def _event_y(self, event: PreviewEvent) -> float:
-        return self._base_screen_y_for_beat_distance(
-            self._event_beat_distance(event)
-        ) + self._event_throw_y_offset(event)
+        return self._base_screen_y_for_beat_distance(self._event_beat_distance(event))
 
     def _event_x_offset(self, event: PreviewEvent) -> float:
         geometry = self._geometry()
+        anchor, beat_distance = self._path_anchor(event)
         offset = 0.0
 
         if self.session.runtime_modifier.zigzag:
             visual_lane = self._visual_lane(event.lane)
             lane_position = prime2_zigzag_lane_position(
                 visual_lane,
-                self._event_beat_distance(event),
+                beat_distance,
                 self.columns,
                 self.stream.route.seed or 0,
-                start=self.stream.split_param(event.split_id, 222, 1.0),
-                interval=self.stream.split_param(event.split_id, 221, 1.0),
+                start=self.stream.block_param(anchor.block_id, 222, 1.0),
+                interval=self.stream.block_param(anchor.block_id, 221, 1.0),
             )
             offset += self._lane_position_x(lane_position) - self.lane_center(event.lane)
 
-        # The R!SE build preserves Snake state/constants but has no validated
-        # gameplay consumer for that state. Do not promote its dormant 20-unit
-        # LineBase helper into behavior. Prime 2 is the historical runtime arbiter:
-        # both Header/metadata Snake and the launch option use its 30-unit path.
-        if self.command.snake or self.session.runtime_modifier.snake:
-            offset += prime2_snake_x_offset(
-                self._event_beat_distance(event),
-                geometry.note_size,
-            )
-
-        # Exceed's exact coefficient remains unrecovered. Keep its historical
-        # diagonal semantics isolated as an explicit approximation rather than
-        # folding it into Mirror, UA, or lane mapping.
-        if self.command.exceed_mode or self.session.runtime_modifier.exceed:
-            centre_lane = (self.columns - 1) / 2.0
-            if event.lane != centre_lane:
-                offset += legacy_exceed_x_offset(
-                    self._event_y(event) - self._receptor_y(),
-                    geometry.field_width,
-                    from_right=event.lane < centre_lane,
-                    travel_height=float(self.height()),
-                )
-        return offset
-
-    def _path_modifiers_active(self) -> bool:
-        return bool(
-            self.command.snake
-            or self.session.runtime_modifier.snake
-            or self.session.runtime_modifier.zigzag
-            or self.command.exceed_mode
-            or self.session.runtime_modifier.exceed
-            or self._effective_throw() is not ThrowMode.FLAT
-        )
-
-    def _screen_y_for_beat_distance(self, beat_distance: float) -> float:
-        geometry = self._geometry()
-        y = self._base_screen_y_for_beat_distance(beat_distance)
-        mode = self._effective_throw()
-        if mode is not ThrowMode.FLAT:
-            y += prime2_throw_y_offset(
-                beat_distance,
-                self.session.high_speed,
-                geometry.note_size,
-                rise=mode is ThrowMode.RISE,
-            )
-        return y
-
-    def _path_x_for_beat_distance(
-        self, beat_distance: float, lane: int, y: float, split_id: int | None = None
-    ) -> float:
-        geometry = self._geometry()
-        base_x = self.lane_center(lane)
-        if self.session.runtime_modifier.zigzag and split_id is not None:
-            visual_lane = self._visual_lane(lane)
-            lane_position = prime2_zigzag_lane_position(
-                visual_lane,
-                beat_distance,
-                self.columns,
-                self.stream.route.seed or 0,
-                start=self.stream.split_param(split_id, 222, 1.0),
-                interval=self.stream.split_param(split_id, 221, 1.0),
-            )
-            base_x = self._lane_position_x(lane_position)
-        offset = 0.0
         if self.command.snake or self.session.runtime_modifier.snake:
             offset += prime2_snake_x_offset(beat_distance, geometry.note_size)
+
         if self.command.exceed_mode or self.session.runtime_modifier.exceed:
-            centre_lane = (self.columns - 1) / 2.0
-            if lane != centre_lane:
-                offset += legacy_exceed_x_offset(
-                    y - self._receptor_y(),
-                    geometry.field_width,
-                    from_right=lane < centre_lane,
-                    travel_height=float(self.height()),
-                )
-        return base_x + offset
+            anchor_y = self._base_screen_y_for_beat_distance(beat_distance)
+            if self.columns <= 5:
+                # A centred Single field still has one approach side per player:
+                # P1 enters from the right, P2 from the left. StartColumn >= 5 is
+                # the only chart-local P2 signal available to standalone preview.
+                from_right = self.start_column < 5
+            else:
+                centre_lane = (self.columns - 1) / 2.0
+                from_right = event.lane < centre_lane
+            offset += legacy_exceed_x_offset(
+                anchor_y - self._receptor_y(),
+                geometry.field_width,
+                from_right=from_right,
+                travel_height=float(self.height()),
+            )
+        return offset
+
+    def _screen_y_for_beat_distance(self, beat_distance: float) -> float:
+        return self._base_screen_y_for_beat_distance(beat_distance)
+
+    def _event_render_geometry(
+        self, event: PreviewEvent
+    ) -> tuple[float, float, float]:
+        centre_x = self.lane_center(event.lane) + self._event_x_offset(event)
+        centre_y = self._event_y(event)
+        _, beat_distance = self._path_anchor(event)
+        centre_x, centre_y, scale = self._throw_projection(
+            centre_x, centre_y, beat_distance
+        )
+        return centre_x, centre_y, self._geometry().note_size * scale
 
     def _event_opacity(self, event: PreviewEvent) -> float:
-        distance = abs(self._event_y(event) - self._receptor_y())
+        _, local_y, _ = self._event_render_geometry(event)
+        _, sy, _, ty = self._sequence_affine()
+        screen_y = sy * local_y + ty
         return self.command.note_opacity(
             int(event.visibility),
-            distance=distance,
-            fade_distance=max(1.0, self.height() * 0.42),
+            screen_y=screen_y,
+            screen_midline=float(self.height()) / 2.0,
             time_ms=self._chart_time_ms,
         )
 
@@ -612,55 +601,22 @@ class GameplayPreviewWidget(QWidget):
             if tail.time_ms < self._chart_time_ms - 80.0:
                 continue
 
-            # Path modifiers cannot be represented by stretching one vertical atlas
-            # strip between transformed endpoints. Sample the same trajectory used
-            # by note heads so Snake/Throw/Exceed/ZigZag longs remain continuous.
-            if self._path_modifiers_active():
-                start_distance = self._event_beat_distance(head)
-                end_distance = self._event_beat_distance(tail)
-                if head.time_ms <= self._chart_time_ms <= tail.time_ms:
-                    start_distance = 0.0
-                span = abs(end_distance - start_distance)
-                sample_count = max(12, min(72, int(span * 10.0) + 2))
-                path = QPainterPath()
-                visible = False
-                for index in range(sample_count):
-                    ratio = index / max(1, sample_count - 1)
-                    distance = start_distance + (end_distance - start_distance) * ratio
-                    y = self._screen_y_for_beat_distance(distance)
-                    x = self._path_x_for_beat_distance(
-                        distance, tail.lane, y, tail.split_id
-                    )
-                    if -120.0 <= y <= self.height() + 120.0:
-                        visible = True
-                    if index == 0:
-                        path.moveTo(x, y)
-                    else:
-                        path.lineTo(x, y)
-                if not visible:
-                    continue
-                painter.save()
-                painter.setOpacity(self._event_opacity(head))
-                pen = QPen(QColor(88, 160, 230, 210))
-                pen.setWidthF(max(8.0, note_size * 0.34))
-                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-                painter.setPen(pen)
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawPath(path)
-                painter.restore()
-                continue
-
-            y1, y2 = self._event_y(head), self._event_y(tail)
+            y1 = self._event_y(head)
+            y2 = self._event_y(tail)
             if head.time_ms <= self._chart_time_ms <= tail.time_ms:
                 y1 = self._receptor_y()
+            anchor_x = self.lane_center(head.lane) + self._event_x_offset(head)
+            _, anchor_distance = self._path_anchor(head)
+            x1, y1, scale = self._throw_projection(anchor_x, y1, anchor_distance)
+            x2, y2, _ = self._throw_projection(anchor_x, y2, anchor_distance)
+            centre = (x1 + x2) / 2.0
+            rendered_note_size = note_size * scale
             if max(y1, y2) < -100 or min(y1, y2) > self.height() + 100:
                 continue
-            centre = self.lane_center(tail.lane)
             target = QRectF(
-                centre - note_size / 2,
+                centre - rendered_note_size / 2,
                 min(y1, y2),
-                note_size,
+                rendered_note_size,
                 max(2.0, abs(y2 - y1)),
             )
             bank = (
@@ -679,7 +635,7 @@ class GameplayPreviewWidget(QWidget):
                 pixmap = self._pixmap(atlas)
                 if pixmap is not None:
                     atlas_lane = (
-                        self.start_column + self._visual_lane(tail.lane)
+                        self.start_column + self._visual_lane(head.lane)
                     ) % 5
                     tile_x, tile_y, tile_width, _ = atlas.tile(atlas_lane, 0)
                     painter.drawPixmap(
@@ -689,7 +645,7 @@ class GameplayPreviewWidget(QWidget):
                     )
                     drawn = True
             if not drawn:
-                width = max(8.0, note_size * 0.34)
+                width = max(8.0, rendered_note_size * 0.34)
                 painter.fillRect(
                     QRectF(
                         centre - width / 2,
@@ -779,13 +735,12 @@ class GameplayPreviewWidget(QWidget):
                 and note.time_ms < self._chart_time_ms - 80
             ):
                 continue
-            centre_x = self.lane_center(note.lane) + self._event_x_offset(note)
-            centre_y = self._event_y(note)
+            centre_x, centre_y, rendered_note_size = self._event_render_geometry(note)
             rect = QRectF(
-                centre_x - note_size / 2,
-                centre_y - note_size / 2,
-                note_size,
-                note_size,
+                centre_x - rendered_note_size / 2,
+                centre_y - rendered_note_size / 2,
+                rendered_note_size,
+                rendered_note_size,
             )
             painter.save()
             painter.setOpacity(self._event_opacity(note))
