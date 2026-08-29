@@ -20,6 +20,7 @@ class CommandFlag:
 
 COMMAND_FLAGS = (
     CommandFlag("v", "vanish", "Vanish"),
+    CommandFlag("p", "appear", "Appear"),
     CommandFlag("n", "nonstep", "Non-Step"),
     CommandFlag("w", "flash", "Flash"),
     CommandFlag("f", "freedom", "Freedom"),
@@ -31,6 +32,9 @@ COMMAND_FLAGS = (
     CommandFlag("d", "deceleration", "Deceleration"),
     CommandFlag("a", "acceleration", "Acceleration"),
     CommandFlag("x", "exceed_mode", "Exceed"),
+    CommandFlag("(", "sink", "Sink"),
+    CommandFlag(")", "rise", "Rise"),
+    CommandFlag("z", "snake", "Snake"),
     CommandFlag("s", "random_velocity", "Random Velocity"),
     CommandFlag("e", "earthworm", "Earthworm"),
 )
@@ -53,6 +57,7 @@ class GameplayCommand:
     raw: str
     speed: float
     vanish: bool = False
+    appear: bool = False
     nonstep: bool = False
     flash: bool = False
     freedom: bool = False
@@ -64,6 +69,9 @@ class GameplayCommand:
     deceleration: bool = False
     acceleration: bool = False
     exceed_mode: bool = False
+    sink: bool = False
+    rise: bool = False
+    snake: bool = False
     random_velocity: bool = False
     earthworm: bool = False
     unknown: tuple[str, ...] = ()
@@ -79,9 +87,13 @@ class GameplayCommand:
         """Return effects whose remaining presentation is not source-exact."""
 
         enabled = (
-            ("Vanish", self.vanish),  # Animator/material fade curve is asset-dependent.
+            ("Vanish", self.vanish),
+            ("Appear", self.appear),
             ("Random", self.randomize),
             ("Exceed", self.exceed_mode),
+            ("Sink", self.sink),
+            ("Rise", self.rise),
+            ("Snake", self.snake),
             # R!SE trigger/range is exact, but its RNG stream/cadence is not yet exact.
             ("Random Velocity", self.random_velocity),
         )
@@ -124,12 +136,12 @@ class GameplayCommand:
         """Render loaded note visibility plus COMMAND-only display effects.
 
         Header Visibility has already rewritten the runtime event's VisualEffect
-        nibble before this function is called. Appear/Vanish animation curves
-        live in Unity Animator/material assets, so the distance fade below remains
-        an explicit display approximation while the loaded visibility state is exact.
+        nibble before this function is called. Exact Unity material curves remain
+        asset-dependent; PIUTESTER/NX2 command semantics are represented as the
+        same independent Vanish/Appear bits, where both active means Hidden.
         """
 
-        if self.nonstep or visibility == 0:
+        if self.nonstep or visibility == 0 or (self.vanish and self.appear):
             return 0.0
         span = max(1.0, float(fade_distance))
         normalized = max(0.0, float(distance)) / span
@@ -139,6 +151,8 @@ class GameplayCommand:
             opacity = normalized
         else:  # Visible and unknown high-bit combinations
             opacity = 1.0
+        if self.appear:
+            opacity = min(opacity, 1.0 - normalized)
         if self.vanish:
             opacity = min(opacity, normalized)
         if self.flash and int(float(time_ms) // 100.0) % 2:
@@ -150,9 +164,9 @@ def parse_gameplay_command(value: str) -> GameplayCommand:
     """Parse PIUTESTER/NX2-style compatibility command characters.
 
     The launch UI exposes semantic named choices and keeps 1x..9x in a separate
-    Speed control. This parser retains historical characters for interoperability:
-    ``u`` is Under Attack/180 and ``!`` is Drop/UpsideDown. Digits keep the
-    legacy cumulative quarter-speed rule for non-UI callers.
+    Speed control. Historical characters remain only for interoperability and
+    reverse-engineering anchors. Digits keep the legacy cumulative quarter-speed
+    rule for non-UI callers.
     """
 
     raw = value.strip().casefold()
