@@ -162,17 +162,23 @@ class RiseVisibilityTests(unittest.TestCase):
 
 class RiseSpeedModeTests(unittest.TestCase):
     def test_earthworm_fast_and_slow_branches_match_drawstep_boundaries(self) -> None:
-        # 120 * 4 = 480, above the 333.33334 threshold.
-        self.assertEqual(earthworm_user_speed(0.0, 120.0, 4), 3.0)
-        self.assertEqual(earthworm_user_speed(250.9, 120.0, 4), 3.0)
-        self.assertEqual(earthworm_user_speed(251.0, 120.0, 4), 2.0)
-        self.assertEqual(earthworm_user_speed(500.0, 120.0, 4), 3.0)
+        # DrawStep reads Div._BPM after StepLoader has overwritten that slot
+        # with msPerLine. 125 ms/line * BeatSplit 4 = 500 ms/beat, so it takes
+        # the >=333.33334 branch.
+        self.assertEqual(earthworm_user_speed(0.0, 125.0, 4), 3.0)
+        self.assertEqual(earthworm_user_speed(250.9, 125.0, 4), 3.0)
+        self.assertEqual(earthworm_user_speed(251.0, 125.0, 4), 2.0)
+        self.assertEqual(earthworm_user_speed(500.0, 125.0, 4), 3.0)
 
-        # 60 * 4 = 240, below the threshold.
-        self.assertEqual(earthworm_user_speed(0.0, 60.0, 4), 2.0)
-        self.assertEqual(earthworm_user_speed(180.9, 60.0, 4), 2.0)
-        self.assertEqual(earthworm_user_speed(181.0, 60.0, 4), 1.0)
-        self.assertEqual(earthworm_user_speed(360.0, 60.0, 4), 2.0)
+        # 62.5 ms/line * BeatSplit 4 = 250 ms/beat, below the threshold.
+        self.assertEqual(earthworm_user_speed(0.0, 62.5, 4), 2.0)
+        self.assertEqual(earthworm_user_speed(180.9, 62.5, 4), 2.0)
+        self.assertEqual(earthworm_user_speed(181.0, 62.5, 4), 1.0)
+        self.assertEqual(earthworm_user_speed(360.0, 62.5, 4), 2.0)
+
+        # Skip sets msPerLine / loaded _BPM to zero and therefore uses the
+        # low-density 360 ms branch regardless of authored BPM.
+        self.assertEqual(earthworm_user_speed(181.0, 0.0, 4), 1.0)
 
     def test_random_velocity_uses_line_48_gate_and_modulo_four_speed(self) -> None:
         self.assertTrue(random_velocity_triggers(0))
@@ -205,6 +211,13 @@ class RiseSpeedModeTests(unittest.TestCase):
         self.assertIs(command_session.speed_mode, SpeedMode.EARTHWORM)
         command_session.advance(17.0)
         self.assertAlmostEqual(command_session.mode_speed, 3.0)
+
+    def test_native_timing_retains_loaded_bpm_slot_for_earthworm(self) -> None:
+        _, stream = _stream_with_header()
+        div = stream.native_timing.blocks[0]
+        self.assertAlmostEqual(div.ms_per_line, 125.0)
+        self.assertAlmostEqual(div.bpm, div.ms_per_line)
+        self.assertEqual(div.beat_split, 4)
 
     def test_non_ui_command_order_resolves_mutually_exclusive_speed_modes(self) -> None:
         _, stream = _stream_with_header()
