@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import random
+from dataclasses import dataclass, replace
 from enum import Enum, IntEnum
 from math import isfinite
 
@@ -125,6 +126,88 @@ class PreviewEvent:
         return self.scroll if isfinite(self.scroll) else 1.0
 
 
+def randomize_event_lanes(
+    events: tuple[PreviewEvent, ...],
+    *,
+    columns: int,
+    native_timing: NativeTimingProjection | None,
+    seed: int,
+) -> tuple[PreviewEvent, ...]:
+    """Project Step.Randomize as an evolving per-row lane mapping.
+
+    The recovered R!SE loop evaluates every cell with ``attribute & 0x0C <= 4``.
+    Empty cells therefore participate in the shuffle, while long body/tail cells
+    lock their current mapping so hold continuity survives. The mapping persists
+    across rows and the current row is rewritten through it after each shuffle.
+
+    R!SE uses its managed/native RNG stream; StepNX keeps a deterministic Python
+    RNG seeded by the resolved route. The structural granularity and long-note
+    locking are source-exact, while the exact random sequence remains an explicit
+    approximation until the runtime seed/state producer is recovered.
+    """
+
+    if columns <= 1 or not events:
+        return events
+
+    by_row: dict[tuple[int, int], list[PreviewEvent]] = {}
+    for event in events:
+        by_row.setdefault((event.native_block_index, event.row_index), []).append(event)
+
+    rng = random.Random(int(seed))
+    lane_map = list(range(int(columns)))
+    replacements: dict[tuple[int, int, int, int], PreviewEvent] = {}
+
+    if native_timing is not None:
+        rows = (
+            (block.index, row_index)
+            for block in native_timing.blocks
+            for row_index in range(block.n_line)
+        )
+    else:
+        rows = iter(sorted(by_row))
+
+    for block_index, row_index in rows:
+        row_events = by_row.get((block_index, row_index), ())
+        locked = {
+            event.lane
+            for event in row_events
+            if (event.attribute & 0x0C) > 0x04
+        }
+        eligible = [lane for lane in range(columns) if lane not in locked]
+        shuffled = [lane_map[lane] for lane in eligible]
+        rng.shuffle(shuffled)
+        for lane, target in zip(eligible, shuffled):
+            lane_map[lane] = target
+
+        for event in row_events:
+            key = (
+                event.native_block_index,
+                event.row_index,
+                event.lane,
+                event.bank_param,
+            )
+            replacements[key] = replace(event, lane=lane_map[event.lane])
+
+    randomized = tuple(
+        replacements.get(
+            (event.native_block_index, event.row_index, event.lane, event.bank_param),
+            event,
+        )
+        for event in events
+    )
+    return tuple(
+        sorted(
+            randomized,
+            key=lambda item: (
+                item.time_ms,
+                item.native_block_index,
+                item.row_index,
+                item.lane,
+            ),
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeEventStream:
     source_name: str | None
@@ -217,7 +300,24 @@ class RuntimeEventStream:
         """
 
         base = EffectiveModifier(speed=float(speed))
-        return apply_step_params(self.header_step_params, base)
+        return apply_step_params(
+            self.header_step_params,
+            base,
+            allow_mid=self.profile == "nxa-step5-patched",
+        )
+
+    def with_randomized_lanes(self, *, seed: int) -> RuntimeEventStream:
+        """Return a runtime-only Random projection without mutating NX data."""
+
+        return replace(
+            self,
+            events=randomize_event_lanes(
+                self.events,
+                columns=self.columns,
+                native_timing=self.native_timing,
+                seed=seed,
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,11 +445,19 @@ def build_event_stream(
     events.sort(
         key=lambda item: (item.time_ms, item.native_block_index, item.row_index, item.lane)
     )
+    event_tuple = tuple(events)
+    if runtime_modifier.random:
+        event_tuple = randomize_event_lanes(
+            event_tuple,
+            columns=int(snapshot.columns),
+            native_timing=native_timing,
+            seed=route.seed or 0,
+        )
     return RuntimeEventStream(
         snapshot.source_name,
         snapshot.profile,
         route,
-        tuple(events),
+        event_tuple,
         tuple(timing),
         tuple(warnings),
         native_timing,
