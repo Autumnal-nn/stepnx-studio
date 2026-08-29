@@ -18,6 +18,7 @@ try:
     )
     from stepnx.gui.preview_widget import GameplayPreviewWidget
     from stepnx.preview import (
+        COMMAND_FLAGS,
         RoutePolicy,
         build_event_stream,
         create_preview_snapshot,
@@ -127,7 +128,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_initialization_dialog_selects_chart_filename_and_launch_options(self) -> None:
+    def test_initialization_dialog_selects_chart_speed_and_command_flags(self) -> None:
         dialog = GameplayInitializationDialog(
             (
                 PreviewChartChoice(2, "S17.NX"),
@@ -137,13 +138,51 @@ class QtGameplayPreviewTests(unittest.TestCase):
         )
         try:
             self.assertEqual(dialog.chart_combo.currentText(), "D18.NX")
+            self.assertEqual(
+                dialog.command_list.count(),
+                len(COMMAND_FLAGS),
+            )
+            self.assertEqual(
+                tuple(dialog.command_items),
+                tuple(flag.code for flag in COMMAND_FLAGS),
+            )
+
             dialog.chart_combo.setCurrentText("S17.NX")
             dialog.speed_combo.setCurrentIndex(7)
-            dialog.command_edit.setText("vm")
+            dialog.command_items["v"].setCheckState(Qt.CheckState.Checked)
+            dialog.command_items["m"].setCheckState(Qt.CheckState.Checked)
             options = dialog.options()
             self.assertEqual(options.document_index, 2)
             self.assertEqual(options.speed, 8)
             self.assertEqual(options.command, "vm")
+        finally:
+            dialog.close()
+
+    def test_command_selector_enforces_native_enum_exclusivity(self) -> None:
+        dialog = GameplayInitializationDialog((PreviewChartChoice(0, "S17.NX"),))
+        try:
+            dialog.command_items["d"].setCheckState(Qt.CheckState.Checked)
+            dialog.command_items["a"].setCheckState(Qt.CheckState.Checked)
+            self.assertEqual(
+                dialog.command_items["d"].checkState(),
+                Qt.CheckState.Unchecked,
+            )
+            self.assertEqual(
+                dialog.command_items["a"].checkState(),
+                Qt.CheckState.Checked,
+            )
+
+            dialog.command_items["s"].setCheckState(Qt.CheckState.Checked)
+            dialog.command_items["e"].setCheckState(Qt.CheckState.Checked)
+            self.assertEqual(
+                dialog.command_items["s"].checkState(),
+                Qt.CheckState.Unchecked,
+            )
+            self.assertEqual(
+                dialog.command_items["e"].checkState(),
+                Qt.CheckState.Checked,
+            )
+            self.assertEqual(dialog.options().command, "ae")
         finally:
             dialog.close()
 
