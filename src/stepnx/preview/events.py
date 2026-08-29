@@ -6,7 +6,7 @@ from math import isfinite
 
 from stepnx.core.model import NoteRow, PackedNoteRow
 from stepnx.core.validation import Severity
-from stepnx.preview.modifiers import EffectiveModifier
+from stepnx.preview.modifiers import EffectiveModifier, StepParam, apply_step_params
 from stepnx.preview.native_timing import (
     NativeTimingProjection,
     NativeTimingState,
@@ -80,6 +80,7 @@ class RuntimeEventStream:
     warnings: tuple[str, ...]
     native_timing: NativeTimingProjection | None = None
     effective_modifier: EffectiveModifier | None = None
+    header_step_params: tuple[StepParam, ...] = ()
 
     @property
     def duration_ms(self) -> float:
@@ -92,15 +93,9 @@ class RuntimeEventStream:
         )
 
     def position_at(self, time_ms: float) -> float:
-        """Return the current gameplay scroll coordinate.
+        """Return the current source-native Block/Line beat coordinate."""
 
-        Routes containing bSkip use the source-faithful Block/Line coordinate.
-        Routes without bSkip retain the already-validated continuous preview
-        projection in this hotfix; the full LineBase velocity audit is separate.
-        """
-
-        if self.uses_native_skip_projection:
-            assert self.native_timing is not None
+        if self.native_timing is not None:
             return self.native_timing.current_position(time_ms)
         if not self.timing:
             return 0.0
@@ -136,11 +131,30 @@ class RuntimeEventStream:
         return event.position - self.position_at(time_ms)
 
     def speed_factor_at(self, time_ms: float) -> float:
-        """Return R!SE's active Div Speed, including native Smooth handling."""
+        """Return R!SE's active Div block speed, including Smooth handling."""
 
         if self.native_timing is None:
             return 1.0
         return self.native_timing.block_speed_at(time_ms)
+
+    def current_gap_at(self, time_ms: float) -> float:
+        """Return the active Step.currentGap() value in milliseconds."""
+
+        if self.native_timing is None:
+            return 0.0
+        return self.native_timing.current_gap(time_ms)
+
+    def modifier_for_launch_speed(self, speed: float) -> EffectiveModifier:
+        """Apply Header StepParams after the user-selected launch speed.
+
+        PlayBase stores the selected high-speed value into GameModifier.Speed
+        before calling ApplyStepParamToMod. Header ID 0 may therefore replace
+        it and Header 1111 may multiply the result. Keeping this order here is
+        necessary for the runtime speed state used by GameplaySession.
+        """
+
+        base = EffectiveModifier(speed=float(speed))
+        return apply_step_params(self.header_step_params, base)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +190,9 @@ def build_event_stream(
         raise ValueError("cannot build events from an unresolved route")
 
     native_timing = build_native_timing(snapshot, route)
-    use_native_skip = any(div.is_skip for div in native_timing.blocks)
     events: list[PreviewEvent] = []
     timing: list[PreviewTimingSegment] = []
     warnings: list[str] = []
-    legacy_position = 0.0
     selected_blocks = [
         (split, split.block(route.block_id(split.stable_id)))
         for split in snapshot.splits
@@ -191,13 +203,7 @@ def build_event_stream(
             warnings.append(f"Block {block.stable_id} has invalid BPM or Beat Split")
             continue
         native_div = native_timing.blocks[selected_index]
-        is_skip = native_div.is_skip
 
-        freeze_delay = (
-            max(0.0, block.offset_or_delay_ms)
-            if block.speed_or_freeze < 0.0 and not is_skip
-            else 0.0
-        )
         if not isfinite(block.scroll):
             warnings.append(
                 f"Block {block.stable_id} has no finite Scroll; "
@@ -207,29 +213,25 @@ def build_event_stream(
             warnings.append(
                 f"Block {block.stable_id} has a non-finite Speed/Freeze factor"
             )
-        safe_scroll = native_div.beat_per_line
-        legacy_row_ms = 60_000.0 / (block.bpm * block.beat_split)
-        motion_start = block.start_time_ms + freeze_delay
-        motion_end = motion_start + len(block.rows) * legacy_row_ms
-        if use_native_skip:
-            start_position = native_timing.line_position(selected_index, 0)
-            end_position = native_timing.line_position(selected_index, len(block.rows))
-        else:
-            start_position = legacy_position
-            end_position = legacy_position + len(block.rows) * safe_scroll
 
+        # Negative serialized Speed is not a local visual freeze in R!SE.
+        # StepLoader uses the sign only while deciding whether to construct Gap,
+        # then normalizes Speed positive. Keep the legacy timing-segment shape
+        # for culling/compatibility but make its axis the native Block/Line one.
+        start_position = native_timing.line_position(selected_index, 0)
+        end_position = native_timing.line_position(selected_index, len(block.rows))
         timing.append(
             PreviewTimingSegment(
                 split.stable_id,
                 block.stable_id,
-                motion_start,
-                motion_end,
+                native_div.start_time_ms,
+                native_div.end_time_ms,
                 start_position,
                 end_position,
                 block.bpm,
                 block.beat_split,
-                safe_scroll,
-                freeze_delay,
+                native_div.beat_per_line,
+                0.0,
             )
         )
 
@@ -242,11 +244,7 @@ def build_event_stream(
             # spatial rows and fully judgeable according to note semantics.
             time_ms = native_timing.judgment_time(selected_index, row_index)
             beat = row_index / block.beat_split
-            event_position = (
-                native_timing.line_position(selected_index, row_index)
-                if use_native_skip
-                else legacy_position + row_index * safe_scroll
-            )
+            event_position = native_timing.line_position(selected_index, row_index)
             for lane, cell in enumerate(row.cells):
                 if cell.raw == b"\x00\x00\x00\x00":
                     continue
@@ -264,7 +262,6 @@ def build_event_stream(
                         selected_index,
                     )
                 )
-        legacy_position = end_position if not use_native_skip else legacy_position
 
     timing.sort(key=lambda item: (item.start_time_ms, item.split_id, item.block_id))
     events.sort(
@@ -279,4 +276,5 @@ def build_event_stream(
         tuple(warnings),
         native_timing,
         snapshot.effective_modifier(),
+        snapshot.header_step_params,
     )
