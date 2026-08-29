@@ -98,7 +98,11 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
     from stepnx.core.diff import diff_documents
     from stepnx.core.errors import ModelInvariantError
     from stepnx.core.model import EmptyRow, LightmapRow, PackedNoteRow
-    from stepnx.core.profiles import MetadataScope, metadata_definition
+    from stepnx.core.profiles import (
+        MetadataScope,
+        metadata_definition,
+        metadata_display_id,
+    )
     from stepnx.core.validation import Severity
     from stepnx.gui.audio_transport import AudioTransport
     from stepnx.gui.metadata_dialog import MetadataCollectionDialog
@@ -2344,7 +2348,12 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                         if definition
                         else str(entry.value.value)
                     )
-                    yield (f"{label} — {name}", str(meta_id), value, entry.value.hex)
+                    yield (
+                        f"{label} — {name}",
+                        metadata_display_id(document.profile, scope, meta_id),
+                        value,
+                        entry.value.hex,
+                    )
 
             if kind in ("document", "header"):
                 rows.extend(

@@ -36,12 +36,12 @@ from stepnx.preview import (
     native_line_local_y,
     native_line_y,
     parse_gameplay_command,
+    prime2_snake_path_lane_position,
     prime2_snake_x_offset,
     prime2_throw_perspective_scale,
     prime2_throw_y_offset,
     prime2_throw_z_offset,
     prime2_zigzag_keyframes,
-    prime2_zigzag_lane_position,
     random_velocity_triggers,
     random_velocity_user_speed,
     resolve_route,
@@ -145,7 +145,7 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             places=5,
         )
 
-    def test_prime_zigzag_uses_nine_permutation_keyframes_and_div_phase(self) -> None:
+    def test_prime_snake_path_uses_nine_permutation_keyframes_and_div_phase(self) -> None:
         frames = prime2_zigzag_keyframes(5, 123)
         self.assertEqual(len(frames), PRIME2_ZIGZAG_KEYFRAME_COUNT)
         for frame in frames:
@@ -153,23 +153,23 @@ class RiseLineBaseVisualTests(unittest.TestCase):
 
         lane = 2
         self.assertEqual(
-            prime2_zigzag_lane_position(lane, 1.0, 5, 123, start=1.0, interval=2.0),
+            prime2_snake_path_lane_position(lane, 1.0, 5, 123, start=1.0, interval=2.0),
             float(lane),
         )
-        halfway = prime2_zigzag_lane_position(
+        halfway = prime2_snake_path_lane_position(
             lane, 2.0, 5, 123, start=1.0, interval=2.0
         )
         self.assertAlmostEqual(
             halfway, (frames[0][lane] + frames[1][lane]) / 2.0
         )
         self.assertEqual(
-            prime2_zigzag_lane_position(
+            prime2_snake_path_lane_position(
                 lane, 100.0, 5, 123, start=1.0, interval=2.0
             ),
             float(frames[-1][lane]),
         )
 
-    def test_runtime_stream_preserves_block_221_222_for_zigzag(self) -> None:
+    def test_runtime_stream_preserves_block_221_222_for_snake_path(self) -> None:
         document = parse_bytes(make_normal_nx20(), source="NM.NX")
         block = document.splits[0].blocks[0]
         document = InsertMetadata.from_ints(block.stable_id, 221, 3).apply(document)
@@ -344,6 +344,7 @@ class RiseVisibilityTests(unittest.TestCase):
                 self.assertEqual(canonical_raw, b"\x03\x13\x00\x00")
                 self.assertEqual(event.raw, bytes((0x03, expected, 0x00, 0x00)))
                 self.assertEqual(event.visual_effect & 0x10, 0x10)
+                self.assertTrue(event.snake_path)
 
 
 class RiseSpeedModeTests(unittest.TestCase):

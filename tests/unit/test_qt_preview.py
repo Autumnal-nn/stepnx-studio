@@ -22,10 +22,12 @@ try:
         AccDecMode,
         RoutePolicy,
         SequenceZoneTransform,
+        StepParam,
         build_event_stream,
         create_preview_snapshot,
         legacy_acc_dec_distance,
         parse_gameplay_command,
+        prime2_snake_path_lane_position,
         resolve_route,
     )
 except ImportError as exc:
@@ -353,6 +355,48 @@ class QtGameplayPreviewTests(unittest.TestCase):
             self.assertNotAlmostEqual(rendered_size, sink._geometry().note_size)
         finally:
             sink.close()
+
+    def test_visual_effect_snake_path_reads_block_221_222_without_header_snake(self) -> None:
+        widget = self._widget()
+        try:
+            widget.resize(640, 480)
+            base = widget.stream.events[0]
+            widget.stream = replace(
+                widget.stream,
+                block_step_params=((
+                    base.block_id,
+                    (StepParam(221, 2), StepParam(222, 3)),
+                ),),
+            )
+            current_position = widget.stream.position_at(widget.chart_time_ms)
+            plain = replace(
+                base,
+                lane=0,
+                raw=b"\x03\x03\x00\x00",
+                native_block_index=-1,
+                position=current_position + 4.0,
+            )
+            snake = replace(plain, raw=b"\x03\x13\x00\x00")
+
+            self.assertFalse(plain.snake_path)
+            self.assertTrue(snake.snake_path)
+            self.assertEqual(widget._event_x_offset(plain), 0.0)
+
+            expected_lane = prime2_snake_path_lane_position(
+                0,
+                4.0,
+                widget.columns,
+                widget.stream.route.seed or 0,
+                start=3.0,
+                interval=2.0,
+            )
+            expected = (
+                widget._lane_position_x(expected_lane) - widget.lane_center(0)
+            )
+            self.assertNotEqual(expected, 0.0)
+            self.assertAlmostEqual(widget._event_x_offset(snake), expected)
+        finally:
+            widget.close()
 
     def test_lane_geometry_centres_assets_on_native_sequence_zone_anchors(self) -> None:
         widget = self._widget()

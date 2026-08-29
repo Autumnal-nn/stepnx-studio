@@ -36,10 +36,10 @@ from stepnx.preview.visuals import (
     native_line_local_y,
     native_line_y,
     native_screen_y,
+    prime2_snake_path_lane_position,
     prime2_snake_x_offset,
     prime2_throw_perspective_scale,
     prime2_throw_z_offset,
-    prime2_zigzag_lane_position,
     sequence_zone_affine,
 )
 
@@ -323,21 +323,26 @@ class GameplayPreviewWidget(QWidget):
 
     def _event_x_offset(self, event: PreviewEvent) -> float:
         geometry = self._geometry()
-        anchor, beat_distance = self._path_anchor(event)
+        _, beat_distance = self._path_anchor(event)
         offset = 0.0
 
-        if self.session.runtime_modifier.zigzag:
+        # NX20 Snake Path is a per-note VisualEffect bit. It is not Header 35
+        # ZigZag and it is not Header 34 / COMMAND z global Snake. The selected
+        # block supplies its phase start (222) and phase length (221).
+        if event.snake_path:
             visual_lane = self._visual_lane(event.lane)
-            lane_position = prime2_zigzag_lane_position(
+            lane_position = prime2_snake_path_lane_position(
                 visual_lane,
                 beat_distance,
                 self.columns,
                 self.stream.route.seed or 0,
-                start=self.stream.block_param(anchor.block_id, 222, 1.0),
-                interval=self.stream.block_param(anchor.block_id, 221, 1.0),
+                start=self.stream.block_param(event.block_id, 222, 1.0),
+                interval=self.stream.block_param(event.block_id, 221, 1.0),
             )
             offset += self._lane_position_x(lane_position) - self.lane_center(event.lane)
 
+        # Header 35 ZigZag remains effective state only until its distinct
+        # rendering equation is recovered. Do not alias it to Snake Path.
         if self.command.snake or self.session.runtime_modifier.snake:
             offset += prime2_snake_x_offset(beat_distance, geometry.note_size)
 

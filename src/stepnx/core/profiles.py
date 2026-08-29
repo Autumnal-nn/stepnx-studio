@@ -1309,6 +1309,32 @@ def metadata_definition(
     return None
 
 
+def metadata_display_id(
+    profile_name: str,
+    scope: MetadataScope,
+    meta_id: int,
+) -> str:
+    """Return the human-facing metadata ID without changing serialized bits.
+
+    Later mission text IDs pack the localization slot in the high word and the
+    semantic field in the low word. The inspector should therefore show the
+    runtime addressing form (for example 0/1103, 1/1103, 2/1103) instead of the
+    opaque decimal composites 1103, 66639, 132175. Other IDs stay unchanged.
+    """
+
+    raw_id = int(meta_id)
+    definition = metadata_definition(profile_name, scope, raw_id)
+    base_id = raw_id & 0xFFFF
+    if (
+        scope is MetadataScope.HEADER
+        and definition is not None
+        and definition.kind is ValueKind.TRAILER_OFFSET
+        and base_id in (1103, 1203, 1303, 1403)
+    ):
+        return f"{raw_id >> 16}/{base_id}"
+    return str(raw_id)
+
+
 def authorable_metadata(
     profile_name: str,
     scope: MetadataScope,

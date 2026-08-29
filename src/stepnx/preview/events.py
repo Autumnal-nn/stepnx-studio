@@ -59,6 +59,11 @@ class PreviewEvent:
         return self.raw[1]
 
     @property
+    def snake_path(self) -> bool:
+        """NX20 per-note Snake Path flag (VisualEffect bit 0x10)."""
+        return bool(self.visual_effect & 0x10)
+
+    @property
     def bank_param(self) -> int:
         return self.raw[2] | (self.raw[3] << 8)
 

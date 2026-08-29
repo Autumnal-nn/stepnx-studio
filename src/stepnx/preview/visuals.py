@@ -318,7 +318,7 @@ def prime2_zigzag_keyframes(
     return tuple(frames)
 
 
-def prime2_zigzag_lane_position(
+def prime2_snake_path_lane_position(
     source_lane: int,
     beat_distance: float,
     columns: int,
@@ -327,11 +327,12 @@ def prime2_zigzag_lane_position(
     start: float = 1.0,
     interval: float = 1.0,
 ) -> float:
-    """Port Prime 1's path_zigzag lane interpolation consumer.
+    """Port the legacy NX20 per-note Snake Path interpolation.
 
-    Before Div 222's start value the lane is unchanged. Afterwards the renderer
-    interpolates between nine permutation maps at the Div 221 interval and
-    clamps phase >= 8 to keyframe eight.
+    VisualEffect bit 0x10 selects this path independently of Header 34's global
+    Snake modifier. Div 222 is the straight-zone/start threshold and Div 221 is
+    the phase length/divisor. After the threshold the renderer interpolates
+    between nine pseudo-random lane maps and clamps phase >= 8 to keyframe eight.
     """
 
     lane = int(source_lane)
@@ -361,6 +362,12 @@ def prime2_zigzag_lane_position(
         float(frames[lower][lane]) * (1.0 - fraction)
         + float(frames[upper][lane]) * fraction
     )
+
+
+# Compatibility alias for code written during the audit before the recovered
+# path was correctly separated from Header 35 ZigZag. New code must use the
+# Snake Path name; 221/222 do not describe Header 35.
+prime2_zigzag_lane_position = prime2_snake_path_lane_position
 
 
 def legacy_exceed_x_offset(
