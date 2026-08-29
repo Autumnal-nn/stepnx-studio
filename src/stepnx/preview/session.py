@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -14,8 +15,14 @@ from stepnx.preview.judgment import (
     project_judge_unit,
     summarize_judge_line,
 )
+from stepnx.preview.modifiers import SpeedMode
 from stepnx.preview.scoring import add_score_floor_zero, native_score_delta
-from stepnx.preview.speed import RuntimeSpeedState
+from stepnx.preview.speed import (
+    RuntimeSpeedState,
+    earthworm_user_speed,
+    random_velocity_triggers,
+    random_velocity_user_speed,
+)
 
 
 class Judgment(str, Enum):
@@ -68,9 +75,9 @@ class GameplaySession:
     """Mutable R!SE gameplay state kept outside the canonical document.
 
     Judgment grouping follows JudgeLine/JudgeNote, timing follows Step.Judge,
-    score follows JudgeStep_PostProcess/GetScore, and gauge follows HPBar. The
-    preview intentionally keeps these runtime projections separate from the
-    editor's historical NXA/Fiesta authoring registries.
+    score follows JudgeStep_PostProcess/GetScore, gauge follows HPBar, and the
+    high-speed state follows DrawStep/SpeedProc. The preview intentionally keeps
+    these runtime projections separate from historical authoring registries.
     """
 
     def __init__(
@@ -90,6 +97,9 @@ class GameplaySession:
         self._selected_speed = float(self.runtime_modifier.speed)
         self._speed_state = self._new_speed_state(0.0)
         self._speed_block_index = self._block_index_at(0.0)
+        self._random_velocity_seed = stream.route.seed or 0
+        self._random_velocity_rng = random.Random(self._random_velocity_seed)
+        self._random_velocity_line_key: tuple[int, int] | None = None
         self._gauge = RuntimeGauge.from_modifier(
             self.runtime_modifier,
             columns=stream.columns,
@@ -117,7 +127,7 @@ class GameplaySession:
 
     @property
     def selected_speed(self) -> float:
-        """Current user/runtime speed target (_modeSpeedExt)."""
+        """Current explicit user-selected speed, separate from speed modes."""
         return self._selected_speed
 
     @property
@@ -132,6 +142,18 @@ class GameplaySession:
     @property
     def mode_speed(self) -> float:
         return self._speed_state.mode_speed
+
+    @property
+    def speed_mode(self) -> SpeedMode:
+        """Resolve Header mode plus sequential COMMAND S/E overrides."""
+
+        mode = self.runtime_modifier.speed_mode
+        for character in self.command.raw:
+            if character == "s":
+                mode = SpeedMode.RANDOM_VELOCITY
+            elif character == "e":
+                mode = SpeedMode.EARTHWORM
+        return mode
 
     @property
     def gauge_limit(self) -> int:
@@ -160,6 +182,38 @@ class GameplaySession:
             self._block_speed_at(time_ms),
         )
 
+    def _apply_speed_mode(self, time_ms: float, block_index: int) -> None:
+        timing = self.stream.native_timing
+        if timing is None or not timing.blocks:
+            return
+        mode = self.speed_mode
+        div = timing.blocks[block_index]
+        if mode is SpeedMode.EARTHWORM:
+            self._speed_state.set_speed(
+                earthworm_user_speed(time_ms, div.bpm, div.beat_split)
+            )
+            self._random_velocity_line_key = None
+            return
+        if mode is not SpeedMode.RANDOM_VELOCITY:
+            self._random_velocity_line_key = None
+            return
+
+        state = timing.state_at(time_ms)
+        key = (state.block_index, state.line)
+        if not random_velocity_triggers(state.line):
+            self._random_velocity_line_key = None
+            return
+        if key == self._random_velocity_line_key:
+            return
+
+        # DrawStep's line gate and %4+1 conversion are exact. The Unity RNG
+        # stream and repeated-per-frame rerolls on the qualifying line are not
+        # recoverable from the available state, so StepNX uses one deterministic
+        # reroll on line entry. This is the remaining RandomVelocity approximation.
+        random_value = self._random_velocity_rng.randrange(0, 0x7FFFFFFF)
+        self._speed_state.set_speed(random_velocity_user_speed(random_value))
+        self._random_velocity_line_key = key
+
     def _advance_speed(self, previous_time: float, time_ms: float) -> None:
         if time_ms <= previous_time:
             return
@@ -172,11 +226,20 @@ class GameplaySession:
         block_speed = timing.block_speed_at(time_ms)
         div = timing.blocks[block_index]
         block_changed = block_index != self._speed_block_index
+        mode = self.speed_mode
 
-        if block_changed or div.is_smooth:
+        # Non-Smooth block-change snapping in DrawStep is gated to Static mode.
+        # Smooth writes the interpolated block speed and pHighSpeed directly.
+        if div.is_smooth:
             self._speed_state.set_block_speed(block_speed, snap=True)
         else:
-            self._speed_state.set_block_speed(block_speed, snap=False)
+            self._speed_state.set_block_speed(
+                block_speed,
+                snap=block_changed and mode is SpeedMode.STATIC,
+            )
+
+        self._apply_speed_mode(time_ms, block_index)
+        if not div.is_smooth:
             self._speed_state.advance(time_ms - previous_time)
         self._speed_block_index = block_index
 
@@ -215,6 +278,8 @@ class GameplaySession:
         self.time_ms = float(time_ms)
         self._speed_state = self._new_speed_state(self.time_ms)
         self._speed_block_index = self._block_index_at(self.time_ms)
+        self._random_velocity_rng = random.Random(self._random_velocity_seed)
+        self._random_velocity_line_key = None
         self._gauge = RuntimeGauge.from_modifier(
             self.runtime_modifier,
             columns=self.stream.columns,
