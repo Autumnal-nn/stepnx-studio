@@ -8,6 +8,15 @@ from stepnx.preview.events import (
     build_event_stream,
 )
 from stepnx.preview.geometry import PlayfieldGeometry
+from stepnx.preview.modifiers import (
+    AccDecMode,
+    EffectiveModifier,
+    SpeedMode,
+    StepParam,
+    ThrowMode,
+    VisibilityMode,
+    apply_step_params,
+)
 from stepnx.preview.routes import (
     PreviewMetrics,
     ResolvedRoute,
@@ -30,6 +39,8 @@ from stepnx.preview.snapshot import (
 )
 
 __all__ = [
+    "AccDecMode",
+    "EffectiveModifier",
     "GameplayCommand",
     "GameplaySession",
     "GameplayStats",
@@ -49,6 +60,11 @@ __all__ = [
     "RouteDiagnostic",
     "RoutePolicy",
     "RuntimeEventStream",
+    "SpeedMode",
+    "StepParam",
+    "ThrowMode",
+    "VisibilityMode",
+    "apply_step_params",
     "build_event_stream",
     "create_preview_snapshot",
     "parse_gameplay_command",
