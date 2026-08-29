@@ -193,6 +193,7 @@ def build_event_stream(
     events: list[PreviewEvent] = []
     timing: list[PreviewTimingSegment] = []
     warnings: list[str] = []
+    authored_position = 0.0
     selected_blocks = [
         (split, split.block(route.block_id(split.stable_id)))
         for split in snapshot.splits
@@ -216,8 +217,8 @@ def build_event_stream(
 
         # Negative serialized Speed is not a local visual freeze in R!SE.
         # StepLoader uses the sign only while deciding whether to construct Gap,
-        # then normalizes Speed positive. Keep the legacy timing-segment shape
-        # for culling/compatibility but make its axis the native Block/Line one.
+        # then normalizes Speed positive. The timing segment is kept only for
+        # culling/compatibility; runtime placement uses native Block/Line state.
         start_position = native_timing.line_position(selected_index, 0)
         end_position = native_timing.line_position(selected_index, len(block.rows))
         timing.append(
@@ -244,7 +245,10 @@ def build_event_stream(
             # spatial rows and fully judgeable according to note semantics.
             time_ms = native_timing.judgment_time(selected_index, row_index)
             beat = row_index / block.beat_split
-            event_position = native_timing.line_position(selected_index, row_index)
+            # ``position`` remains the stable authored cumulative-row coordinate
+            # used by older preview APIs. Runtime Y placement never consumes it;
+            # beat_distance_at() routes through PlayBase.GetBlockBeat instead.
+            event_position = authored_position + row_index * native_div.beat_per_line
             for lane, cell in enumerate(row.cells):
                 if cell.raw == b"\x00\x00\x00\x00":
                     continue
@@ -262,6 +266,7 @@ def build_event_stream(
                         selected_index,
                     )
                 )
+        authored_position += len(block.rows) * native_div.beat_per_line
 
     timing.sort(key=lambda item: (item.start_time_ms, item.split_id, item.block_id))
     events.sort(
