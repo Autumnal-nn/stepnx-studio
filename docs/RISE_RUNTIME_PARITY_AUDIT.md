@@ -168,16 +168,20 @@ if rawSpeed < 0:
 - `Step.GetGrade` RVA `0x7508E0`
 - `StepLoader.Load` RVA `0x751B80`
 
-## Current test checkpoint
+## Final validation checkpoint
 
-The last completed repository-wide checkpoint before the visual-modifier pass is:
+The completed repository-wide validation for this audit pass is:
 
 ```text
-Ran 464 tests in 2.285s
+GitHub Actions run: 33256211227
+Commit tested: 9ff6f29f042a41e4e163e0df81d88074eb95a622
+Ran 476 tests in 1.975s
 OK
 ```
 
-The visual pass adds dedicated regressions for Accel/Decel, Snake, Header Visibility, Earthworm including loaded `_BPM`/Skip behavior, Random Velocity, and the selectable COMMAND UI. These changes are intentionally awaiting one final repository-wide GitHub Actions run before the work branch is promoted.
+The run covers the existing repository suite plus dedicated regressions for Accel/Decel, Snake, Header Visibility without document mutation, Earthworm including the loaded `_BPM`/`msPerLine` alias and Skip behavior, Random Velocity gate/conversion, speed-mode resolution, and the selectable COMMAND UI.
+
+An earlier final-attempt run correctly exposed two test regressions rather than runtime behavior failures: one stale source-string assertion from the pre-LineBase renderer and one tolerance that assumed mathematical pi instead of R!SE's float32 pi constant. Both were corrected before the green checkpoint above; no production behavior was weakened to satisfy them.
 
 ## Remaining source-gated work
 
