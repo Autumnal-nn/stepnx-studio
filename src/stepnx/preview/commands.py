@@ -91,9 +91,6 @@ class GameplayCommand:
             ("Appear", self.appear),
             ("Random", self.randomize),
             ("Exceed", self.exceed_mode),
-            ("Sink", self.sink),
-            ("Rise", self.rise),
-            ("Snake", self.snake),
             # R!SE trigger/range is exact, but its RNG stream/cadence is not yet exact.
             ("Random Velocity", self.random_velocity),
         )
