@@ -60,11 +60,11 @@ class JudgeNoteDecision:
 
 @dataclass(frozen=True, slots=True)
 class JudgeUnitProjection:
-    """JudgeUnit state immediately before JudgeStep_PostProcess.
+    """Source-derived JudgeUnit state consumed by runtime postprocessing.
 
-    Counter writes, sound/effect calls, score and gauge are deliberately left
-    out. Those are consumers of this state and belong to the later scoring and
-    gauge parity item.
+    Counter, score and HPBar mutations are intentionally performed by the
+    session's JudgeStep_PostProcess/HPBar projections rather than hidden inside
+    this structural conversion object.
     """
 
     bank: int
@@ -208,8 +208,8 @@ def project_judge_unit(
     The native method maps a negative grade to Miss for the public Judgement
     state, keeps a distinct ``bNoMiss && !bVisible`` path, computes the AltSkin
     score factor from the proportion of alternate-skin notes, and returns
-    ``grade <= Great``. Its later counter/effect writes and PostProcess call are
-    intentionally outside this helper.
+    ``grade <= Great``. Later counter/effect writes and the PostProcess call use
+    this projection as input in GameplaySession.
     """
 
     total_note_count = note_count + long_note_count
