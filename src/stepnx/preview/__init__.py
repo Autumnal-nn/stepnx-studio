@@ -7,11 +7,25 @@ from stepnx.preview.events import (
     RuntimeEventStream,
     build_event_stream,
 )
+from stepnx.preview.gauge import (
+    GAUGE_DEFAULT,
+    GAUGE_DISPLAY_MAX_DEFAULT,
+    GAUGE_LIMIT_DEFAULT,
+    HPBarType,
+    RuntimeGauge,
+)
 from stepnx.preview.geometry import PlayfieldGeometry
+from stepnx.preview.judge_timing import (
+    DEFAULT_JUDGE_DELAY_FRAMES,
+    JUDGE_FRAME_MS,
+    NativeJudgeTiming,
+)
 from stepnx.preview.judgment import (
     JudgeLineSummary,
     JudgeNoteDecision,
+    JudgeUnitProjection,
     judge_note_decision,
+    project_judge_unit,
     summarize_judge_line,
 )
 from stepnx.preview.modifiers import (
@@ -32,6 +46,11 @@ from stepnx.preview.routes import (
     RouteDiagnostic,
     RoutePolicy,
     resolve_route,
+)
+from stepnx.preview.scoring import (
+    add_score_floor_zero,
+    native_base_score,
+    native_score_delta,
 )
 from stepnx.preview.session import (
     GameplaySession,
@@ -61,19 +80,27 @@ __all__ = [
     "AccDecMode",
     "BASE_ARROW_Y",
     "ComboDisplay",
+    "DEFAULT_JUDGE_DELAY_FRAMES",
     "DirectionMode",
     "EffectiveModifier",
+    "GAUGE_DEFAULT",
+    "GAUGE_DISPLAY_MAX_DEFAULT",
+    "GAUGE_LIMIT_DEFAULT",
     "GameplayCommand",
     "GameplaySession",
     "GameplayStats",
+    "HPBarType",
+    "JUDGE_FRAME_MS",
     "JudgeLineSummary",
     "JudgeNoteDecision",
+    "JudgeUnitProjection",
     "Judgment",
     "JudgmentWindows",
     "LINE_BASE_START_GAP_TIME",
     "LINE_BASE_START_Y",
     "LINE_BASE_VELOCITY",
     "NOTE_RENDER_UNIT",
+    "NativeJudgeTiming",
     "PlayfieldGeometry",
     "PreviewBlock",
     "PreviewEvent",
@@ -88,6 +115,7 @@ __all__ = [
     "RouteDiagnostic",
     "RoutePolicy",
     "RuntimeEventStream",
+    "RuntimeGauge",
     "RuntimeSpeedState",
     "SPEED_PROC_INCREMENT",
     "SPEED_PROC_INTERVAL_SECONDS",
@@ -95,12 +123,16 @@ __all__ = [
     "StepParam",
     "ThrowMode",
     "VisibilityMode",
+    "add_score_floor_zero",
     "apply_step_params",
     "build_event_stream",
     "create_preview_snapshot",
     "judge_note_decision",
+    "native_base_score",
     "native_base_velocity_pixels",
+    "native_score_delta",
     "parse_gameplay_command",
+    "project_judge_unit",
     "resolve_route",
     "summarize_judge_line",
 ]
