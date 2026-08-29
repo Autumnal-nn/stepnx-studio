@@ -37,6 +37,8 @@ class GameplayInitializationDialog(QDialog):
         "a": "d",
         "s": "e",
         "e": "s",
+        "(": ")",
+        ")": "(",
     }
 
     def __init__(
