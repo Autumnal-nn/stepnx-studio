@@ -1,0 +1,99 @@
+name: Retry legacy visual follow-up
+
+on:
+  push:
+    branches:
+      - audit/rise-visual-command-re
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Retry legacy visual follow-up'
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/rise-visual-command-re
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reapply visual patch and fix regressions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          # Reuse the already-reviewed patch body from the first one-shot workflow.
+          workflow = Path('.github/workflows/fix-legacy-visual-followup.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "          PY\n"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          patch_script = textwrap.dedent(workflow[start:end])
+          exec(compile(patch_script, '<legacy-visual-followup>', 'exec'))
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'expected regression fragment not found in {path}: {old[:120]!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          preview_tests = 'tests/unit/test_preview.py'
+          replace_once(
+              preview_tests,
+              '''    def test_chart_visibility_composes_with_nonstep_vanish_and_flash(self) -> None:\n        plain = parse_gameplay_command(\"\")\n        self.assertEqual(\n            plain.note_opacity(0, distance=100, fade_distance=200, time_ms=0), 0\n        )\n        self.assertEqual(\n            plain.note_opacity(1, distance=50, fade_distance=200, time_ms=0),\n            0.75,\n        )\n        self.assertEqual(\n            plain.note_opacity(2, distance=50, fade_distance=200, time_ms=0),\n            0.25,\n        )\n        self.assertEqual(\n            parse_gameplay_command(\"n\").note_opacity(\n                3, distance=100, fade_distance=200, time_ms=0\n            ),\n            0,\n        )\n        flashing = parse_gameplay_command(\"w\")\n        self.assertEqual(\n            flashing.note_opacity(3, distance=100, fade_distance=200, time_ms=50),\n            1,\n        )\n        self.assertEqual(\n            flashing.note_opacity(\n                3, distance=100, fade_distance=200, time_ms=150\n            ),\n            0,\n        )\n''',
+              '''    def test_chart_visibility_composes_with_nonstep_vanish_and_flash(self) -> None:\n        plain = parse_gameplay_command(\"\")\n        self.assertEqual(\n            plain.note_opacity(\n                0, screen_y=300, screen_midline=240, time_ms=0\n            ),\n            0,\n        )\n        # Serialized Appear/Vanish use the physical screen midpoint, not the\n        # receptor distance. Below centre is the approach half for normal play.\n        self.assertEqual(\n            plain.note_opacity(\n                1, screen_y=300, screen_midline=240, time_ms=0\n            ),\n            0,\n        )\n        self.assertEqual(\n            plain.note_opacity(\n                1, screen_y=200, screen_midline=240, time_ms=0\n            ),\n            1,\n        )\n        self.assertEqual(\n            plain.note_opacity(\n                2, screen_y=300, screen_midline=240, time_ms=0\n            ),\n            1,\n        )\n        self.assertEqual(\n            plain.note_opacity(\n                2, screen_y=200, screen_midline=240, time_ms=0\n            ),\n            0,\n        )\n        self.assertEqual(\n            parse_gameplay_command(\"n\").note_opacity(\n                3, screen_y=300, screen_midline=240, time_ms=0\n            ),\n            0,\n        )\n        flashing = parse_gameplay_command(\"w\")\n        self.assertEqual(\n            flashing.note_opacity(\n                3, screen_y=300, screen_midline=240, time_ms=50\n            ),\n            1,\n        )\n        self.assertEqual(\n            flashing.note_opacity(\n                3, screen_y=300, screen_midline=240, time_ms=150\n            ),\n            0,\n        )\n''',
+          )
+
+          rise_tests = 'tests/unit/test_rise_visual_modifiers.py'
+          replace_once(
+              rise_tests,
+              '''            command.note_opacity(\n                3,\n                distance=100.0,\n                fade_distance=400.0,\n                time_ms=0.0,\n            ),\n''',
+              '''            command.note_opacity(\n                3,\n                screen_y=300.0,\n                screen_midline=240.0,\n                time_ms=0.0,\n            ),\n''',
+          )
+
+          qt_tests = 'tests/unit/test_qt_preview.py'
+          replace_once(
+              qt_tests,
+              '''            for widget in (p1, p2):\n                widget.resize(640, 480)\n                event = replace(widget.stream.events[0], lane=2)\n                # A centred lane is still diagonal: P1 approaches from the\n''',
+              '''            for widget in (p1, p2):\n                widget.resize(640, 480)\n                event = replace(widget.stream.events[0], lane=2)\n                # Measure while the note is still travelling. Exactly at the\n                # receptor every Exceed path correctly converges to zero X offset.\n                widget.set_playback_time(event.time_ms - 500.0)\n                # A centred lane is still diagonal: P1 approaches from the\n''',
+          )
+          PY
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 \
+            libgl1 \
+            libopengl0 \
+            libpulse0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-xinerama0
+      - name: Install StepNX Studio with GUI dependencies
+        run: python -m pip install -e '.[gui]'
+      - name: Run complete repository suite
+        run: python -m unittest discover -s tests -v
+      - name: Commit corrections and remove one-shot workflows
+        run: |
+          git config user.name 'OpenAI'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-legacy-visual-followup.yml \
+                 .github/workflows/retry-legacy-visual-followup.yml
+          git add src/stepnx/preview/visuals.py \
+                  src/stepnx/preview/snapshot.py \
+                  src/stepnx/preview/events.py \
+                  src/stepnx/preview/commands.py \
+                  src/stepnx/preview/__init__.py \
+                  src/stepnx/gui/preview_widget.py \
+                  tests/unit/test_preview.py \
+                  tests/unit/test_rise_visual_modifiers.py \
+                  tests/unit/test_qt_preview.py
+          git diff --cached --check
+          git commit -m 'Correct legacy path and display rendering'
+          git push origin HEAD:audit/rise-visual-command-re
