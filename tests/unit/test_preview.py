@@ -440,7 +440,7 @@ class RuntimeEventTests(unittest.TestCase):
         rows = document.splits[0].blocks[0].rows
         for row, raw in zip(
             rows,
-            (b"\x47\x03\x00\x00", b"\x4b\x03\x00\x00", b"\x4f\x03\x00\x00"),
+            (b"\x57\x03\x00\x00", b"\x5b\x03\x00\x00", b"\x5f\x03\x00\x00"),
         ):
             document = SetNoteAt(row.stable_id, 0, raw).apply(document)
         snapshot = create_preview_snapshot(document)
