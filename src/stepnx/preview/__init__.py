@@ -39,9 +39,21 @@ from stepnx.preview.snapshot import (
     PreviewSplit,
     create_preview_snapshot,
 )
+from stepnx.preview.speed import (
+    BASE_ARROW_Y,
+    LINE_BASE_START_GAP_TIME,
+    LINE_BASE_START_Y,
+    LINE_BASE_VELOCITY,
+    NOTE_RENDER_UNIT,
+    RuntimeSpeedState,
+    SPEED_PROC_INCREMENT,
+    SPEED_PROC_INTERVAL_SECONDS,
+    native_base_velocity_pixels,
+)
 
 __all__ = [
     "AccDecMode",
+    "BASE_ARROW_Y",
     "ComboDisplay",
     "DirectionMode",
     "EffectiveModifier",
@@ -50,6 +62,10 @@ __all__ = [
     "GameplayStats",
     "Judgment",
     "JudgmentWindows",
+    "LINE_BASE_START_GAP_TIME",
+    "LINE_BASE_START_Y",
+    "LINE_BASE_VELOCITY",
+    "NOTE_RENDER_UNIT",
     "PlayfieldGeometry",
     "PreviewBlock",
     "PreviewEvent",
@@ -64,6 +80,9 @@ __all__ = [
     "RouteDiagnostic",
     "RoutePolicy",
     "RuntimeEventStream",
+    "RuntimeSpeedState",
+    "SPEED_PROC_INCREMENT",
+    "SPEED_PROC_INTERVAL_SECONDS",
     "SpeedMode",
     "StepParam",
     "ThrowMode",
@@ -71,6 +90,7 @@ __all__ = [
     "apply_step_params",
     "build_event_stream",
     "create_preview_snapshot",
+    "native_base_velocity_pixels",
     "parse_gameplay_command",
     "resolve_route",
 ]
