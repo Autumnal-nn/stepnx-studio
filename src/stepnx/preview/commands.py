@@ -94,8 +94,6 @@ class GameplayCommand:
         """
 
         enabled = (
-            ("V", self.vanish),
-            ("P", self.appear),
             ("R", self.randomize),
             ("X", self.exceed_mode),
         )
@@ -105,7 +103,7 @@ class GameplayCommand:
     def pending_effects(self) -> tuple[str, ...]:
         """Return parsed flags that still have no complete runtime projection."""
 
-        return ("^",) if self.nx_mode else ()
+        return ()
 
     def with_speed(self, speed: int) -> GameplayCommand:
         if not 1 <= speed <= 9:
@@ -126,6 +124,23 @@ class GameplayCommand:
         if self.mirror:
             lanes.reverse()
         return tuple(lanes)
+
+    def effective_visibility(self, visibility: int) -> int:
+        """Resolve COMMAND visibility before the screen-space mask is applied."""
+
+        mode = int(visibility) & 0x03
+        if self.nonstep or (self.vanish and self.appear):
+            return 0
+        if self.appear:
+            return 1
+        if self.vanish:
+            return 2
+        return mode
+
+    def flash_visible(self, time_ms: float, *, header_flash: bool = False) -> bool:
+        if not (self.flash or bool(header_flash)):
+            return True
+        return int(float(time_ms) // 100.0) % 2 == 0
 
     def note_opacity(
         self,

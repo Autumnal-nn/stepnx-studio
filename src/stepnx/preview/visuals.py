@@ -33,7 +33,7 @@ PRIME2_PATH_PI = 3.1415927410125732
 PRIME2_SNAKE_AMPLITUDE = 30.0
 PRIME2_THROW_SPAN = 453.0
 PRIME2_THROW_AMPLITUDE = 96.0  # 64 * 1.5, standard branch
-PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, external-state branch (OPEN)
+PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, NX Mode branch
 PRIME2_THROW_CAMERA_FOV = 43.60300064086914
 PRIME2_THROW_CAMERA_EYE_Z = 600.0
 
@@ -200,7 +200,7 @@ def prime2_throw_z_offset(
 
     `piu_prime` writes the recovered sine term into the third coordinate of all
     four arrow vertices at 0x806DEAE/BD/CC/E1. It is therefore depth, not a Y
-    offset. Standard amplitude is 96; the unidentified alternate branch is 300.
+    offset. Standard amplitude is 96; NX Mode selects the 300-unit branch.
     """
 
     displacement = float(beat_distance) * PRIME2_PATH_UNIT * float(high_speed)

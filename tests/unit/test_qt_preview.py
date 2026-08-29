@@ -7,7 +7,7 @@ from dataclasses import replace
 os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offscreen")
 
 try:
-    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
     from PySide6.QtGui import QImage, QKeyEvent, QPainter, QTransform
     from PySide6.QtWidgets import QApplication
 
@@ -29,6 +29,10 @@ try:
         parse_gameplay_command,
         prime2_snake_path_lane_position,
         resolve_route,
+    )
+    from stepnx.preview.legacy_render import (
+        legacy_nx_project_point,
+        legacy_visibility_gradient_stops,
     )
 except ImportError as exc:
     QApplication = None
@@ -88,15 +92,28 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_legacy_visibility_fade_is_local_to_note_scale(self) -> None:
+    def test_legacy_visibility_uses_native_screen_mask(self) -> None:
         widget = self._widget("v")
         try:
             widget.resize(640, 480)
-            self.assertAlmostEqual(
-                widget._visibility_fade_distance(),
-                widget._geometry().note_size * 1.5,
+            self.assertEqual(widget._effective_visibility(widget.stream.events[0]), 2)
+            stops = legacy_visibility_gradient_stops(2)
+            self.assertAlmostEqual(stops[1][0] * 480.0, 224.5, places=5)
+            self.assertAlmostEqual(stops[2][0] * 480.0, 256.375, places=5)
+        finally:
+            widget.close()
+
+    def test_nx_mode_qtransform_matches_recovered_projection(self) -> None:
+        widget = self._widget("^")
+        try:
+            widget.resize(640, 480)
+            self.assertTrue(widget._effective_nx_mode())
+            mapped = widget._playfield_transform().map(QPointF(320.0, 82.0))
+            expected_x, expected_y = legacy_nx_project_point(
+                320.0, 82.0, 640.0, 480.0
             )
-            self.assertLess(widget._visibility_fade_distance(), widget.height() * 0.25)
+            self.assertAlmostEqual(mapped.x(), expected_x, places=5)
+            self.assertAlmostEqual(mapped.y(), expected_y, places=5)
         finally:
             widget.close()
 

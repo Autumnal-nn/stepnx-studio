@@ -76,39 +76,23 @@ class GameplayCommandTests(unittest.TestCase):
 
     def test_command_effects_report_only_remaining_unprojected_behavior(self) -> None:
         command = parse_gameplay_command("vadenswfjx^")
-        self.assertEqual(command.approximate_effects, ("V", "X"))
-        self.assertEqual(command.pending_effects, ("^",))
+        self.assertEqual(command.approximate_effects, ("X",))
+        self.assertEqual(command.pending_effects, ())
         self.assertEqual(parse_gameplay_command("u").pending_effects, ())
 
-    def test_chart_visibility_composes_with_nonstep_vanish_and_flash(self) -> None:
+    def test_chart_visibility_resolves_before_screen_space_mask(self) -> None:
         plain = parse_gameplay_command("")
-        self.assertEqual(
-            plain.note_opacity(0, distance=100, fade_distance=200, time_ms=0),
-            0,
-        )
-        self.assertEqual(
-            plain.note_opacity(1, distance=50, fade_distance=200, time_ms=0),
-            0.75,
-        )
-        self.assertEqual(
-            plain.note_opacity(2, distance=50, fade_distance=200, time_ms=0),
-            0.25,
-        )
-        self.assertEqual(
-            parse_gameplay_command("n").note_opacity(
-                3, distance=100, fade_distance=200, time_ms=0
-            ),
-            0,
-        )
+        self.assertEqual(plain.effective_visibility(0), 0)
+        self.assertEqual(plain.effective_visibility(1), 1)
+        self.assertEqual(plain.effective_visibility(2), 2)
+        self.assertEqual(plain.effective_visibility(3), 3)
+        self.assertEqual(parse_gameplay_command("n").effective_visibility(3), 0)
+        self.assertEqual(parse_gameplay_command("p").effective_visibility(3), 1)
+        self.assertEqual(parse_gameplay_command("v").effective_visibility(3), 2)
+        self.assertEqual(parse_gameplay_command("vp").effective_visibility(3), 0)
         flashing = parse_gameplay_command("w")
-        self.assertEqual(
-            flashing.note_opacity(3, distance=100, fade_distance=200, time_ms=50),
-            1,
-        )
-        self.assertEqual(
-            flashing.note_opacity(3, distance=100, fade_distance=200, time_ms=150),
-            0,
-        )
+        self.assertTrue(flashing.flash_visible(50.0))
+        self.assertFalse(flashing.flash_visible(150.0))
 
     def test_launch_speed_overrides_legacy_cumulative_command_digits(self) -> None:
         command = parse_gameplay_command("v4x88").with_speed(7)

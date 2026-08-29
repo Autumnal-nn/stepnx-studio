@@ -47,7 +47,7 @@ Standard branch constants:
 
 The second active state substitutes `-64.0` before the same sine path, yielding the opposite direction. This matches the runtime enum ordering already recovered as Sink=1, Rise=2.
 
-Prime 2 also contains an external-state branch choosing `200/-200`, giving `300/-300` after the 1.5 multiplier. The producer of that external state is not identified, so StepNX does not enable the alternate amplitude implicitly.
+Prime/NXA identify the `200/-200` branch as **NX Mode**. After the same 1.5 multiplier, NX Mode therefore uses `+/-300` while the normal branch remains `+/-96`. StepNX selects the 300-unit depth branch whenever Header 22 or COMMAND `^` enables NX Mode.
 
 ## Exceed
 
@@ -68,5 +68,12 @@ No proprietary executable bytes or game assets are copied into the repository.
 ## Visual validation follow-up
 
 - NX20 Snake Path `221/222` boundary convergence was visually validated against legacy gameplay on 2026-08-29. The phase-zero identity convergence is locked; later preview work must not replace it without contradictory runtime/capture evidence.
-- Legacy Appear/Vanish remains a continuous fade, but its spatial window is compact around the judge line. StepNX now scales that window to `1.5 * rendered note size` instead of viewport height; the exact legacy easing curve remains approximate.
-- PIUTESTER/NX2 compatibility command `^` is restored to the selector as **NX Mode**. It is distinct from `x` / Exceed. No visual consumer is invented until source evidence establishes its rendering behavior.
+- NX20 Snake Path `221/222` remains locked after visual validation; this port does not alter its code or interpolation.
+
+## Prime/NXA visibility mask and NX Mode
+
+Prime and NXA independently generate the same 32x512 RGBA visibility texture. The low VisualEffect states are 0 Invisible, 1 Appear, 2 Vanish, 3 Visible. The recovered mask constants are centre 256, vertex offset 16.5, alpha bias 128 and slope +/-8 per logical pixel. On the native 640x480 viewport, alpha 128 occurs at screen Y 240.5 and the complete transition occupies only about 32 logical pixels (roughly Y 224.5..256.5). StepNX now renders Appear/Vanish into screen-space layers and applies that vertical mask after path/perspective transforms, matching the texture consumer rather than assigning one opacity to the entire sprite.
+
+Header 22 and COMMAND `^` feed the same **NX Mode** state. Both supplied executables select a 75-degree perspective instead of the normal 90-degree projection. NXA then applies the recovered 1.5 scale and X-axis tilt: -120 degrees in the normal branch and -60 degrees in the Drop branch. StepNX collapses each fixed-Z plane to the equivalent projective homography, so arrow artwork and long-note geometry are warped rather than merely repositioned. Sink/Rise uses the recovered NX-specific +/-300 Z branch.
+
+The standalone preview preserves Under Attack as the already-validated independent 180-degree field transform before the NX homography. The native combined UA+NX branch was not separately used as an arbiter in this pass.

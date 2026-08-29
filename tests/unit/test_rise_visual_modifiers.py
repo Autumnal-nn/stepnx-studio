@@ -17,6 +17,7 @@ from stepnx.preview import (
     LINE_BASE_Y_MAX,
     LINE_BASE_Y_MIN,
     PRIME2_SNAKE_AMPLITUDE,
+    PRIME2_THROW_ALT_AMPLITUDE,
     PRIME2_THROW_AMPLITUDE,
     PRIME2_THROW_CAMERA_EYE_Z,
     PRIME2_THROW_SPAN,
@@ -47,6 +48,14 @@ from stepnx.preview import (
     resolve_route,
     serialize_command_flags,
     transform_sequence_zone_point,
+)
+from stepnx.preview.legacy_render import (
+    LEGACY_NX_FOV_DEGREES,
+    LEGACY_VISIBILITY_ALPHA_BIAS,
+    LEGACY_VISIBILITY_ALPHA_SLOPE,
+    LEGACY_VISIBILITY_SCREEN_CENTER,
+    legacy_nx_project_point,
+    legacy_visibility_alpha,
 )
 from tests.fixture_factory import make_normal_nx20
 
@@ -202,6 +211,17 @@ class RiseLineBaseVisualTests(unittest.TestCase):
         rise_z = prime2_throw_z_offset(half_peak_beat, 1.0, rise=True)
         self.assertAlmostEqual(sink_z, 96.0, places=5)
         self.assertAlmostEqual(rise_z, -96.0, places=5)
+        self.assertEqual(PRIME2_THROW_ALT_AMPLITUDE, 300.0)
+        self.assertAlmostEqual(
+            prime2_throw_z_offset(
+                half_peak_beat,
+                1.0,
+                rise=False,
+                alternate_amplitude=True,
+            ),
+            300.0,
+            places=5,
+        )
         self.assertGreater(prime2_throw_perspective_scale(sink_z), 1.0)
         self.assertLess(prime2_throw_perspective_scale(rise_z), 1.0)
         # Compatibility wrapper retains the old scalar API but is not used as Y.
@@ -211,27 +231,45 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             places=5,
         )
 
-    def test_legacy_vanish_and_appear_keep_continuous_fade(self) -> None:
-        vanish = parse_gameplay_command("v")
-        appear = parse_gameplay_command("p")
-        for distance, vanish_expected, appear_expected in (
-            (200.0, 1.0, 0.0),
-            (100.0, 0.5, 0.5),
-            (50.0, 0.25, 0.75),
-            (0.0, 0.0, 1.0),
-        ):
-            self.assertAlmostEqual(
-                vanish.note_opacity(
-                    3, distance=distance, fade_distance=200.0, time_ms=0.0
-                ),
-                vanish_expected,
-            )
-            self.assertAlmostEqual(
-                appear.note_opacity(
-                    3, distance=distance, fade_distance=200.0, time_ms=0.0
-                ),
-                appear_expected,
-            )
+    def test_prime_nxa_visibility_mask_is_screen_space_and_source_exact(self) -> None:
+        self.assertEqual(LEGACY_VISIBILITY_SCREEN_CENTER, 240.5)
+        self.assertEqual(LEGACY_VISIBILITY_ALPHA_BIAS, 128.0)
+        self.assertEqual(LEGACY_VISIBILITY_ALPHA_SLOPE, 8.0)
+        self.assertAlmostEqual(
+            legacy_visibility_alpha(240.5, 480.0, 1), 128.0 / 255.0
+        )
+        self.assertAlmostEqual(
+            legacy_visibility_alpha(240.5, 480.0, 2), 128.0 / 255.0
+        )
+        self.assertEqual(legacy_visibility_alpha(224.625, 480.0, 1), 1.0)
+        self.assertEqual(legacy_visibility_alpha(256.5, 480.0, 1), 0.0)
+        self.assertEqual(legacy_visibility_alpha(224.5, 480.0, 2), 0.0)
+        self.assertEqual(legacy_visibility_alpha(256.375, 480.0, 2), 1.0)
+        # Viewport resize scales logical screen coordinates, not the mask shape.
+        self.assertAlmostEqual(
+            legacy_visibility_alpha(481.0, 960.0, 1), 128.0 / 255.0
+        )
+
+    def test_nx_mode_projection_matches_nxa_prime_pipeline(self) -> None:
+        self.assertEqual(LEGACY_NX_FOV_DEGREES, 75.0)
+        centre_receptor = legacy_nx_project_point(320.0, 82.0, 640.0, 480.0)
+        self.assertAlmostEqual(centre_receptor[0], 320.0, places=5)
+        self.assertAlmostEqual(centre_receptor[1], 239.4348315793912, places=5)
+        lower = legacy_nx_project_point(320.0, 400.0, 640.0, 480.0)
+        self.assertAlmostEqual(lower[1], 60.0, places=5)
+        doubled = legacy_nx_project_point(640.0, 164.0, 1280.0, 960.0)
+        self.assertAlmostEqual(doubled[0], centre_receptor[0] * 2.0, places=5)
+        self.assertAlmostEqual(doubled[1], centre_receptor[1] * 2.0, places=5)
+        flat_drop = legacy_nx_project_point(320.0, 240.0, 640.0, 480.0, drop=True)
+        flat_normal = legacy_nx_project_point(320.0, 240.0, 640.0, 480.0)
+        self.assertAlmostEqual(flat_drop[1], flat_normal[1], places=5)
+        depth_normal = legacy_nx_project_point(
+            320.0, 240.0, 640.0, 480.0, z=100.0
+        )
+        depth_drop = legacy_nx_project_point(
+            320.0, 240.0, 640.0, 480.0, z=100.0, drop=True
+        )
+        self.assertNotAlmostEqual(depth_normal[1], depth_drop[1])
 
 
 class SequenceZoneTransformTests(unittest.TestCase):
@@ -480,7 +518,7 @@ class CommandRegistryTests(unittest.TestCase):
         nx = parse_gameplay_command("x^")
         self.assertTrue(nx.exceed_mode)
         self.assertTrue(nx.nx_mode)
-        self.assertEqual(nx.pending_effects, ("^",))
+        self.assertEqual(nx.pending_effects, ())
         with self.assertRaisesRegex(ValueError, "unsupported COMMAND"):
             serialize_command_flags(("v", "?"))
 
