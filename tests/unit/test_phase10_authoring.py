@@ -215,7 +215,7 @@ class Phase10AdapterTests(unittest.TestCase):
         self.assertNotIn("original_preview = window._open_gameplay_preview", text)
         self.assertNotIn("window.open_preview_action.triggered.disconnect()", text)
 
-    def test_gameplay_preview_scroll_pitch_is_receptor_spacing(self):
+    def test_gameplay_preview_uses_native_base_velocity_projection(self):
         from pathlib import Path
 
         source = (
@@ -227,21 +227,15 @@ class Phase10AdapterTests(unittest.TestCase):
         )
         text = source.read_text(encoding="utf-8")
         self.assertIn(
-            "scroll_pitch = self._geometry().lane_spacing",
+            "base_velocity = native_base_velocity_pixels(self._geometry().note_size)",
             text,
         )
         self.assertIn(
-            "pixels = distance * scroll_pitch * multiplier",
+            "pixels = distance * base_velocity * multiplier",
             text,
         )
-        self.assertNotIn(
-            "pixels = distance * 96.0 * multiplier",
-            text,
-        )
-        self.assertNotIn(
-            "            96.0 * multiplier",
-            text,
-        )
+        self.assertIn("multiplier = self.session.high_speed", text)
+        self.assertNotIn("scroll_pitch = self._geometry().lane_spacing", text)
 
     def test_gameplay_preview_culls_events_after_chart_end(self):
         from pathlib import Path
