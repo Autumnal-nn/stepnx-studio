@@ -135,6 +135,8 @@ class RuntimeEventStream:
     native_timing: NativeTimingProjection | None = None
     effective_modifier: EffectiveModifier | None = None
     header_step_params: tuple[StepParam, ...] = ()
+    start_column: int = 0
+    columns: int = 5
 
     @property
     def duration_ms(self) -> float:
@@ -340,4 +342,6 @@ def build_event_stream(
         native_timing,
         snapshot.effective_modifier(),
         snapshot.header_step_params,
+        int(snapshot.start_column),
+        int(snapshot.columns),
     )
