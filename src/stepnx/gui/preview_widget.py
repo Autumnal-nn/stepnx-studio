@@ -18,6 +18,7 @@ from stepnx.preview.events import (
 )
 from stepnx.preview.geometry import PlayfieldGeometry
 from stepnx.preview.session import GameplaySession, Judgment
+from stepnx.preview.speed import native_base_velocity_pixels
 
 _FALLBACK_COLORS = {
     0x1: QColor("#df8b42"),
@@ -151,11 +152,8 @@ class GameplayPreviewWidget(QWidget):
 
     def _event_y(self, event: PreviewEvent) -> float:
         receptor_y = self._receptor_y()
-        current_position = self.stream.position_at(self._chart_time_ms)
-        distance = event.position - current_position
-        multiplier = self.command.speed * self.stream.speed_factor_at(
-            self._chart_time_ms
-        )
+        distance = self.stream.beat_distance_at(event, self._chart_time_ms)
+        multiplier = self.session.high_speed
         if self.command.random_velocity:
             seed = (
                 event.split_id * 1_000_003
@@ -164,8 +162,8 @@ class GameplayPreviewWidget(QWidget):
                 + event.lane
             )
             multiplier *= random.Random(seed).uniform(0.65, 1.35)
-        scroll_pitch = self._geometry().lane_spacing
-        pixels = distance * scroll_pitch * multiplier
+        base_velocity = native_base_velocity_pixels(self._geometry().note_size)
+        pixels = distance * base_velocity * multiplier
         if self.command.acceleration:
             pixels = math.copysign(abs(pixels) ** 1.08, pixels)
         elif self.command.deceleration:
@@ -192,27 +190,15 @@ class GameplayPreviewWidget(QWidget):
         timing = self.stream.timing
         if not timing or not self.stream.events:
             return ()
-        # position_at() intentionally clamps beyond the final timing segment.
-        # Without a time-domain end guard, that can make the last notes appear
-        # again indefinitely after playback has passed the chart.
-        if self._chart_time_ms > self.stream.duration_ms + 250.0:
-            return ()
-        # position_at() intentionally clamps beyond the final timing segment.
-        # Without a time-domain end guard, that can make the last notes appear
-        # again indefinitely after playback has passed the chart.
+        # The native position axis clamps after the route endpoint. Keep the
+        # explicit time-domain guard so the last notes cannot reappear forever.
         if self._chart_time_ms > self.stream.duration_ms + 250.0:
             return ()
         current_position = self.stream.position_at(self._chart_time_ms)
-        multiplier = max(
-            0.001,
-            abs(
-                self.command.speed
-                * self.stream.speed_factor_at(self._chart_time_ms)
-            ),
-        )
-        scroll_pitch = self._geometry().lane_spacing
+        multiplier = max(0.001, abs(self.session.high_speed))
+        base_velocity = native_base_velocity_pixels(self._geometry().note_size)
         visible_position = (self.height() + margin + abs(self._receptor_y())) / (
-            scroll_pitch * multiplier
+            base_velocity * multiplier
         )
         positions = (
             current_position - visible_position,
@@ -561,7 +547,7 @@ class GameplayPreviewWidget(QWidget):
         painter.drawText(
             QRectF(12, self.height() - 28, self.width() - 24, 20),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            f"{mode} · {self.command.speed:g}x · "
+            f"{mode} · {self.session.selected_speed:g}x · "
             f"{self._chart_time_ms / 1000:.3f}s · "
             f"{self.field_mode} · COMMAND {self.command.raw or '—'}",
         )
@@ -594,7 +580,7 @@ class GameplayPreviewWidget(QWidget):
         lines = (
             (
                 f"TIME {self._chart_time_ms:10.3f} ms   POS {position:9.3f}  "
-                f"SF {speed_factor:7.3f}"
+                f"BLOCK {speed_factor:7.3f}  HIGH {self.session.high_speed:7.3f}"
             ),
             f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms",
             (
@@ -644,7 +630,7 @@ class GameplayPreviewWidget(QWidget):
         elif Qt.Key.Key_1 <= key <= Qt.Key.Key_9:
             self.session.select_speed(key - Qt.Key.Key_0)
             self._refresh_tooltip()
-            self.statusChanged.emit(f"Speed {self.command.speed:g}x")
+            self.statusChanged.emit(f"Speed {self.session.selected_speed:g}x")
         elif key in _PAD_KEYS:
             self._press_global_pad(_PAD_KEYS[key])
         else:
