@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
+from math import trunc
 
 
 # PUMPPlayer.SpeedProc / LineBase / ArrowMaker / NoteMaker constants recovered
@@ -13,10 +14,43 @@ BASE_ARROW_Y = 608.0
 LINE_BASE_START_GAP_TIME = 8.5
 NOTE_RENDER_UNIT = 72.0
 LINE_BASE_VELOCITY = (BASE_ARROW_Y - LINE_BASE_START_Y) / LINE_BASE_START_GAP_TIME
+EARTHWORM_FAST_THRESHOLD = 333.3333435058594
+RANDOM_VELOCITY_LINE_INTERVAL = 48
 
 
 def _f32(value: float) -> float:
     return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+
+
+def _signed_remainder(value: int, divisor: int) -> int:
+    """C#/native signed remainder with truncation toward zero."""
+
+    quotient = trunc(int(value) / int(divisor))
+    return int(value) - quotient * int(divisor)
+
+
+def earthworm_user_speed(time_ms: float, bpm: float, beat_split: int) -> float:
+    """Port DrawStep's Earthworm _modeSpeedExt square-wave selection."""
+
+    current_ms = trunc(float(time_ms))
+    density = _f32(_f32(bpm) * float(int(beat_split)))
+    if density >= _f32(EARTHWORM_FAST_THRESHOLD):
+        phase = _signed_remainder(current_ms, 500)
+        return 3.0 if float(phase) <= 250.0 else 2.0
+    phase = _signed_remainder(current_ms, 360)
+    return 2.0 if float(phase) <= 180.0 else 1.0
+
+
+def random_velocity_triggers(line: int) -> bool:
+    """Return DrawStep's exact RandomVelocity line gate."""
+
+    return _signed_remainder(int(line), RANDOM_VELOCITY_LINE_INTERVAL) == 0
+
+
+def random_velocity_user_speed(random_value: int) -> float:
+    """Port DrawStep's signed %4 + 1 conversion after the native RNG call."""
+
+    return float(_signed_remainder(int(random_value), 4) + 1)
 
 
 def native_base_velocity_pixels(note_size: float) -> float:
