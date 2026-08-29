@@ -10,6 +10,8 @@ from stepnx.preview.events import (
 from stepnx.preview.geometry import PlayfieldGeometry
 from stepnx.preview.modifiers import (
     AccDecMode,
+    ComboDisplay,
+    DirectionMode,
     EffectiveModifier,
     SpeedMode,
     StepParam,
@@ -40,6 +42,8 @@ from stepnx.preview.snapshot import (
 
 __all__ = [
     "AccDecMode",
+    "ComboDisplay",
+    "DirectionMode",
     "EffectiveModifier",
     "GameplayCommand",
     "GameplaySession",
