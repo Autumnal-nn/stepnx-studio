@@ -38,6 +38,8 @@ def _two_note_stream(*, second_bank: int = 0, judge_by_note: bool = False):
     document = replace(document, splits=(replace(split, blocks=(block,)),))
     block = document.splits[0].blocks[0]
     for row in block.rows:
+        if not hasattr(row, "cells"):
+            continue
         for lane in range(len(row.cells)):
             document = SetNoteAt(row.stable_id, lane, b"\0\0\0\0").apply(document)
     row = document.splits[0].blocks[0].rows[0]
