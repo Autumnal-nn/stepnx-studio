@@ -152,10 +152,15 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             self.assertEqual(sorted(frame), list(range(5)))
 
         lane = 2
-        self.assertEqual(
-            prime2_snake_path_lane_position(lane, 1.0, 5, 123, start=1.0, interval=2.0),
-            float(lane),
+        self.assertEqual(frames[0], tuple(range(5)))
+        at_boundary = prime2_snake_path_lane_position(
+            lane, 1.0, 5, 123, start=1.0, interval=2.0
         )
+        just_above = prime2_snake_path_lane_position(
+            lane, 1.000001, 5, 123, start=1.0, interval=2.0
+        )
+        self.assertEqual(at_boundary, float(lane))
+        self.assertAlmostEqual(just_above, float(lane), places=5)
         halfway = prime2_snake_path_lane_position(
             lane, 2.0, 5, 123, start=1.0, interval=2.0
         )
@@ -206,22 +211,24 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             places=5,
         )
 
-    def test_legacy_vanish_and_appear_switch_at_screen_midline(self) -> None:
+    def test_legacy_vanish_and_appear_keep_continuous_fade(self) -> None:
         vanish = parse_gameplay_command("v")
         appear = parse_gameplay_command("p")
-        for y, vanish_expected, appear_expected in (
-            (300.0, 1.0, 0.0),
-            (239.0, 0.0, 1.0),
+        for distance, vanish_expected, appear_expected in (
+            (200.0, 1.0, 0.0),
+            (100.0, 0.5, 0.5),
+            (50.0, 0.25, 0.75),
+            (0.0, 0.0, 1.0),
         ):
-            self.assertEqual(
+            self.assertAlmostEqual(
                 vanish.note_opacity(
-                    3, screen_y=y, screen_midline=240.0, time_ms=0.0
+                    3, distance=distance, fade_distance=200.0, time_ms=0.0
                 ),
                 vanish_expected,
             )
-            self.assertEqual(
+            self.assertAlmostEqual(
                 appear.note_opacity(
-                    3, screen_y=y, screen_midline=240.0, time_ms=0.0
+                    3, distance=distance, fade_distance=200.0, time_ms=0.0
                 ),
                 appear_expected,
             )
@@ -488,8 +495,8 @@ class CommandRegistryTests(unittest.TestCase):
         self.assertEqual(
             command.note_opacity(
                 3,
-                screen_y=300.0,
-                screen_midline=240.0,
+                distance=100.0,
+                fade_distance=200.0,
                 time_ms=0.0,
             ),
             0.0,

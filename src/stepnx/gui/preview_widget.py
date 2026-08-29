@@ -382,10 +382,11 @@ class GameplayPreviewWidget(QWidget):
         _, local_y, _ = self._event_render_geometry(event)
         _, sy, _, ty = self._sequence_affine()
         screen_y = sy * local_y + ty
+        receptor_y = sy * self._receptor_y() + ty
         return self.command.note_opacity(
             int(event.visibility),
-            screen_y=screen_y,
-            screen_midline=float(self.height()) / 2.0,
+            distance=abs(screen_y - receptor_y),
+            fade_distance=max(1.0, float(self.height()) * 0.42),
             time_ms=self._chart_time_ms,
         )
 

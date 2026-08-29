@@ -354,7 +354,7 @@ Hidden -> 0
 Visible -> leave serialized value unchanged
 ```
 
-High bits, including `Effects.bZigZag = 0x10`, are preserved. StepNX performs the rewrite only on runtime event bytes, never on the canonical NX document. Appear/Vanish fade curves remain Animator/asset dependent, so the presentation is not claimed pixel-perfect.
+High bits, including `Effects.bZigZag = 0x10`, are preserved. StepNX performs the rewrite only on runtime event bytes, never on the canonical NX document. Legacy gameplay capture confirms that Appear/Vanish are continuous alpha fades rather than binary midpoint gates; StepNX restores the distance ramp while still treating the exact engine material/Animator curve as an approximation.
 
 ### Earthworm
 

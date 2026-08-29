@@ -83,52 +83,30 @@ class GameplayCommandTests(unittest.TestCase):
     def test_chart_visibility_composes_with_nonstep_vanish_and_flash(self) -> None:
         plain = parse_gameplay_command("")
         self.assertEqual(
-            plain.note_opacity(
-                0, screen_y=300, screen_midline=240, time_ms=0
-            ),
+            plain.note_opacity(0, distance=100, fade_distance=200, time_ms=0),
             0,
         )
         self.assertEqual(
-            plain.note_opacity(
-                1, screen_y=300, screen_midline=240, time_ms=0
-            ),
-            0,
+            plain.note_opacity(1, distance=50, fade_distance=200, time_ms=0),
+            0.75,
         )
         self.assertEqual(
-            plain.note_opacity(
-                1, screen_y=200, screen_midline=240, time_ms=0
-            ),
-            1,
-        )
-        self.assertEqual(
-            plain.note_opacity(
-                2, screen_y=300, screen_midline=240, time_ms=0
-            ),
-            1,
-        )
-        self.assertEqual(
-            plain.note_opacity(
-                2, screen_y=200, screen_midline=240, time_ms=0
-            ),
-            0,
+            plain.note_opacity(2, distance=50, fade_distance=200, time_ms=0),
+            0.25,
         )
         self.assertEqual(
             parse_gameplay_command("n").note_opacity(
-                3, screen_y=300, screen_midline=240, time_ms=0
+                3, distance=100, fade_distance=200, time_ms=0
             ),
             0,
         )
         flashing = parse_gameplay_command("w")
         self.assertEqual(
-            flashing.note_opacity(
-                3, screen_y=300, screen_midline=240, time_ms=50
-            ),
+            flashing.note_opacity(3, distance=100, fade_distance=200, time_ms=50),
             1,
         )
         self.assertEqual(
-            flashing.note_opacity(
-                3, screen_y=300, screen_midline=240, time_ms=150
-            ),
+            flashing.note_opacity(3, distance=100, fade_distance=200, time_ms=150),
             0,
         )
 

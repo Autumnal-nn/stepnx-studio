@@ -289,9 +289,11 @@ def legacy_acc_dec_distance(
 def prime2_zigzag_keyframes(
     columns: int, seed: int
 ) -> tuple[tuple[int, ...], ...]:
-    """Build Prime 1's nine deterministic ZigZag permutation keyframes.
+    """Build the nine deterministic legacy Snake Path keyframes.
 
-    The native seed also includes an engine-owned per-player contribution that
+    Keyframe zero is identity so phase zero joins the authored lane continuously
+    at Div 222. Keyframes one through eight use the recovered permutation
+    generator. The native seed also includes an engine-owned per-player contribution that
     is not available to the standalone preview. StepNX supplies the resolved
     route seed, while preserving the recovered 32-bit LCG and Fisher-Yates
     selection exactly. Geometry and interpolation are therefore native; only
@@ -302,8 +304,11 @@ def prime2_zigzag_keyframes(
     if count <= 0:
         return ()
     state = int(seed) & 0xFFFFFFFF
-    frames: list[tuple[int, ...]] = []
-    for _ in range(PRIME2_ZIGZAG_KEYFRAME_COUNT):
+    # Phase zero is the authored lane map. The previous implementation
+    # randomized frame zero as well, which caused an observable snap when the
+    # path crossed Div 222 into its straight zone.
+    frames: list[tuple[int, ...]] = [tuple(range(count))]
+    for _ in range(1, PRIME2_ZIGZAG_KEYFRAME_COUNT):
         candidates = list(range(count))
         output = [0] * count
         for remaining in range(count, 0, -1):

@@ -369,9 +369,21 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 ),),
             )
             current_position = widget.stream.position_at(widget.chart_time_ms)
+            seed = widget.stream.route.seed or 0
+            candidates = [
+                (lane, prime2_snake_path_lane_position(
+                    lane, 4.0, widget.columns, seed, start=3.0, interval=2.0
+                ))
+                for lane in range(widget.columns)
+            ]
+            moving_lane, expected_lane = next(
+                (lane, position)
+                for lane, position in candidates
+                if abs(position - float(lane)) > 1e-9
+            )
             plain = replace(
                 base,
-                lane=0,
+                lane=moving_lane,
                 raw=b"\x03\x03\x00\x00",
                 native_block_index=-1,
                 position=current_position + 4.0,
@@ -381,17 +393,9 @@ class QtGameplayPreviewTests(unittest.TestCase):
             self.assertFalse(plain.snake_path)
             self.assertTrue(snake.snake_path)
             self.assertEqual(widget._event_x_offset(plain), 0.0)
-
-            expected_lane = prime2_snake_path_lane_position(
-                0,
-                4.0,
-                widget.columns,
-                widget.stream.route.seed or 0,
-                start=3.0,
-                interval=2.0,
-            )
             expected = (
-                widget._lane_position_x(expected_lane) - widget.lane_center(0)
+                widget._lane_position_x(expected_lane)
+                - widget.lane_center(moving_lane)
             )
             self.assertNotEqual(expected, 0.0)
             self.assertAlmostEqual(widget._event_x_offset(snake), expected)
