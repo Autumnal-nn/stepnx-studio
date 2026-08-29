@@ -8,6 +8,12 @@ from stepnx.preview.events import (
     build_event_stream,
 )
 from stepnx.preview.geometry import PlayfieldGeometry
+from stepnx.preview.judgment import (
+    JudgeLineSummary,
+    JudgeNoteDecision,
+    judge_note_decision,
+    summarize_judge_line,
+)
 from stepnx.preview.modifiers import (
     AccDecMode,
     ComboDisplay,
@@ -60,6 +66,8 @@ __all__ = [
     "GameplayCommand",
     "GameplaySession",
     "GameplayStats",
+    "JudgeLineSummary",
+    "JudgeNoteDecision",
     "Judgment",
     "JudgmentWindows",
     "LINE_BASE_START_GAP_TIME",
@@ -90,7 +98,9 @@ __all__ = [
     "apply_step_params",
     "build_event_stream",
     "create_preview_snapshot",
+    "judge_note_decision",
     "native_base_velocity_pixels",
     "parse_gameplay_command",
     "resolve_route",
+    "summarize_judge_line",
 ]
