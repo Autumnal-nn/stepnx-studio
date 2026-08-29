@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import pi, pow, sin
+from math import pow, sin
 
 from stepnx.preview.modifiers import AccDecMode, VisibilityMode
 from stepnx.preview.speed import (
@@ -18,6 +18,7 @@ LINE_BASE_WAVE_RATE = 2.0
 LINE_BASE_ACC_POW = 1.5
 LINE_BASE_ACC_SCALE = 1.0
 LINE_BASE_ACC_OFFSET = -200.0
+LINE_BASE_PI = 3.1415927410125732
 
 
 def _clamp01(value: float) -> float:
@@ -116,7 +117,9 @@ def native_snake_x_offset(
     if y_max <= y_min or y >= y_max:
         return 0.0
     t = _clamp01((float(y) - float(y_min)) / (float(y_max) - float(y_min)))
-    native_x = sin(t * pi * float(wave_rate)) * float(amplitude)
+    native_x = (
+        sin(t * LINE_BASE_PI * float(wave_rate)) * float(amplitude)
+    )
     return native_x * (float(note_size) / NOTE_RENDER_UNIT)
 
 
