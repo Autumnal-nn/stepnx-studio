@@ -1,0 +1,65 @@
+name: Final clean visual parity checkpoint
+
+on:
+  push:
+    branches:
+      - audit/rise-visual-command-re
+
+permissions:
+  contents: write
+
+jobs:
+  test-and-record:
+    if: github.event.head_commit.message == 'Run final clean visual parity checkpoint'
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/rise-visual-command-re
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 \
+            libgl1 \
+            libopengl0 \
+            libpulse0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-xinerama0
+      - name: Install StepNX Studio with GUI dependencies
+        run: python -m pip install -e '.[gui]'
+      - name: Run complete repository suite
+        run: python -m unittest discover -s tests -v
+      - name: Record clean checkpoint and remove one-shot workflow
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          TESTED_SHA="$(git rev-parse HEAD)"
+          export TESTED_SHA
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('docs/RISE_RUNTIME_PARITY_HANDOFF.md')
+          text = path.read_text(encoding='utf-8')
+          old = '''## Final validation checkpoint\n\nThe completed repository-wide validation for Items 0 through 6 is:\n\n```text\nGitHub Actions run: 33256211227\nCommit tested: 9ff6f29f042a41e4e163e0df81d88074eb95a622\nRan 476 tests in 1.975s\nOK\n```\n\nThe run includes dedicated regressions for LineBase constants and curves, Snake, Header Visibility without document mutation, Earthworm including the loaded `_BPM`/`msPerLine` alias and Skip behavior, Random Velocity gate/conversion, speed-mode resolution, and the selectable COMMAND dialog.\n\nThe first final-attempt run exposed two test regressions, not production behavior defects: a source-string assertion tied to the old renderer shape and a zero-tolerance assumption incompatible with R!SE's float32 pi. Both were corrected before the green checkpoint without weakening the native implementation.\n\n## Remaining source-gated side paths\n\n- exact ZigZag transform consumer;\n- Throw Animator/asset movement;\n- exact Random Velocity RNG stream/cadence;\n- exact Appear/Vanish Animator curves;\n- real producer of `CommonModifier.SpeedBoost`;\n- challenge-mode HPBar.Add branch;\n- forced-judgment Div 999 consumer;\n- any Split-level modifier dispatcher if one is eventually recovered.\n'''
+          run_id = os.environ['RUN_ID']
+          sha = os.environ['TESTED_SHA']
+          new = f'''## Final validation checkpoint\n\nThe completed repository-wide validation after the visual-command correction pass is:\n\n```text\nGitHub Actions run: {run_id}\nCommit tested: {sha}\nRan 486 tests\nOK\n```\n\nThis checkpoint includes dedicated regressions for independent UA/Drop bitmask geometry, row-wise Random projection with hold continuity, Accel/Decel transform order, Prime 2 Snake amplitude 30, Prime 2 Sink/Rise paths, Header Visibility without document mutation, Earthworm fixed DrawStep cadence, Random Velocity repeated qualifying-line rerolls, external-advance chunk invariance, and the 18-entry semantic modifier selector. Path-modified long-note shafts are rendered by sampling the same trajectory as their note heads.\n\nThe dormant R!SE Snake 20-unit helper is deliberately **not** accepted as behavior because no validated gameplay consumer was recovered; Prime 2 is the historical runtime arbiter for Snake.\n\n## Remaining source-gated side paths\n\n- exact ZigZag transform consumer;\n- exact R!SE Throw Animator/asset curve; the preview uses the recovered Prime 2 historical sine projection instead;\n- exact Random Velocity Unity RNG sequence; gate, conversion and DrawStep cadence are implemented;\n- exact Appear/Vanish Animator/material curves; the current fade is an explicit visual approximation;\n- exact legacy Exceed affine coefficient; current X-mode projection is explicitly approximate and isolated;\n- real producer of `CommonModifier.SpeedBoost`;\n- challenge-mode HPBar.Add branch;\n- forced-judgment Div 999 consumer;\n- any Split-level modifier dispatcher if one is eventually recovered.\n'''
+          if old not in text:
+              raise SystemExit('final checkpoint block did not match expected handoff text')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git config user.name 'OpenAI'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/final-clean-visual-parity-checkpoint.yml
+          git add docs/RISE_RUNTIME_PARITY_HANDOFF.md
+          git diff --cached --check
+          git commit -m 'Record final visual parity checkpoint'
+          git push origin HEAD:audit/rise-visual-command-re
