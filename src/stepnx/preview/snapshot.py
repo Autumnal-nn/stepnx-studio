@@ -37,8 +37,8 @@ class PreviewSplit:
     random_at_trigger: bool
     force_select: bool
     group: int
-    step_params: tuple[StepParam, ...]
     blocks: tuple[PreviewBlock, ...]
+    step_params: tuple[StepParam, ...] = ()
 
     def block(self, stable_id: int) -> PreviewBlock:
         for block in self.blocks:
@@ -148,8 +148,8 @@ def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
                 bool(raw & 0x40),
                 bool(raw & 0x20),
                 raw & 0x1F,
-                _step_params(split.metadata),
                 tuple(blocks),
+                _step_params(split.metadata),
             )
         )
     return PreviewSnapshot(
