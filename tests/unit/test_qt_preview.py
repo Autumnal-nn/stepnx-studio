@@ -20,8 +20,10 @@ try:
     from stepnx.preview import (
         COMMAND_FLAGS,
         RoutePolicy,
+        SequenceZoneTransform,
         build_event_stream,
         create_preview_snapshot,
+        parse_gameplay_command,
         resolve_route,
     )
 except ImportError as exc:
@@ -39,7 +41,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
 
-    def _widget(self) -> GameplayPreviewWidget:
+    def _widget(self, command="") -> GameplayPreviewWidget:
         document = parse_bytes(
             make_normal_nx20(), source="NM.NX", row_storage="compact"
         )
@@ -56,6 +58,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
             build_event_stream(snapshot, route),
             columns=snapshot.columns,
             start_column=snapshot.start_column,
+            command=parse_gameplay_command(command),
         )
 
     def test_offscreen_renderer_is_read_only_and_tracks_playback(self) -> None:
@@ -128,7 +131,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_initialization_dialog_selects_chart_speed_and_command_flags(self) -> None:
+    def test_initialization_dialog_uses_semantic_modifier_labels(self) -> None:
         dialog = GameplayInitializationDialog(
             (
                 PreviewChartChoice(2, "S17.NX"),
@@ -138,13 +141,14 @@ class QtGameplayPreviewTests(unittest.TestCase):
         )
         try:
             self.assertEqual(dialog.chart_combo.currentText(), "D18.NX")
-            self.assertEqual(
-                dialog.command_list.count(),
-                len(COMMAND_FLAGS),
-            )
+            self.assertEqual(dialog.command_list.count(), len(COMMAND_FLAGS))
             self.assertEqual(
                 tuple(dialog.command_items),
                 tuple(flag.code for flag in COMMAND_FLAGS),
+            )
+            self.assertEqual(
+                tuple(dialog.command_list.item(i).text() for i in range(dialog.command_list.count())),
+                tuple(flag.label for flag in COMMAND_FLAGS),
             )
 
             dialog.chart_combo.setCurrentText("S17.NX")
@@ -158,7 +162,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_command_selector_enforces_native_enum_exclusivity(self) -> None:
+    def test_command_selector_enforces_only_true_exclusivity(self) -> None:
         dialog = GameplayInitializationDialog((PreviewChartChoice(0, "S17.NX"),))
         try:
             dialog.command_items["d"].setCheckState(Qt.CheckState.Checked)
@@ -182,9 +186,44 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 dialog.command_items["e"].checkState(),
                 Qt.CheckState.Checked,
             )
-            self.assertEqual(dialog.options().command, "ae")
+
+            # UA and Drop are independent bits and must compose.
+            dialog.command_items["u"].setCheckState(Qt.CheckState.Checked)
+            dialog.command_items["!"].setCheckState(Qt.CheckState.Checked)
+            self.assertEqual(
+                dialog.command_items["u"].checkState(), Qt.CheckState.Checked
+            )
+            self.assertEqual(
+                dialog.command_items["!"].checkState(), Qt.CheckState.Checked
+            )
+            self.assertEqual(dialog.options().command, "u!ae")
         finally:
             dialog.close()
+
+    def test_sequence_transform_affects_playfield_and_input_not_lane_map(self) -> None:
+        ua = self._widget("u")
+        drop = self._widget("!")
+        both = self._widget("u!")
+        try:
+            for widget in (ua, drop, both):
+                widget.resize(640, 480)
+
+            self.assertEqual(
+                ua._sequence_transform(), SequenceZoneTransform.UNDER_ATTACK
+            )
+            self.assertEqual(ua._sequence_affine(), (-1.0, -1.0, 640.0, 480.0))
+            self.assertEqual(drop._sequence_affine(), (1.0, -1.0, 0.0, 480.0))
+            self.assertEqual(both._sequence_affine(), (-1.0, 1.0, 640.0, 0.0))
+
+            # UA's X reflection changes which source lane a physical screen lane
+            # addresses. Drop never changes horizontal input mapping.
+            self.assertEqual(ua._screen_lane_to_source(0), 4)
+            self.assertEqual(drop._screen_lane_to_source(0), 0)
+            self.assertEqual(both._screen_lane_to_source(0), 4)
+        finally:
+            ua.close()
+            drop.close()
+            both.close()
 
     def test_lane_geometry_centres_assets_on_native_sequence_zone_anchors(self) -> None:
         widget = self._widget()
