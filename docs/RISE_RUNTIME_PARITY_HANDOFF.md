@@ -6,7 +6,7 @@ This file is the continuity anchor for continuing the StepNX Studio audit agains
 
 Primary audit branch: `audit/rise-runtime-parity`
 
-The current implementation checkpoint was developed on an isolated work branch and should only be fast-forwarded into the primary audit branch after the full suite is green and the temporary CI workflow is removed.
+The visual-modifier implementation was developed on `audit/rise-runtime-parity-item45-work`. Promote it into the primary audit branch only after the single final repository-wide suite is green and the temporary CI workflow has been removed.
 
 ## Primary-source policy
 
@@ -49,7 +49,7 @@ if rawSpeed < 0:
     Speed = -rawSpeed
 ```
 
-`PUMPPlayer.DrawStep()` RVA `0x748B50` tests only bit `0x01` for Smooth. Smooth interpolation now lives in `NativeTimingProjection.block_speed_at()` and uses the previous loaded Div Speed, previous Div end and current Div end. Skip-only `2` does not interpolate.
+`PUMPPlayer.DrawStep()` RVA `0x748B50` tests only bit `0x01` for Smooth. Smooth interpolation lives in `NativeTimingProjection.block_speed_at()` and uses the previous loaded Div Speed, previous Div end and current Div end. Skip-only `2` does not interpolate.
 
 ## Completed Item 1 — ApplyStepParamToMod / EffectiveModifier
 
@@ -132,7 +132,7 @@ Primary anchors:
 - `LineBase.RePos` RVA `0x638CA0`
 - `LineBase.CreateSplits` RVA `0x639720`
 
-Native speed state is now explicit:
+Native speed state is explicit:
 
 ```text
 _modeSpeedExt = selected/user speed
@@ -143,16 +143,16 @@ pHighSpeed    = displayed speed
 
 `SpeedProc` moves `pHighSpeed` toward `_modeSpeed` by `0.05` each `1/60 s` tick. Block changes and Smooth updates remain on the DrawStep path rather than being confused with user speed easing.
 
-Negative serialized Speed no longer creates a fake preview freeze. The loader uses its sign only while constructing Gap and then normalizes it positive.
+Negative serialized Speed does not create a preview freeze. The loader uses its sign only while constructing Gap and then normalizes it positive.
 
 Recovered LineBase geometry:
 
 ```text
-LineBase start Y       = 50
-TargetArrow Y          = 608
-_startGapTime          = 8.5
-_baseVelocity          = (608 - 50) / 8.5
-                       = 65.6470588
+LineBase start Y        = 50
+TargetArrow Y           = 608
+_startGapTime           = 8.5
+_baseVelocity           = (608 - 50) / 8.5
+                        = 65.6470588
 modern note render unit = 72
 ```
 
@@ -175,7 +175,7 @@ Recovered note routing:
 - JudgeLine resolves one bank at a time;
 - JudgeByNote resolves eligible cells independently.
 
-Long-note distinction that invalidated old preview tests:
+Long-note distinction:
 
 ```text
 47 / 4B / 4F = long without bNoRush = rush/roll JudgeNote path
@@ -240,9 +240,7 @@ else:
     grade = min(grade, 3)
 ```
 
-`NativeJudgeTiming` replaces the old fixed symmetric preview table. Header 65 now changes actual GameplaySession timing.
-
-With default `PerfectFrame=2.5`, `Interval=2.5`, `Delay=2.5 frames`, the late side gets one additional Delay band before grade evaluation, exactly as the native Step path does.
+`NativeJudgeTiming` replaces the old fixed symmetric preview table. Header 65 changes actual GameplaySession timing.
 
 ## Completed Item 5 — Native score and gauge
 
@@ -265,32 +263,15 @@ Miss     -200
 
 Ordinary-note Miss uses the special `-300` PostProcess path.
 
-Perfect/Great combo bonus:
+Perfect/Great receive +1000 once the per-bank combo after increment reaches 51. Chord counts of 3 use x1.5 and 4+ use x2, truncating before the JudgeUnit AltSkin multiplication. AddCount floors accumulated score at zero.
 
-```text
-if per-bank combo after increment >= 51:
-    score += 1000
-```
-
-Chord multiplier, using total JudgeUnit count:
-
-```text
-1-2 notes: x1
-3 notes:   x1.5, truncate
-4+ notes:  x2
-```
-
-Then the JudgeUnit AltSkin factor multiplies the result and the runtime truncates again. AddCount floors accumulated score at zero after negative additions.
-
-Combo behavior is now native:
+Combo behavior:
 
 ```text
 Perfect / Great -> increment
 Good            -> preserve
 Bad / Miss      -> clear
 ```
-
-Per-bank combo state is retained internally because the score bonus uses the bank combo.
 
 ### HPBar / gauge
 
@@ -302,38 +283,7 @@ Limit   = 1000 + 3 * min(Level, 50)^2
 DispMax = 1000
 ```
 
-Header overrides are direct runtime writes after setup:
-
-```text
-80 -> Limit
-81 -> DispMax
-82 -> Life
-```
-
-Recovered factor presets:
-
-```text
-Single:     Min 200, Max 1000, MissFactor -700, initial 500
-HalfDouble: Min   0, Max  800, MissFactor -700, initial 100
-Double:     Min 100, Max  900, MissFactor -700, initial 300
-```
-
-JudgeUnit gauge changes:
-
-```text
-Perfect: delta = trunc(12 * factor / 1000); factor += 20
-Great:   delta = trunc(10 * factor / 1000); factor += 16
-Good:    delta = 0
-Bad:     delta = -50
-Miss:
-    lifeBase = min(Life, 1000)
-    delta = trunc((-500 * lifeBase) / 2000) - 20
-    factor += MissFactor
-```
-
-Factor is clamped to its mode-specific Min/Max. Normal `HPBar.Add` clamps Life to `[0, Limit]`.
-
-A Miss carrying NoMiss bypasses the normal PostProcess/gauge path, so it does not alter counters, score or life.
+Header 80/81/82 override Limit, DispMax and Life after setup. Mode-specific factor presets and native Perfect/Great/Good/Bad/Miss deltas are implemented. A Miss carrying NoMiss bypasses the normal PostProcess/gauge path.
 
 Current preview field-width bridge:
 
@@ -342,38 +292,129 @@ Current preview field-width bridge:
 - 10 columns -> Double
 - unusual widths retain the HalfDouble fallback rather than inventing a new HPBar type.
 
-The separate challenge-game HPBar.Add branch is not modeled yet.
+The separate challenge-game HPBar.Add branch remains source-gated.
+
+## Completed Item 6 — visual modifier pass
+
+### Accel / Decel
+
+`LineBase.GetAccDecYOffset` RVA `0x638B20` and constructor RVA `0x63B280` establish:
+
+```text
+_yMin     = 200
+_yMax     = 550
+_accPow   = 1.5
+_accScale = 1
+scale     = -200
+```
+
+For normalized `t = clamp((Y-yMin)/(yMax-yMin),0,1)`:
+
+```text
+Accel: (1 - pow(t, 1.5)) * -200
+Decel: pow(1 - t, 1.5)   * -200
+```
+
+The previous synthetic pixel powers were removed. `TryGetMaxVisibleSplitLocalY` can substitute a grouped child maximum before this scalar formula; flattened preview events cannot reproduce that grouping perfectly and the limitation is explicit.
+
+### Snake
+
+`LineBase.PlaySnakeAnim` RVA `0x6390A0` uses the same visible-Y range plus:
+
+```text
+xAmplitude = 20
+waveRate   = 2
+pi         = 3.1415927410125732f
+xOffset    = sin(t * pi * waveRate) * xAmplitude
+```
+
+Header `bSnake` now drives this path. Earthworm no longer masquerades as horizontal sine motion.
+
+### Header Visibility
+
+`PlayBase.InitData` applies Header Visibility to loaded note state by replacing only the low `VisualEffect` nibble:
+
+```text
+Vanish -> 2
+Appear -> 1
+Hidden -> 0
+Visible -> leave serialized value unchanged
+```
+
+High bits, including `Effects.bZigZag = 0x10`, are preserved. StepNX performs the rewrite only on runtime event bytes, never on the canonical NX document. Appear/Vanish fade curves remain Animator/asset dependent, so the presentation is not claimed pixel-perfect.
+
+### Earthworm
+
+`PUMPPlayer.DrawStep` RVA `0x748B50` reads:
+
+- current time from inherited `Step.msCurTime` at +0x24;
+- `Div.nBeatSplit` at +0x24;
+- the Div field at +0x14.
+
+`Div_h_t.msPerLine` aliases `_BPM` at +0x14. StepLoader therefore overwrites the serialized BPM there before DrawStep runs. Earthworm compares:
+
+```text
+nBeatSplit * loaded _BPM/msPerLine
+```
+
+against `333.3333435`. Normal Divs therefore compare milliseconds per beat; Skip loads the value as zero.
+
+The two square waves are:
+
+```text
+>= 333.33334: msCurTime % 500 <= 250 -> 3x, else 2x
+<  333.33334: msCurTime % 360 <= 180 -> 2x, else 1x
+```
+
+These values update `_modeSpeedExt`, then `_modeSpeed = _modeSpeedExt * _blockSpeed`, then non-Smooth display changes pass through SpeedProc.
+
+### Random Velocity
+
+DrawStep proves:
+
+```text
+Line % 48 == 0
+native RNG result % 4 + 1
+```
+
+before writing `_modeSpeedExt`. StepNX uses the exact line gate and signed modulo conversion. The exact Unity RNG stream and native repeated-per-frame rerolls while a qualifying line remains current were not recovered, so the preview uses one deterministic reroll on line entry and marks Random Velocity approximate for that reason.
+
+### COMMAND launch selector
+
+The gameplay initialization dialog no longer accepts arbitrary free text. It exposes the 13 known auxiliary codes as checkable entries:
+
+```text
+V N W F M R U J D A X S E
+```
+
+Speed remains a separate 1x..9x selector. D/A and S/E are mutually exclusive in the UI because each pair targets one enum-like runtime mode. Legacy string parsing remains for tests and non-UI compatibility.
+
+### Deliberately unresolved visual state
+
+Do not invent transforms for:
+
+- ZigZag: `Effects.bZigZag=0x10`, Header `bZigZag`, and Div params 221/222 are known, but a sufficiently strong direct gameplay consumer has not been recovered;
+- Throw: Flat/Sink/Rise is known and `LineBase.PlayThrowAnim` exists, but movement depends on Animator/assets;
+- exact Appear/Vanish Animator fade curves;
+- exact Random Velocity Unity RNG/cadence.
 
 ## Validation checkpoint
 
-After integrating Items 4 and 5 and correcting legacy hold fixtures that used rush bytes:
+The last completed repository-wide checkpoint before Item 6 was:
 
 ```text
 Ran 464 tests in 2.285s
 OK
 ```
 
-The full suite includes Qt offscreen tests, previous Smooth/Skip regressions, EffectiveModifier coverage, Speed/Gap/base-velocity tests, JudgeLine/JudgeNote/JudgeUnit tests, native timing boundaries, score formula tests and HPBar dynamics.
+Item 6 adds dedicated regressions for LineBase constants and curves, Snake, Header Visibility without document mutation, Earthworm including the loaded `_BPM` alias and Skip behavior, Random Velocity gate/conversion, speed-mode resolution, and the selectable COMMAND dialog. The work branch is intentionally awaiting one final full GitHub Actions run before promotion.
 
-## Next audit item — visual modifiers
+## Remaining source-gated side paths
 
-Proceed in this order unless new source evidence suggests stronger coupling:
-
-1. Accel/Decel
-2. Visibility
-3. Snake/ZigZag
-4. Earthworm
-5. Random Velocity
-6. remaining Throw/Freedom/Flash visual behavior
-
-Known anchors already available:
-
-- `LineBase.GetAccDecYOffset` RVA `0x638B20`
-- `LineBase.RePos` RVA `0x638CA0`
-- LineBase constructor defaults include `_accPow=1.5`, `_accScale=1`, `_yMin=200`, `_yMax=550`, `xAmplitude=20`, `waveRate=2`.
-
-Keep these open side-paths source-gated:
-
+- exact ZigZag transform consumer;
+- Throw Animator/asset movement;
+- exact Random Velocity RNG stream/cadence;
+- exact Appear/Vanish Animator curves;
 - real producer of `CommonModifier.SpeedBoost`;
 - challenge-mode HPBar.Add branch;
 - forced-judgment Div 999 consumer;
