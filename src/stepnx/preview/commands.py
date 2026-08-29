@@ -84,15 +84,20 @@ class GameplayCommand:
 
     @property
     def approximate_effects(self) -> tuple[str, ...]:
-        """Return effects whose remaining presentation is not source-exact."""
+        """Return compatibility codes for effects still not source-exact.
+
+        The launch UI is semantic and displays full names. This compact status
+        tuple deliberately retains the older debug/API contract used by tests
+        and external preview tooling.
+        """
 
         enabled = (
-            ("Vanish", self.vanish),
-            ("Appear", self.appear),
-            ("Random", self.randomize),
-            ("Exceed", self.exceed_mode),
+            ("V", self.vanish),
+            ("P", self.appear),
+            ("R", self.randomize),
+            ("X", self.exceed_mode),
             # R!SE trigger/range is exact, but its RNG stream/cadence is not yet exact.
-            ("Random Velocity", self.random_velocity),
+            ("S", self.random_velocity),
         )
         return tuple(flag for flag, active in enabled if active)
 
