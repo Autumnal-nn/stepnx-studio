@@ -1,0 +1,97 @@
+name: Refresh visual parity handoff
+
+on:
+  push:
+    branches:
+      - audit/rise-visual-command-re
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.event.head_commit.message == 'Install final handoff refresh workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/rise-visual-command-re
+      - name: Refresh audit and handoff facts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'expected source fragment not found in {path}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          audit = 'docs/RISE_RUNTIME_PARITY_AUDIT.md'
+          replace_once(
+              audit,
+              '''| RV-003 | Snake | FIXED scalar path | `LineBase.PlaySnakeAnim()` uses the same visible-Y normalization, native float pi, `waveRate=2`, `xAmplitude=20`, and resets above `_yMax`. | Header `bSnake` now drives the recovered sine path. The old Earthworm-as-horizontal-sine behavior was removed. Grouped-child max-Y aggregation remains flattened. |''',
+              '''| RV-003 | Snake | OPEN in R!SE / FIXED historical projection | The current R!SE image preserves Snake state and a 20-unit LineBase helper, but this audit has no validated gameplay consumer making that dormant path authoritative. Prime 2 `exec` proves the historical runtime path `sin(pi*phase) * 60 * 0.5`, i.e. amplitude 30. | StepNX deliberately ignores the dormant R!SE 20-unit implementation and uses the Prime 2 30-unit path for Snake visualization, including Header Snake state. Path-modified long shafts are sampled along the same trajectory. |''',
+          )
+          replace_once(
+              audit,
+              '''| RV-004 | Earthworm | FIXED | `PUMPPlayer.DrawStep()` reads `Step.msCurTime`, multiplies `Div.nBeatSplit` by the loaded offset-0x14 `_BPM` slot, which `StepLoader` has overwritten with `msPerLine`, then selects 500 ms 3x/2x or 360 ms 2x/1x square waves around the 333.33334 threshold. Skip loads the slot as zero. | Earthworm is a SpeedMode that updates `_modeSpeedExt` and then follows `_modeSpeed`/`SpeedProc`; it no longer moves notes horizontally. |''',
+              '''| RV-004 | Earthworm | FIXED | `PUMPPlayer.DrawStep()` reads `Step.msCurTime`, multiplies `Div.nBeatSplit` by the loaded offset-0x14 `_BPM` slot, which `StepLoader` has overwritten with `msPerLine`, then selects 500 ms 3x/2x or 360 ms 2x/1x square waves around the 333.33334 threshold. Skip loads the slot as zero. | Earthworm is evaluated on an internal 1/60 s DrawStep cadence, independent of UI `advance()` chunk size, updates `_modeSpeedExt`, and then follows `_modeSpeed`/`SpeedProc`; it no longer moves notes horizontally. |''',
+          )
+          replace_once(
+              audit,
+              '''| RV-005 | Random Velocity | APPROXIMATION | DrawStep gate is exact `Line % 48 == 0`; native RNG result is converted with signed `% 4 + 1` before updating `_modeSpeedExt`. | Gate and conversion are exact. Studio uses one deterministic reroll on qualifying-line entry because the Unity RNG stream and native repeated-per-frame reroll cadence have not been recovered. |''',
+              '''| RV-005 | Random Velocity | APPROXIMATION only for RNG stream | DrawStep gate is exact `Line % 48 == 0`; native RNG result is converted with signed `% 4 + 1` before updating `_modeSpeedExt`, and DrawStep rerolls on each update while the qualifying line remains current. | Gate, 1/60 s cadence, repeated qualifying-line reroll, and `%4+1` conversion are implemented. Python's deterministic RNG substitutes for the unrecovered Unity RNG sequence, which is the remaining approximation. |''',
+          )
+          replace_once(
+              audit,
+              '''| RV-008 | Throw | OPEN | Flat/Sink/Rise state and `LineBase.PlayThrowAnim()` are recovered, but movement is Animator/asset driven. | No synthetic transform is introduced. |''',
+              '''| RV-008 | Throw | FIXED historical compatibility projection | R!SE exposes Flat/Sink/Rise and `LineBase.PlayThrowAnim()` but delegates movement to Animator/assets. Prime 2 provides a reproducible historical sine path: span 453, amplitude 96, with Rise reversing the sign. | Preview uses the Prime 2 path as an explicit compatibility projection for Sink/Rise. Path-modified long shafts follow the sampled curve. The unidentified Prime 2 alternate 300-unit producer is not enabled. |''',
+          )
+          replace_once(
+              audit,
+              '''| RE-006 | Gameplay COMMAND launch UI | FIXED | The supported auxiliary command set is finite and already parsed as named flags; launch speed is a separate runtime control. | Free-text COMMAND entry was replaced with 13 checkable codes. D/A and S/E are mutually exclusive in the selector; legacy string parsing remains only for compatibility/non-UI callers. |''',
+              '''| RE-006 | Gameplay COMMAND launch UI | FIXED | The supported auxiliary command set is finite and already parsed as named flags; launch speed is a separate runtime control. | Free-text COMMAND entry was replaced with 18 semantic checkable modifiers. Acceleration/Deceleration and Random Velocity/Earthworm are mutually exclusive in the selector; legacy character parsing remains only for compatibility/non-UI callers. |''',
+          )
+          replace_once(
+              audit,
+              '''3. exact Random Velocity Unity RNG stream and qualifying-line reroll cadence;\n4. exact Animator curves for Appear/Vanish presentation;''',
+              '''3. exact Random Velocity Unity RNG stream; cadence and repeated DrawStep rerolls are now implemented;\n4. exact Animator/material curves for Appear/Vanish presentation;''',
+          )
+
+          handoff = 'docs/RISE_RUNTIME_PARITY_HANDOFF.md'
+          replace_once(
+              handoff,
+              '''### Snake\n\n`LineBase.PlaySnakeAnim` RVA `0x6390A0` uses the same visible-Y range plus:\n\n```text\nxAmplitude = 20\nwaveRate   = 2\npi         = 3.1415927410125732f\nxOffset    = sin(t * pi * waveRate) * xAmplitude\n```\n\nHeader `bSnake` now drives this path. Earthworm no longer masquerades as horizontal sine motion.\n''',
+              '''### Snake\n\nThe current R!SE image preserves Snake state plus a 20-unit `LineBase` helper, but no validated gameplay consumer for that state was recovered. Per the audit policy, that dormant implementation is **not** treated as preview behavior.\n\nPrime 2 is the historical runtime arbiter. Its rendering path proves:\n\n```text\nxOffset = sin(pi * phase) * 60 * 0.5\n        = sin(pi * phase) * 30\n```\n\nStepNX therefore uses the Prime 2 30-unit path for Snake visualization, including loaded Header Snake state. Long-note shafts are sampled along the path instead of remaining straight endpoint rectangles. Earthworm remains a separate speed mode.\n''',
+          )
+          replace_once(
+              handoff,
+              '''These values update `_modeSpeedExt`, then `_modeSpeed = _modeSpeedExt * _blockSpeed`, then non-Smooth display changes pass through SpeedProc.\n''',
+              '''These values update `_modeSpeedExt`, then `_modeSpeed = _modeSpeedExt * _blockSpeed`, then non-Smooth display changes pass through SpeedProc. StepNX evaluates this on the native 1/60 s DrawStep cadence, independent of the caller's `advance()` chunk size.\n''',
+          )
+          replace_once(
+              handoff,
+              '''before writing `_modeSpeedExt`. StepNX uses the exact line gate and signed modulo conversion. The exact Unity RNG stream and native repeated-per-frame rerolls while a qualifying line remains current were not recovered, so the preview uses one deterministic reroll on line entry and marks Random Velocity approximate for that reason.\n''',
+              '''before writing `_modeSpeedExt`. StepNX uses the exact line gate, 1/60 s DrawStep cadence, repeated rerolls while a qualifying line remains current, and signed modulo conversion. The exact Unity RNG stream is still unrecovered, so a deterministic Python RNG supplies the sequence; that sequence is the remaining approximation.\n''',
+          )
+          replace_once(
+              handoff,
+              '''The gameplay initialization dialog no longer accepts arbitrary free text. It exposes the 13 known auxiliary codes as checkable entries:\n\n```text\nV N W F M R U J D A X S E\n```\n\nSpeed remains a separate 1x..9x selector. D/A and S/E are mutually exclusive in the UI because each pair targets one enum-like runtime mode. Legacy string parsing remains for tests and non-UI compatibility.\n''',
+              '''The gameplay initialization dialog no longer accepts arbitrary free text. It exposes 18 semantic modifier choices: Vanish, Appear, Non-Step, Flash, Freedom, Mirror, Random, Under Attack, Drop, Judge Reverse, Deceleration, Acceleration, Exceed, Sink, Rise, Snake, Random Velocity and Earthworm.\n\nSpeed remains a separate 1x..9x selector. Acceleration/Deceleration and Random Velocity/Earthworm are mutually exclusive in the UI because each pair targets one enum-like runtime mode. Historical command characters remain internal compatibility keys for tests and non-UI callers.\n''',
+          )
+          replace_once(
+              handoff,
+              '''- Throw: Flat/Sink/Rise is known and `LineBase.PlayThrowAnim` exists, but movement depends on Animator/assets;\n- exact Appear/Vanish Animator fade curves;\n- exact Random Velocity Unity RNG/cadence.\n''',
+              '''- R!SE's exact Throw Animator/asset movement; the preview intentionally uses the recovered Prime 2 sine path as a historical compatibility projection;\n- exact Appear/Vanish Animator/material fade curves;\n- exact Random Velocity Unity RNG sequence.\n''',
+          )
+          PY
+      - name: Commit refreshed handoff
+        run: |
+          git config user.name 'OpenAI'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/RISE_RUNTIME_PARITY_AUDIT.md docs/RISE_RUNTIME_PARITY_HANDOFF.md
+          git diff --cached --check
+          git commit -m 'Refresh visual parity audit handoff'
+          git push origin HEAD:audit/rise-visual-command-re
