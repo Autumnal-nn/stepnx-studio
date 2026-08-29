@@ -96,7 +96,7 @@ class GameplayCommand:
             ("P", self.appear),
             ("R", self.randomize),
             ("X", self.exceed_mode),
-            # R!SE trigger/range is exact, but its RNG stream/cadence is not yet exact.
+            # R!SE gate/cadence/conversion are exact; Unity RNG sequence remains approximate.
             ("S", self.random_velocity),
         )
         return tuple(flag for flag, active in enabled if active)

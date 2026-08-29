@@ -33,7 +33,6 @@ from stepnx.preview.visuals import (
     native_line_local_y,
     native_line_y,
     native_screen_y,
-    native_snake_x_offset,
     prime2_snake_x_offset,
     prime2_throw_y_offset,
     sequence_zone_affine,
@@ -256,16 +255,11 @@ class GameplayPreviewWidget(QWidget):
         geometry = self._geometry()
         offset = 0.0
 
-        # R!SE Header Snake is source-exact and uses a 20-unit LineBase sine.
-        if self.session.runtime_modifier.snake:
-            offset += native_snake_x_offset(
-                self._event_local_y(event),
-                geometry.note_size,
-            )
-
-        # The legacy/NX2 Snake path is distinct. Prime 2 establishes the final
-        # amplitude as 60 * 0.5 = 30 units, so do not reuse R!SE's 20 here.
-        if self.command.snake:
+        # The R!SE build preserves Snake state/constants but has no validated
+        # gameplay consumer for that state. Do not promote its dormant 20-unit
+        # LineBase helper into behavior. Prime 2 is the historical runtime arbiter:
+        # both Header/metadata Snake and the launch option use its 30-unit path.
+        if self.command.snake or self.session.runtime_modifier.snake:
             offset += prime2_snake_x_offset(
                 self._event_beat_distance(event),
                 geometry.note_size,
@@ -284,6 +278,55 @@ class GameplayPreviewWidget(QWidget):
                     travel_height=float(self.height()),
                 )
         return offset
+
+    def _path_modifiers_active(self) -> bool:
+        return bool(
+            self.command.snake
+            or self.session.runtime_modifier.snake
+            or self.command.exceed_mode
+            or self.session.runtime_modifier.exceed
+            or self._effective_throw() is not ThrowMode.FLAT
+        )
+
+    def _screen_y_for_beat_distance(self, beat_distance: float) -> float:
+        geometry = self._geometry()
+        native_y = native_line_y(
+            beat_distance,
+            self.session.high_speed,
+            self._effective_acc_dec(),
+        )
+        y = native_screen_y(
+            native_y,
+            self._receptor_y(),
+            geometry.note_size,
+        )
+        mode = self._effective_throw()
+        if mode is not ThrowMode.FLAT:
+            y += prime2_throw_y_offset(
+                beat_distance,
+                self.session.high_speed,
+                geometry.note_size,
+                rise=mode is ThrowMode.RISE,
+            )
+        return y
+
+    def _path_x_for_beat_distance(
+        self, beat_distance: float, lane: int, y: float
+    ) -> float:
+        geometry = self._geometry()
+        offset = 0.0
+        if self.command.snake or self.session.runtime_modifier.snake:
+            offset += prime2_snake_x_offset(beat_distance, geometry.note_size)
+        if self.command.exceed_mode or self.session.runtime_modifier.exceed:
+            centre_lane = (self.columns - 1) / 2.0
+            if lane != centre_lane:
+                offset += legacy_exceed_x_offset(
+                    y - self._receptor_y(),
+                    geometry.field_width,
+                    from_right=lane < centre_lane,
+                    travel_height=float(self.height()),
+                )
+        return self.lane_center(lane) + offset
 
     def _event_opacity(self, event: PreviewEvent) -> float:
         distance = abs(self._event_y(event) - self._receptor_y())
@@ -506,6 +549,44 @@ class GameplayPreviewWidget(QWidget):
         for head, tail in self._hold_pairs:
             if tail.time_ms < self._chart_time_ms - 80.0:
                 continue
+
+            # Path modifiers cannot be represented by stretching one vertical atlas
+            # strip between transformed endpoints. Sample the same trajectory used
+            # by note heads so Snake/Throw/Exceed longs remain continuous.
+            if self._path_modifiers_active():
+                start_distance = self._event_beat_distance(head)
+                end_distance = self._event_beat_distance(tail)
+                if head.time_ms <= self._chart_time_ms <= tail.time_ms:
+                    start_distance = 0.0
+                span = abs(end_distance - start_distance)
+                sample_count = max(12, min(72, int(span * 10.0) + 2))
+                path = QPainterPath()
+                visible = False
+                for index in range(sample_count):
+                    ratio = index / max(1, sample_count - 1)
+                    distance = start_distance + (end_distance - start_distance) * ratio
+                    y = self._screen_y_for_beat_distance(distance)
+                    x = self._path_x_for_beat_distance(distance, tail.lane, y)
+                    if -120.0 <= y <= self.height() + 120.0:
+                        visible = True
+                    if index == 0:
+                        path.moveTo(x, y)
+                    else:
+                        path.lineTo(x, y)
+                if not visible:
+                    continue
+                painter.save()
+                painter.setOpacity(self._event_opacity(head))
+                pen = QPen(QColor(88, 160, 230, 210))
+                pen.setWidthF(max(8.0, note_size * 0.34))
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPath(path)
+                painter.restore()
+                continue
+
             y1, y2 = self._event_y(head), self._event_y(tail)
             if head.time_ms <= self._chart_time_ms <= tail.time_ms:
                 y1 = self._receptor_y()

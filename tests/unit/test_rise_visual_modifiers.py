@@ -14,7 +14,6 @@ from stepnx.preview import (
     LINE_BASE_ACC_SCALE,
     LINE_BASE_VELOCITY,
     LINE_BASE_WAVE_RATE,
-    LINE_BASE_X_AMPLITUDE,
     LINE_BASE_Y_MAX,
     LINE_BASE_Y_MIN,
     PRIME2_SNAKE_AMPLITUDE,
@@ -33,7 +32,6 @@ from stepnx.preview import (
     native_acc_dec_offset,
     native_line_local_y,
     native_line_y,
-    native_snake_x_offset,
     parse_gameplay_command,
     prime2_snake_x_offset,
     prime2_throw_y_offset,
@@ -72,7 +70,6 @@ class RiseLineBaseVisualTests(unittest.TestCase):
     def test_linebase_constructor_defaults_match_binary(self) -> None:
         self.assertEqual(LINE_BASE_Y_MIN, 200.0)
         self.assertEqual(LINE_BASE_Y_MAX, 550.0)
-        self.assertEqual(LINE_BASE_X_AMPLITUDE, 20.0)
         self.assertEqual(LINE_BASE_WAVE_RATE, 2.0)
         self.assertEqual(LINE_BASE_ACC_POW, 1.5)
         self.assertEqual(LINE_BASE_ACC_SCALE, 1.0)
@@ -111,19 +108,6 @@ class RiseLineBaseVisualTests(unittest.TestCase):
         wrong_base = BASE_ARROW_Y - distance * LINE_BASE_VELOCITY * 2.0
         wrong = wrong_base + native_acc_dec_offset(wrong_base, AccDecMode.ACCELERATION)
         self.assertNotAlmostEqual(speed2, wrong)
-
-    def test_rise_snake_keeps_modern_twenty_unit_amplitude(self) -> None:
-        span = LINE_BASE_Y_MAX - LINE_BASE_Y_MIN
-        self.assertAlmostEqual(
-            native_snake_x_offset(LINE_BASE_Y_MIN + span * 0.25, 72.0),
-            20.0,
-            places=6,
-        )
-        self.assertAlmostEqual(
-            native_snake_x_offset(LINE_BASE_Y_MIN + span * 0.75, 72.0),
-            -20.0,
-            places=6,
-        )
 
     def test_prime2_arbitrates_legacy_snake_at_thirty_units(self) -> None:
         # Supplied Prime 2 exec: sinf(pi*phase) * 60.0 * 0.5.
@@ -314,6 +298,34 @@ class RiseSpeedModeTests(unittest.TestCase):
         self.assertAlmostEqual(div.ms_per_line, 125.0)
         self.assertAlmostEqual(div.bpm, div.ms_per_line)
         self.assertEqual(div.beat_split, 4)
+
+    def test_speed_modes_are_independent_of_external_advance_chunking(self) -> None:
+        _, stream = _stream_with_header(1, 1)
+        coarse = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+        fine = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+
+        coarse.advance(260.0)
+        for moment in range(10, 261, 10):
+            fine.advance(float(moment))
+
+        self.assertEqual(coarse.mode_speed, fine.mode_speed)
+        self.assertEqual(coarse.high_speed, fine.high_speed)
+        self.assertEqual(coarse.block_speed, fine.block_speed)
+
+    def test_random_velocity_rerolls_each_drawstep_tick_on_qualifying_line(self) -> None:
+        import random
+
+        _, stream = _stream_with_header(1, 2)
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+        expected_rng = random.Random(stream.route.seed or 0)
+
+        first = random_velocity_user_speed(expected_rng.randrange(0, 0x7FFFFFFF))
+        second = random_velocity_user_speed(expected_rng.randrange(0, 0x7FFFFFFF))
+
+        session.advance(17.0)
+        self.assertEqual(session.mode_speed, first)
+        session.advance(34.0)
+        self.assertEqual(session.mode_speed, second)
 
     def test_non_ui_command_order_resolves_mutually_exclusive_speed_modes(self) -> None:
         _, stream = _stream_with_header()
