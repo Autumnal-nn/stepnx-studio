@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, replace
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from math import trunc
 
 
@@ -26,11 +26,34 @@ class VisibilityMode(IntEnum):
     HIDDEN = 3
 
 
-class DirectionMode(IntEnum):
+class SequenceZoneTransform(IntFlag):
+    """Metadata 32 sequence-zone transform bits.
+
+    NX2/NXA and the R!SE CommonModifier expose the native low two bits as
+    independent transformations rather than a four-value direction enum:
+
+    * bit0: Under Attack (180-degree playfield rotation)
+    * bit1: Drop (vertical reflection)
+
+    The NXA-patched profile extends the same bitfield with bit2 (Mid).  Higher
+    bits are ignored by that patch.  R!SE/native decoding remains restricted to
+    canonical values 0..3.
+    """
+
     NORMAL = 0
-    ROTATE_180 = 1
-    UPSIDE_DOWN = 2
-    MIRROR = 3
+    UNDER_ATTACK = 0x01
+    DROP = 0x02
+    MID = 0x04
+
+    # Compatibility aliases for older callers. These names describe the old
+    # Studio abstraction, not separate native enum values.
+    ROTATE_180 = UNDER_ATTACK
+    UPSIDE_DOWN = DROP
+    MIRROR = UNDER_ATTACK | DROP
+
+
+# Public compatibility alias retained while callers migrate to the bitmask name.
+DirectionMode = SequenceZoneTransform
 
 
 class ThrowMode(IntEnum):
@@ -67,8 +90,8 @@ class EffectiveModifier:
     """R!SE state after ApplyStepParamToMod has consumed Header StepParams.
 
     Field names mirror the recovered GameModifier/CommonModifier metadata where
-    possible.  State outside those two classes is retained only when the same
-    dispatcher directly writes it.  Merely declared PUMP.Param IDs are not
+    possible. State outside those two classes is retained only when the same
+    dispatcher directly writes it. Merely declared PUMP.Param IDs are not
     treated as active Header modifiers unless the binary consumes them here.
     """
 
@@ -104,9 +127,7 @@ class EffectiveModifier:
     disable_bg: bool = False
     exceed: bool = False
     nx: bool = False
-    direction: DirectionMode = DirectionMode.NORMAL
-    rotate_180: bool = False
-    upside_down: bool = False
+    sequence_transform: SequenceZoneTransform = SequenceZoneTransform.NORMAL
     merge_combo: bool = False
     gauge_link_factor: int = 0
     speed_boost: float = 0.0
@@ -118,6 +139,33 @@ class EffectiveModifier:
     gauge_initial_value: int | None = None
     stage_break: bool | None = None
     miss_combo_break: int | None = None
+
+    @property
+    def under_attack(self) -> bool:
+        return bool(self.sequence_transform & SequenceZoneTransform.UNDER_ATTACK)
+
+    @property
+    def drop(self) -> bool:
+        return bool(self.sequence_transform & SequenceZoneTransform.DROP)
+
+    @property
+    def mid(self) -> bool:
+        return bool(self.sequence_transform & SequenceZoneTransform.MID)
+
+    # Native field-name compatibility. R!SE calls the two low-bit consumers
+    # bRotate180 and bUpsideDown, but the serialized Metadata 32 semantics are
+    # Under Attack and Drop.
+    @property
+    def rotate_180(self) -> bool:
+        return self.under_attack
+
+    @property
+    def upside_down(self) -> bool:
+        return self.drop
+
+    @property
+    def direction(self) -> SequenceZoneTransform:
+        return self.sequence_transform
 
 
 def _first(params: tuple[StepParam, ...], metadata_id: int) -> StepParam | None:
@@ -182,16 +230,25 @@ def _judge_parameter(value: int) -> tuple[float, float]:
     return perfect_frame, interval_frame
 
 
-def _apply_direction(result: EffectiveModifier, value: int) -> EffectiveModifier:
-    if value not in (0, 1, 2, 3):
+def _apply_sequence_transform(
+    result: EffectiveModifier,
+    value: int,
+    *,
+    allow_mid: bool,
+) -> EffectiveModifier:
+    """Decode Metadata 32 without collapsing its independent bits.
+
+    Native NX2/NXA/R!SE accepts canonical values 0..3. The NXA patch extends
+    the same bitfield with Mid (bit2) and ignores bits above 0x04.
+    """
+
+    if allow_mid:
+        transform = SequenceZoneTransform(int(value) & 0x07)
+    elif value in (0, 1, 2, 3):
+        transform = SequenceZoneTransform(value)
+    else:
         return result
-    direction = DirectionMode(value)
-    return replace(
-        result,
-        direction=direction,
-        rotate_180=value in (1, 3),
-        upside_down=value in (2, 3),
-    )
+    return replace(result, sequence_transform=transform)
 
 
 def _apply_combo_display(result: EffectiveModifier, value: int) -> EffectiveModifier:
@@ -223,12 +280,18 @@ def _apply_skins(
 def apply_step_params(
     params: tuple[StepParam, ...],
     base: EffectiveModifier | None = None,
+    *,
+    allow_mid: bool = False,
 ) -> EffectiveModifier:
     """Port R!SE PlayBase.ApplyStepParamToMod (RVA 0x659F00).
 
     The native method reads the loaded Step's global Header StepParam array at
     Step+0x28. Split metadata is deliberately not merged here: no recovered
     source path applies Split+0x18 through this dispatcher.
+
+    ``allow_mid`` is deliberately profile-gated. R!SE/native Metadata 32 uses
+    only the low two canonical bits; NXA-patched extends that same field with
+    bit2 Mid and ignores higher bits.
 
     PUMP.Param contains a few names that are *not* effective Header writes in
     this routine. mpRunner (51) has no branch here. mpForceBGA (20) calls
@@ -289,7 +352,7 @@ def apply_step_params(
 
     value_i = _present_signed(params, 32)
     if value_i is not None:
-        result = _apply_direction(result, value_i)
+        result = _apply_sequence_transform(result, value_i, allow_mid=allow_mid)
 
     throw = _enum_value(params, 33, ThrowMode)
     if throw is not None:
