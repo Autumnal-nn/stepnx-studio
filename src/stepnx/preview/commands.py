@@ -2,6 +2,43 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, replace
+from typing import Iterable
+
+
+@dataclass(frozen=True, slots=True)
+class CommandFlag:
+    code: str
+    field: str
+    label: str
+
+
+COMMAND_FLAGS = (
+    CommandFlag("v", "vanish", "Vanish"),
+    CommandFlag("n", "nonstep", "Non-Step"),
+    CommandFlag("w", "flash", "Flash"),
+    CommandFlag("f", "freedom", "Freedom"),
+    CommandFlag("m", "mirror", "Mirror"),
+    CommandFlag("r", "randomize", "Random"),
+    CommandFlag("u", "upside_down", "Upside Down"),
+    CommandFlag("j", "judge_reverse", "Judge Reverse"),
+    CommandFlag("d", "deceleration", "Deceleration"),
+    CommandFlag("a", "acceleration", "Acceleration"),
+    CommandFlag("x", "exceed_mode", "Exceed"),
+    CommandFlag("s", "random_velocity", "Random Velocity"),
+    CommandFlag("e", "earthworm", "Earthworm"),
+)
+
+_FLAGS = {flag.code: flag.field for flag in COMMAND_FLAGS}
+
+
+def serialize_command_flags(codes: Iterable[str]) -> str:
+    """Serialize selected auxiliary flags in one canonical UI order."""
+
+    selected = {str(code).strip().casefold() for code in codes}
+    unknown = selected.difference(_FLAGS)
+    if unknown:
+        raise ValueError("unsupported COMMAND flag(s): " + ", ".join(sorted(unknown)))
+    return "".join(flag.code for flag in COMMAND_FLAGS if flag.code in selected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,26 +62,21 @@ class GameplayCommand:
 
     @property
     def approximate_effects(self) -> tuple[str, ...]:
-        """Return effects whose curves still need engine-capture calibration."""
+        """Return effects whose remaining presentation is not source-exact."""
 
         enabled = (
-            ("V", self.vanish),
-            ("D", self.deceleration),
-            ("A", self.acceleration),
+            ("V", self.vanish),  # Animator fade curve is asset-dependent.
             ("X", self.exceed_mode),
+            # R!SE trigger/range is exact, but its RNG stream/cadence is not.
             ("S", self.random_velocity),
-            ("E", self.earthworm),
         )
         return tuple(flag for flag, active in enabled if active)
 
     @property
     def pending_effects(self) -> tuple[str, ...]:
-        """Return parsed flags that are not yet projected by the simulator."""
+        """Return parsed flags that have no runtime projection yet."""
 
-        enabled = (
-            ("U", self.upside_down),
-        )
-        return tuple(flag for flag, active in enabled if active)
+        return ()
 
     def with_speed(self, speed: int) -> GameplayCommand:
         if not 1 <= speed <= 9:
@@ -72,7 +104,13 @@ class GameplayCommand:
         fade_distance: float,
         time_ms: float,
     ) -> float:
-        """Combine chart visibility with proven global display commands."""
+        """Render loaded note visibility plus COMMAND-only display effects.
+
+        Header Visibility has already rewritten the runtime event's VisualEffect
+        nibble before this function is called. Appear/Vanish animation curves
+        live in Unity Animator assets, so the distance fade below remains an
+        explicit display approximation while the loaded visibility state is exact.
+        """
 
         if self.nonstep or visibility == 0:
             return 0.0
@@ -91,28 +129,12 @@ class GameplayCommand:
         return min(1.0, max(0.0, opacity))
 
 
-_FLAGS = {
-    "v": "vanish",
-    "n": "nonstep",
-    "w": "flash",
-    "f": "freedom",
-    "m": "mirror",
-    "r": "randomize",
-    "u": "upside_down",
-    "j": "judge_reverse",
-    "d": "deceleration",
-    "a": "acceleration",
-    "x": "exceed_mode",
-    "s": "random_velocity",
-    "e": "earthworm",
-}
-
-
 def parse_gameplay_command(value: str) -> GameplayCommand:
     """Parse PIUTESTER-style cumulative auxiliary commands.
 
-    Every digit 1..9 contributes digit/4 to the resulting speed. A command
-    without digits uses 1x so an empty startup field remains playable.
+    The launch UI now exposes flags as checkable choices and keeps 1x..9x in a
+    separate Speed control. This parser retains the legacy cumulative digit rule
+    for non-UI callers and historical compatibility.
     """
 
     raw = value.strip().casefold()
