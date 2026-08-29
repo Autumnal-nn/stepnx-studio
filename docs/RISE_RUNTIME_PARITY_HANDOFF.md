@@ -6,7 +6,7 @@ This file is the continuity anchor for continuing the StepNX Studio audit agains
 
 Primary audit branch: `audit/rise-runtime-parity`
 
-The visual-modifier implementation was developed on `audit/rise-runtime-parity-item45-work`. Promote it into the primary audit branch only after the single final repository-wide suite is green and the temporary CI workflow has been removed.
+The visual-modifier implementation was developed on `audit/rise-runtime-parity-item45-work`, validated repository-wide, then promoted into the primary audit branch after the temporary CI workflow was removed.
 
 ## Primary-source policy
 
@@ -398,16 +398,20 @@ Do not invent transforms for:
 - exact Appear/Vanish Animator fade curves;
 - exact Random Velocity Unity RNG/cadence.
 
-## Validation checkpoint
+## Final validation checkpoint
 
-The last completed repository-wide checkpoint before Item 6 was:
+The completed repository-wide validation for Items 0 through 6 is:
 
 ```text
-Ran 464 tests in 2.285s
+GitHub Actions run: 33256211227
+Commit tested: 9ff6f29f042a41e4e163e0df81d88074eb95a622
+Ran 476 tests in 1.975s
 OK
 ```
 
-Item 6 adds dedicated regressions for LineBase constants and curves, Snake, Header Visibility without document mutation, Earthworm including the loaded `_BPM` alias and Skip behavior, Random Velocity gate/conversion, speed-mode resolution, and the selectable COMMAND dialog. The work branch is intentionally awaiting one final full GitHub Actions run before promotion.
+The run includes dedicated regressions for LineBase constants and curves, Snake, Header Visibility without document mutation, Earthworm including the loaded `_BPM`/`msPerLine` alias and Skip behavior, Random Velocity gate/conversion, speed-mode resolution, and the selectable COMMAND dialog.
+
+The first final-attempt run exposed two test regressions, not production behavior defects: a source-string assertion tied to the old renderer shape and a zero-tolerance assumption incompatible with R!SE's float32 pi. Both were corrected before the green checkpoint without weakening the native implementation.
 
 ## Remaining source-gated side paths
 
