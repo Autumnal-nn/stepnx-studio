@@ -4,11 +4,11 @@ This file is the continuity anchor for continuing the StepNX Studio audit agains
 
 ## Working branch
 
-`audit/rise-runtime-parity`
+Primary audit branch: `audit/rise-runtime-parity`
 
-The branch starts from the PUPA Skip-timing hotfix and keeps the broader runtime-parity work isolated from the release hotfix.
+The current implementation checkpoint was developed on an isolated work branch and should only be fast-forwarded into the primary audit branch after the full suite is green and the temporary CI workflow is removed.
 
-## Primary-source corpus
+## Primary-source policy
 
 Primary specification:
 
@@ -16,7 +16,7 @@ Primary specification:
 - `dump.cs` — IL2CPP type/field/enum metadata
 - `script.json` — IL2CPP method/address map
 
-When Studio behavior or an old test conflicts with the runtime, the runtime wins. Do not preserve a regression merely because a test encoded it first.
+When Studio behavior or an old test conflicts with the runtime, the runtime wins. Do not preserve a regression merely because a test encoded it first. Keep R!SE runtime semantics separate from the historical NXA/Fiesta authoring registries because numeric metadata IDs are reused across generations.
 
 ## Completed Item 0 — Smooth migration
 
@@ -32,7 +32,7 @@ bSkip   = 0x02
 3 = Smooth + Skip
 ```
 
-Native loader behavior recovered from `StepLoader.Load` RVA `0x751B80`:
+`StepLoader.Load` RVA `0x751B80`:
 
 ```text
 if flags & bSkip:
@@ -49,319 +49,81 @@ if rawSpeed < 0:
     Speed = -rawSpeed
 ```
 
-`PUMPPlayer.DrawStep()` RVA `0x748B50` tests only `flags & 0x01` for Smooth. A Skip-only Div (`2`) does not interpolate.
-
-Smooth now lives in `NativeTimingProjection.block_speed_at()` and uses the native interval:
-
-```text
-prevEnd = 0                    if current Block == 0
-prevEnd = DivEndTime(block-1)  otherwise
-curEnd  = DivEndTime(current)
-ratio   = clamp((time-prevEnd)/(curEnd-prevEnd), 0, 1)
-
-blockSpeed = previousLoadedDivSpeed
-           + (currentLoadedDivSpeed - previousLoadedDivSpeed) * ratio
-```
-
-If `curEnd <= prevEnd`, ratio is 1. The first previous speed is 1.0. Negative serialized Div Speed has already been normalized positive by StepLoader.
-
-The legacy `PreviewTimingSegment` speed transition was removed. `RuntimeEventStream.speed_factor_at()` delegates to the native projection. Tests explicitly cover raw flags 0/1/2/3 and previous-Div speed handoff.
+`PUMPPlayer.DrawStep()` RVA `0x748B50` tests only bit `0x01` for Smooth. Smooth interpolation now lives in `NativeTimingProjection.block_speed_at()` and uses the previous loaded Div Speed, previous Div end and current Div end. Skip-only `2` does not interpolate.
 
 ## Completed Item 1 — ApplyStepParamToMod / EffectiveModifier
 
-Primary binary anchor: `PlayBase.ApplyStepParamToMod` RVA `0x659F00`.
+Primary anchor: `PlayBase.ApplyStepParamToMod` RVA `0x659F00`.
 
-### Scope finding
+Scope:
 
-The recovered R!SE path reads the loaded Step's global Header StepParam array at `Step + 0x28`.
+- runtime consumes the Step global Header StepParam array at `Step + 0x28`;
+- Split metadata remains preserved at `Split + 0x18` but no second modifier dispatcher has been recovered;
+- Header params are therefore the only source applied to `EffectiveModifier`.
 
-Split metadata is stored separately (`Split + 0x18`), but no second `ApplyStepParamToMod` path applying Split metadata to `GameModifier` has been recovered. Therefore the preview:
+Lookup semantics:
 
-- preserves both Header and Split StepParams in `PreviewSnapshot`;
-- applies only Header StepParams to `EffectiveModifier`;
-- does not invent Header -> Split modifier overrides from historical editor profile scopes.
+- `Step.GetParam` RVA `0x74CC30` is first-wins;
+- `Step.GetFloatParam` RVA `0x74CC90` reinterprets raw uint32 bits as float;
+- never collapse runtime StepParams into a normal dict.
 
-Revisit this only if a direct runtime consumer of Split StepParams is recovered.
-
-### Lookup behavior
-
-`Step.GetParam` RVA `0x74CC30` scans serialized `(id,value)` pairs from the beginning and returns the first matching ID. Duplicates are therefore **first-wins**. Never convert runtime StepParams to a normal dict.
-
-`Step.GetFloatParam` RVA `0x74CC90` preserves the four value bytes and reinterprets them as IEEE-754 `float`; it does not numerically cast the uint32 payload.
-
-### Runtime types recovered from dump.cs
-
-`GameModifier` contains:
+Important recovered Header mappings:
 
 ```text
-Skin[6]
-Speed
-_SpeedMod
-_AccDec
-_Visibility
-bFreedom
-bFlash
-nRandomSkin
-_Throw
-bSnake
-bZigZag
-bMirrorTurn
-bMirrorLR
-bRandom
-bRunner
-bJudgeBank
-PerfectFrame
-Interval
-bJudgeReverse
-bHideJudge
-bJudgeByNote
-bComboPerBank
-bFreePerformance
-_JudgeLinePos
-_DefaultJudgeLinePos
-bGhostBuster
-bTreasureHunter
-bShowMeTheBank
-AltSkinScoreFactor
-AltSkinGaugeFactor
+0     Speed
+1     SpeedMode: 0 Static, 1 Earthworm, 2 RandomVelocity
+2     AccDec: 0 Linear, 1 Accel, 2 Decel
+16    Visibility: 0 Visible, 1 Vanish, 2 Appear, 3 Hidden
+17    Freedom
+18    Flash
+19    RandomSkin
+21    Exceed
+22    NX
+32    Direction: 0 Normal, 1 180, 2 UpsideDown, 3 Mirror
+33    Throw: 0 Flat, 1 Sink, 2 Rise
+34    Snake
+35    ZigZag
+48    MirrorTurn
+49    MirrorLR
+50    Random
+64    JudgeBank
+65    PerfectFrame / Interval decoder
+66    JudgeReverse
+67    HideJudge
+68    JudgeByNote
+69    ComboDisplay
+70    AltSkinScoreFactor and AltSkinGaugeFactor
+71    FreePerformance
+80    Gauge Max / HPBar Limit
+81    Gauge Display Max
+82    Gauge Initial Life
+83    Gauge Break / Stage Break
+84    MissComboBreak
+85    GaugeLinkFactor
+900..905 six skin slots
+1001  Level
+1111  SpeedX multiplier
 ```
 
-`CommonModifier` contains:
+Important no-write findings:
+
+- ID 20 ForceBGA getter result is discarded by this dispatcher;
+- ID 51 Runner is declared in the enum but has no branch here;
+- ID 1110 SpeedBoost getter result is discarded here even though `CommonModifier.SpeedBoost` is a real field consumed elsewhere.
+
+Header 65 decoder:
 
 ```text
-bDisableBG
-bExceed
-bNX
-bRotate180
-bUpsideDown
-bMergeCombo
-GaugeLinkFactor
-SpeedBoost
+x = value + 5
+q = trunc(x / 10)
+r = x - q*10
+PerfectFrame = (75 - q) / 10.0
+Interval     = (10 - r) * 0.5
 ```
 
-`GameModifier.Clear()` establishes at least:
+## Completed Item 2 — Speed / Gap / `_baseVelocity`
 
-```text
-Speed        = 2.0
-SpeedMode    = Static (0)
-AccDec       = Linear (0)
-Visibility   = Visible (0)
-PerfectFrame = 2.5
-Interval     = 2.5
-```
-
-### Exact PUMP.Param names relevant to this dispatcher
-
-```text
-0     mpSpeed
-1     mpSpeedMod
-2     mpAccDec
-16    mpVisibility
-17    mpFreedom
-18    mpFlash
-19    mpRandomSkin
-20    mpForceBGA
-21    mpExceed
-22    mpNX
-32    mpDirection
-33    mpThrow
-34    mpSnake
-35    mpZigZag
-48    mpMirrorTurn
-49    mpMirrorLR
-50    mpRandom
-51    mpRunner
-64    mpJudgeBank
-65    mpDifficulty
-66    mpJudgeReverse
-67    mpHideJudge
-68    mpJudgeByNote
-69    mpComboDisplay
-70    mpAltSkinScoreFactor / mpAltSkinGaugeFactor
-71    mpFreePerformance
-80    mpGaugeMax
-81    mpGaugeDispMax
-82    mpGaugeInitVal
-83    mpGaugeBreak
-84    mpMissComboBreak
-85    mpGaugeLink
-900   mpSkinBase (900..905 = six skin slots)
-1000  mpGameType
-1001  mpLevel
-1002  mpPlayers
-1003  mp2PStep
-1100  mpmTitle
-1101  mpmLevel
-1102  mpmDescS
-1103  mpmDescF
-1110  mpmSpeedBoost
-1111  mpmSpeedX
-1150  mpmCondition
-1199  mpmBreakCond
-```
-
-Important: declaration in `PUMP.Param` does not imply an effective Header write in this method.
-
-### ApplyStepParamToMod projections now implemented
-
-```text
-1001 Level
-0    Speed
-1    SpeedMode: 0 Static, 1 Earthworm, 2 RandomVelocity
-2    AccDec: 0 Linear, 1 Acceleration, 2 Deceleration
-16   Visibility: 0 Visible, 1 Vanish, 2 Appear, 3 Hidden
-17   Freedom
-18   Flash
-19   Random Skin selector
-21   CommonModifier.bExceed
-22   CommonModifier.bNX
-32   Direction: 0 Normal, 1 180, 2 UpsideDown, 3 Mirror
-33   Throw: 0 Flat, 1 Sink, 2 Rise
-34   Snake
-35   ZigZag
-48   MirrorTurn
-49   MirrorLR
-50   Random
-64   JudgeBank
-65   PerfectFrame / Interval decimal decoder
-66   JudgeReverse
-67   HideJudge
-68   JudgeByNote
-69   ComboDisplay
-70   AltSkinScoreFactor and AltSkinGaugeFactor
-71   FreePerformance
-80   Gauge Max
-81   Gauge Display Max
-82   Gauge Initial Value
-83   Gauge Break / Stage Break
-84   MissComboBreak
-85   CommonModifier.GaugeLinkFactor
-900..905 six GameModifier Skin slots
-1111 SpeedX multiplier applied to already-effective Speed
-```
-
-### Corrections made after dump.cs became available
-
-The first no-dump pass used several provisional names inferred only from stores. Those are now replaced with metadata-backed names:
-
-- ID 32 is **Direction**, not Under Attack / Drop.
-- ID 48 is `MirrorTurn`.
-- ID 49 is `MirrorLR`.
-- ID 50 is `Random`, not Runner.
-- ID 64 is `JudgeBank`, not legacy Judge-by-Note.
-- ID 66 is `JudgeReverse`.
-- Visibility 3 is **Hidden**, not Vanish+Appear.
-- ID 69 is `ComboDisplay`.
-- ID 70 is both `AltSkinScoreFactor` and `AltSkinGaugeFactor`.
-- ID 71 is `FreePerformance`.
-- ID 85 is `GaugeLink`.
-
-Do not change NXA/Fiesta profile metadata just because R!SE reuses the same numeric ID differently. Engine-profile authoring semantics and the R!SE runtime projection are separate layers.
-
-### Detailed cases
-
-#### Header Speed ID 0
-
-Uses `GetFloatParam`. After decoding:
-
-```text
-if 0 < speed <= 255:
-    speed *= 0.25
-else:
-    speed remains direct
-```
-
-`-1.0` is the no-value sentinel.
-
-#### SpeedMode ID 1
-
-The enum declares `AutoVelocity = 3`, but `ApplyStepParamToMod` only applies values 0, 1 and 2. Value 3 is handled elsewhere and is not treated as a Header dispatcher write.
-
-#### Direction ID 32
-
-```text
-0 Normal      -> Rotate180=0, UpsideDown=0
-1 180         -> Rotate180=1, UpsideDown=0
-2 UpsideDown  -> Rotate180=0, UpsideDown=1
-3 Mirror      -> Rotate180=1, UpsideDown=1
-```
-
-#### ComboDisplay ID 69
-
-```text
-0 SingleBank -> GameModifier.bComboPerBank=1, CommonModifier.bMergeCombo=0
-1 AllBank    -> GameModifier.bComboPerBank=0, CommonModifier.bMergeCombo=0
-2 AllPlayer  -> GameModifier.bComboPerBank=0, CommonModifier.bMergeCombo=1
-```
-
-#### Alt Skin Factor ID 70
-
-The enum intentionally declares the same numeric ID twice. The dispatcher reads ID 70 twice and writes:
-
-```text
-AltSkinScoreFactor = decodedFloat - 1.0
-AltSkinGaugeFactor = decodedFloat - 1.0
-```
-
-#### Skin IDs 900..905
-
-After processing Random Skin ID 19, the dispatcher iterates all six slots:
-
-```text
-if Header 900+slot exists:
-    Skin[slot] = value
-else if nRandomSkin != 0:
-    Skin[slot] = 254
-else:
-    keep current/default slot
-```
-
-#### IDs that exist but are not effective writes here
-
-- `20 mpForceBGA`: `GetStrParam(...,20)` is called but the returned string is discarded by this method.
-- `51 mpRunner`: enum member exists, but no ID-51 branch exists in `ApplyStepParamToMod`.
-- `1110 mpmSpeedBoost`: `GetFloatParam(...,1110)` is called but the return value is discarded by this method.
-
-Do not fabricate writes for those IDs in `EffectiveModifier`. `CommonModifier.SpeedBoost` does exist and is consumed elsewhere, including judgment timing, so its producer must be audited separately.
-
-#### ID 1111 SpeedX
-
-If present, decoded float directly multiplies the current `GameModifier.Speed`.
-
-#### ID 65
-
-The R!SE decimal decoder currently updates only `EffectiveModifier.perfect_frame` and `.interval_frame`. It does not yet alter `GameplaySession` judgment windows; that belongs to the native judgment-window item.
-
-### Tests
-
-After the dump-backed mapping correction and expanded coverage:
-
-```text
-Ran 437 tests in 2.249s
-OK
-```
-
-Coverage includes Direction 0..3, Hidden visibility, ComboDisplay, skin slots and Random fallback 254, exact lane/judge flags, AutoVelocity value 3 not being applied by this dispatcher, ForceBGA/SpeedBoost discarded-lookups, gauge/link state, and all previous Smooth/Skip/Qt regressions.
-
-## Existing Skip-aware timing anchors
-
-Already ported and validated against PUPA:
-
-- `Step.GetBlock` RVA `0x74BFA0`
-- `Step.GetLine` RVA `0x74C4C0`
-- `Step.SetCurrentTime` RVA `0x74C570`
-- `Step.DivEndTime` RVA `0x74C890`
-- `PlayBase.GetBlockBeat` RVA `0x656220`, private overload RVA `0x656300`
-
-Keep these axes separate:
-
-- judgment time
-- Block/Line beat-space position
-- visual speed multiplier
-
-## Next item — Speed / Gap / `_baseVelocity`
-
-Primary anchors already identified:
+Primary anchors:
 
 - `PUMPPlayer.SetSpeed` RVA `0x746330`
 - `PUMPPlayer.SpeedProc` RVA `0x746360`
@@ -370,28 +132,249 @@ Primary anchors already identified:
 - `LineBase.RePos` RVA `0x638CA0`
 - `LineBase.CreateSplits` RVA `0x639720`
 
-Current source findings to preserve:
+Native speed state is now explicit:
 
-- `SetSpeed()` stores `_modeSpeedExt = userSpeed` and `_modeSpeed = userSpeed * _blockSpeed`.
-- `SpeedProc()` moves `pHighSpeed` toward `_modeSpeed`; the existing Studio direct multiplication is not frame-exact.
-- `LineBase.RePos()` multiplies `PlayBase.GetBlockBeat(block,line)` by the LineBase `_baseVelocity` before transform placement.
-- `CreateSplits()` stores judge time as `msStart + line*msPerLine`, stores `GetBlockBeat(block,line)`, sets start Y to 50, and derives `_baseVelocity` from a transform Y distance divided by a LineBase field at `+0x8C`.
-- That `+0x8C` input appears serialized/prefab-provided rather than assigned inside `CreateSplits`; do not invent its value from Studio lane spacing. Recover the prefab/config source or explicitly keep a normalized Studio scale.
-- `CommonModifier.SpeedBoost` is a real field and later affects timing consumers, but Header ID 1110 is not assigned to it by `ApplyStepParamToMod`; audit its actual producer separately.
+```text
+_modeSpeedExt = selected/user speed
+_blockSpeed   = active Div speed
+_modeSpeed    = _modeSpeedExt * _blockSpeed
+pHighSpeed    = displayed speed
+```
 
-## Planned order after Speed/Gap
+`SpeedProc` moves `pHighSpeed` toward `_modeSpeed` by `0.05` each `1/60 s` tick. Block changes and Smooth updates remain on the DrawStep path rather than being confused with user speed easing.
 
-1. `JudgeLine` / `JudgeNote` / `JudgeUnit` / long-note processing.
-2. Native judgment windows.
-3. Native scoring and gauge.
-4. Accel/Decel, Visibility, Snake/ZigZag, Earthworm, Random Velocity and remaining visual modifiers.
+Negative serialized Speed no longer creates a fake preview freeze. The loader uses its sign only while constructing Gap and then normalizes it positive.
 
-## Other primary-source anchors
+Recovered LineBase geometry:
 
-- `PUMPPlayer.SetJudgeTiming` RVA `0x746B00`
+```text
+LineBase start Y       = 50
+TargetArrow Y          = 608
+_startGapTime          = 8.5
+_baseVelocity          = (608 - 50) / 8.5
+                       = 65.6470588
+modern note render unit = 72
+```
+
+Runtime Y placement uses `PlayBase.GetBlockBeat(block,line) * _baseVelocity`. `PreviewEvent.position` remains a compatibility/culling axis and is not treated as the native visual distance.
+
+## Completed Item 3 — JudgeLine / JudgeNote / JudgeUnit structure
+
+Primary anchors:
+
+- `PUMPPlayer.JudgeNote` RVA `0x747320`
 - `PUMPPlayer.JudgeLine` RVA `0x7474D0`
 - `PUMPPlayer.JudgeUnit` RVA `0x747A60`
+
+Recovered note routing:
+
+- native TypeMask low two bits: Item=1, Special=2, Normal=3;
+- exact NoJudge mask is `0x20`;
+- `bNoRush = 0x10`;
+- bank comes from the top two bits of the 16-bit Param field;
+- JudgeLine resolves one bank at a time;
+- JudgeByNote resolves eligible cells independently.
+
+Long-note distinction that invalidated old preview tests:
+
+```text
+47 / 4B / 4F = long without bNoRush = rush/roll JudgeNote path
+57 / 5B / 5F = long with bNoRush    = aggregate JudgeLine path
+```
+
+JudgeUnit structural projection:
+
+- negative grade becomes Miss;
+- `bNoMiss` is preserved for the later bypass;
+- `AltSkinFactor = 1 + altSkinCount/totalNoteCount * AltSkinScoreFactor`;
+- return value is `grade <= Great`.
+
+## Completed Item 4 — Native judgment windows
+
+Primary anchors:
+
+- `PUMPPlayer.SetJudgeTiming` RVA `0x746B00`
+- `Step.SetJudgeTiming` RVA `0x74BB50`
+- `Step.Judge` RVA `0x74D100`
+- `Step.GetGrade` RVA `0x7508E0`
+
+Base frame:
+
+```text
+16.66666603088379 ms
+```
+
+`PUMPPlayer.SetJudgeTiming` constructs:
+
+```text
+P = PerfectFrame * frame
+I = Interval     * frame
+D = 2.5          * frame
+N = 4
+```
+
+If a validated producer has already populated `CommonModifier.SpeedBoost > 0`, the entire frame unit is multiplied by SpeedBoost. Header 1110 alone does not populate it.
+
+`Step.SetJudgeTiming` stores:
+
+```text
+Start = -(P + 3*I + D)
+End   =  P + 3*I
+```
+
+`Step.Judge` is asymmetric:
+
+```text
+early input: gradeTime = -error
+late input:  gradeTime = max(0, error - D)
+```
+
+`Step.GetGrade`:
+
+```text
+x = gradeTime - P
+if x <= 0:
+    grade = Perfect
+else:
+    grade = trunc(x / I + 1)
+    grade = min(grade, 3)
+```
+
+`NativeJudgeTiming` replaces the old fixed symmetric preview table. Header 65 now changes actual GameplaySession timing.
+
+With default `PerfectFrame=2.5`, `Interval=2.5`, `Delay=2.5 frames`, the late side gets one additional Delay band before grade evaluation, exactly as the native Step path does.
+
+## Completed Item 5 — Native score and gauge
+
+### Score
+
+Primary anchors:
+
 - `PUMPPlayer.JudgeStep_PostProcess` RVA `0x748000`
 - `PUMPPlayer.GetScore` RVA `0x748A40`
+
+Recovered base score table:
+
+```text
+Perfect  1000
+Great    1000
+Good      500
+Bad       100
+Miss     -200
+```
+
+Ordinary-note Miss uses the special `-300` PostProcess path.
+
+Perfect/Great combo bonus:
+
+```text
+if per-bank combo after increment >= 51:
+    score += 1000
+```
+
+Chord multiplier, using total JudgeUnit count:
+
+```text
+1-2 notes: x1
+3 notes:   x1.5, truncate
+4+ notes:  x2
+```
+
+Then the JudgeUnit AltSkin factor multiplies the result and the runtime truncates again. AddCount floors accumulated score at zero after negative additions.
+
+Combo behavior is now native:
+
+```text
+Perfect / Great -> increment
+Good            -> preserve
+Bad / Miss      -> clear
+```
+
+Per-bank combo state is retained internally because the score bonus uses the bank combo.
+
+### HPBar / gauge
+
+Native setup:
+
+```text
+Life    = 500
+Limit   = 1000 + 3 * min(Level, 50)^2
+DispMax = 1000
+```
+
+Header overrides are direct runtime writes after setup:
+
+```text
+80 -> Limit
+81 -> DispMax
+82 -> Life
+```
+
+Recovered factor presets:
+
+```text
+Single:     Min 200, Max 1000, MissFactor -700, initial 500
+HalfDouble: Min   0, Max  800, MissFactor -700, initial 100
+Double:     Min 100, Max  900, MissFactor -700, initial 300
+```
+
+JudgeUnit gauge changes:
+
+```text
+Perfect: delta = trunc(12 * factor / 1000); factor += 20
+Great:   delta = trunc(10 * factor / 1000); factor += 16
+Good:    delta = 0
+Bad:     delta = -50
+Miss:
+    lifeBase = min(Life, 1000)
+    delta = trunc((-500 * lifeBase) / 2000) - 20
+    factor += MissFactor
+```
+
+Factor is clamped to its mode-specific Min/Max. Normal `HPBar.Add` clamps Life to `[0, Limit]`.
+
+A Miss carrying NoMiss bypasses the normal PostProcess/gauge path, so it does not alter counters, score or life.
+
+Current preview field-width bridge:
+
+- 5 columns -> Single
+- 6 columns -> HalfDouble
+- 10 columns -> Double
+- unusual widths retain the HalfDouble fallback rather than inventing a new HPBar type.
+
+The separate challenge-game HPBar.Add branch is not modeled yet.
+
+## Validation checkpoint
+
+After integrating Items 4 and 5 and correcting legacy hold fixtures that used rush bytes:
+
+```text
+Ran 464 tests in 2.285s
+OK
+```
+
+The full suite includes Qt offscreen tests, previous Smooth/Skip regressions, EffectiveModifier coverage, Speed/Gap/base-velocity tests, JudgeLine/JudgeNote/JudgeUnit tests, native timing boundaries, score formula tests and HPBar dynamics.
+
+## Next audit item — visual modifiers
+
+Proceed in this order unless new source evidence suggests stronger coupling:
+
+1. Accel/Decel
+2. Visibility
+3. Snake/ZigZag
+4. Earthworm
+5. Random Velocity
+6. remaining Throw/Freedom/Flash visual behavior
+
+Known anchors already available:
+
 - `LineBase.GetAccDecYOffset` RVA `0x638B20`
-- `Gauge.SetJudgeGauge` RVA `0x518C90`
+- `LineBase.RePos` RVA `0x638CA0`
+- LineBase constructor defaults include `_accPow=1.5`, `_accScale=1`, `_yMin=200`, `_yMax=550`, `xAmplitude=20`, `waveRate=2`.
+
+Keep these open side-paths source-gated:
+
+- real producer of `CommonModifier.SpeedBoost`;
+- challenge-mode HPBar.Add branch;
+- forced-judgment Div 999 consumer;
+- any Split-level modifier dispatcher if one is eventually recovered.
