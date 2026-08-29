@@ -1,0 +1,454 @@
+name: Port native visibility mask and NX projection
+
+on:
+  push:
+    branches:
+      - audit/rise-visual-command-re
+
+permissions:
+  contents: write
+
+jobs:
+  port:
+    if: github.event.head_commit.message == 'Port native visibility mask and NX projection'
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/rise-visual-command-re
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Port NXA Prime visibility and NX consumers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'expected fragment not found in {path}: {old[:180]!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          def replace_region(path: str, pattern: str, replacement: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              new_text, count = re.subn(
+                  pattern,
+                  lambda _: replacement,
+                  text,
+                  count=1,
+                  flags=re.S,
+              )
+              if count != 1:
+                  raise SystemExit(f'expected one region in {path}, found {count}: {pattern}')
+              file.write_text(new_text, encoding='utf-8')
+
+          Path('src/stepnx/preview/legacy_render.py').write_text(r'''from __future__ import annotations
+
+from math import radians, tan
+
+LEGACY_LOGICAL_WIDTH = 640.0
+LEGACY_LOGICAL_HEIGHT = 480.0
+
+LEGACY_VISIBILITY_MASK_HEIGHT = 512.0
+LEGACY_VISIBILITY_MASK_CENTER = 256.0
+LEGACY_VISIBILITY_VERTEX_OFFSET = 16.5
+LEGACY_VISIBILITY_ALPHA_BIAS = 128.0
+LEGACY_VISIBILITY_ALPHA_SLOPE = 8.0
+LEGACY_VISIBILITY_SCREEN_CENTER = (
+    LEGACY_LOGICAL_HEIGHT
+    + LEGACY_VISIBILITY_VERTEX_OFFSET
+    - LEGACY_VISIBILITY_MASK_CENTER
+)
+
+LEGACY_NX_FOV_DEGREES = 75.0
+LEGACY_NX_SCALE = 1.5
+LEGACY_NX_ROTATE_DEGREES = -120.0
+LEGACY_NX_DROP_ROTATE_DEGREES = -60.0
+LEGACY_NX_YZ_COUPLING = 1.299038105676658
+LEGACY_NX_Z_OFFSET = -519.6152422706632
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return min(maximum, max(minimum, float(value)))
+
+
+def legacy_visibility_alpha(
+    screen_y: float,
+    viewport_height: float,
+    visibility: int,
+) -> float:
+    """Return the NXA/Prime screen-space alpha mask at one Y coordinate.
+
+    Both supplied executables build the same 32x512 RGBA effect texture. The
+    low two VisualEffect bits select Invisible, Appear, Vanish, or Visible. The
+    transition bands use centre 256, vertex offset 16.5, bias 128 and a signed
+    slope of eight alpha units per logical screen pixel.
+    """
+
+    mode = int(visibility) & 0x03
+    if mode == 0:
+        return 0.0
+    if mode == 3:
+        return 1.0
+    height = max(1.0, float(viewport_height))
+    logical_y = float(screen_y) * LEGACY_LOGICAL_HEIGHT / height
+    mask_y = LEGACY_LOGICAL_HEIGHT - logical_y + LEGACY_VISIBILITY_VERTEX_OFFSET
+    direction = 1.0 if mode == 1 else -1.0
+    alpha_byte = (
+        (mask_y - LEGACY_VISIBILITY_MASK_CENTER)
+        * LEGACY_VISIBILITY_ALPHA_SLOPE
+        * direction
+        + LEGACY_VISIBILITY_ALPHA_BIAS
+    )
+    return _clamp(alpha_byte, 0.0, 255.0) / 255.0
+
+
+def legacy_visibility_gradient_stops(
+    visibility: int,
+) -> tuple[tuple[float, float], ...]:
+    """Return normalized viewport stops for the exact piecewise-linear mask."""
+
+    mode = int(visibility) & 0x03
+    if mode == 0:
+        return ((0.0, 0.0), (1.0, 0.0))
+    if mode == 3:
+        return ((0.0, 1.0), (1.0, 1.0))
+
+    centre = LEGACY_VISIBILITY_SCREEN_CENTER
+    low_span = LEGACY_VISIBILITY_ALPHA_BIAS / LEGACY_VISIBILITY_ALPHA_SLOPE
+    high_span = (
+        255.0 - LEGACY_VISIBILITY_ALPHA_BIAS
+    ) / LEGACY_VISIBILITY_ALPHA_SLOPE
+    if mode == 1:
+        full_y = centre - high_span
+        zero_y = centre + low_span
+        stops = (
+            (0.0, 1.0),
+            (full_y / LEGACY_LOGICAL_HEIGHT, 1.0),
+            (zero_y / LEGACY_LOGICAL_HEIGHT, 0.0),
+            (1.0, 0.0),
+        )
+    else:
+        zero_y = centre - low_span
+        full_y = centre + high_span
+        stops = (
+            (0.0, 0.0),
+            (zero_y / LEGACY_LOGICAL_HEIGHT, 0.0),
+            (full_y / LEGACY_LOGICAL_HEIGHT, 1.0),
+            (1.0, 1.0),
+        )
+    return tuple((_clamp(position, 0.0, 1.0), alpha) for position, alpha in stops)
+
+
+def _matmul3(
+    left: tuple[tuple[float, float, float], ...],
+    right: tuple[tuple[float, float, float], ...],
+) -> tuple[tuple[float, float, float], ...]:
+    return tuple(
+        tuple(
+            sum(left[row][k] * right[k][column] for k in range(3))
+            for column in range(3)
+        )
+        for row in range(3)
+    )
+
+
+def legacy_nx_homography(
+    viewport_width: float,
+    viewport_height: float,
+    *,
+    z: float = 0.0,
+    drop: bool = False,
+    under_attack: bool = False,
+) -> tuple[float, float, float, float, float, float, float, float, float]:
+    """Return the NXA/Prime NX Mode projective transform as Qt coefficients.
+
+    The source pipeline is a 640x480 logical field with Perspective(75), a
+    -120 degree X tilt (-60 in the Drop branch), centre translation and 1.5
+    scale. For a fixed Z plane this collapses exactly to a 2-D homography. The
+    tuple order matches QTransform's nine-argument constructor.
+    """
+
+    width = max(1.0, float(viewport_width))
+    height = max(1.0, float(viewport_height))
+    fixed_z = float(z)
+
+    focal = 1.0 / tan(radians(LEGACY_NX_FOV_DEGREES / 2.0))
+    eye_distance = focal * LEGACY_LOGICAL_WIDTH / 2.0
+    projection_scale = focal * LEGACY_LOGICAL_HEIGHT / 2.0
+
+    x_in = LEGACY_LOGICAL_WIDTH / width
+    y_in = LEGACY_LOGICAL_HEIGHT / height
+    x_out = width / LEGACY_LOGICAL_WIDTH
+    y_out = height / LEGACY_LOGICAL_HEIGHT
+
+    y_z = -LEGACY_NX_YZ_COUPLING if drop else LEGACY_NX_YZ_COUPLING
+    z_z = 0.75 if drop else -0.75
+    denominator_constant = eye_distance - LEGACY_NX_Z_OFFSET - z_z * fixed_z
+    if abs(denominator_constant) < 1e-9:
+        denominator_constant = 1e-9
+
+    c = LEGACY_NX_YZ_COUPLING
+    matrix = (
+        (
+            x_out * (1.5 * projection_scale) * x_in / denominator_constant,
+            x_out * (-320.0 * c) * y_in / denominator_constant,
+            x_out
+            * (320.0 * denominator_constant - 480.0 * projection_scale)
+            / denominator_constant,
+        ),
+        (
+            0.0,
+            y_out
+            * (-240.0 * c - 0.75 * projection_scale)
+            * y_in
+            / denominator_constant,
+            y_out
+            * (
+                240.0 * denominator_constant
+                + 60.0 * projection_scale
+                - projection_scale * y_z * fixed_z
+            )
+            / denominator_constant,
+        ),
+        (
+            0.0,
+            -c * y_in / denominator_constant,
+            1.0,
+        ),
+    )
+
+    if under_attack:
+        matrix = _matmul3(
+            matrix,
+            (
+                (-1.0, 0.0, width),
+                (0.0, -1.0, height),
+                (0.0, 0.0, 1.0),
+            ),
+        )
+
+    return (
+        matrix[0][0],
+        matrix[1][0],
+        matrix[2][0],
+        matrix[0][1],
+        matrix[1][1],
+        matrix[2][1],
+        matrix[0][2],
+        matrix[1][2],
+        matrix[2][2],
+    )
+
+
+def legacy_nx_project_point(
+    x: float,
+    y: float,
+    viewport_width: float,
+    viewport_height: float,
+    *,
+    z: float = 0.0,
+    drop: bool = False,
+    under_attack: bool = False,
+) -> tuple[float, float]:
+    """Project one point through the exact fixed-Z NX Mode homography."""
+
+    m11, m12, m13, m21, m22, m23, m31, m32, m33 = legacy_nx_homography(
+        viewport_width,
+        viewport_height,
+        z=z,
+        drop=drop,
+        under_attack=under_attack,
+    )
+    denominator = m13 * float(x) + m23 * float(y) + m33
+    if abs(denominator) < 1e-9:
+        denominator = 1e-9 if denominator >= 0.0 else -1e-9
+    return (
+        (m11 * float(x) + m21 * float(y) + m31) / denominator,
+        (m12 * float(x) + m22 * float(y) + m32) / denominator,
+    )
+''', encoding='utf-8')
+
+          # COMMAND semantics: Vanish/Appear and NX are now projected by recovered
+          # runtime consumers rather than listed as approximations/pending state.
+          replace_once(
+              'src/stepnx/preview/commands.py',
+              '''        enabled = (\n            ("V", self.vanish),\n            ("P", self.appear),\n            ("R", self.randomize),\n            ("X", self.exceed_mode),\n        )\n''',
+              '''        enabled = (\n            ("R", self.randomize),\n            ("X", self.exceed_mode),\n        )\n''',
+          )
+          replace_once(
+              'src/stepnx/preview/commands.py',
+              '''        return ("^",) if self.nx_mode else ()\n\n    def with_speed''',
+              '''        return ()\n\n    def with_speed''',
+          )
+          replace_once(
+              'src/stepnx/preview/commands.py',
+              '''    def note_opacity(\n''',
+              '''    def effective_visibility(self, visibility: int) -> int:\n        """Resolve COMMAND visibility before the screen-space mask is applied."""\n\n        mode = int(visibility) & 0x03\n        if self.nonstep or (self.vanish and self.appear):\n            return 0\n        if self.appear:\n            return 1\n        if self.vanish:\n            return 2\n        return mode\n\n    def flash_visible(self, time_ms: float, *, header_flash: bool = False) -> bool:\n        if not (self.flash or bool(header_flash)):\n            return True\n        return int(float(time_ms) // 100.0) % 2 == 0\n\n    def note_opacity(\n''',
+          )
+
+          # The formerly unidentified +/-300 branch is the NX Mode producer.
+          replace_once(
+              'src/stepnx/preview/visuals.py',
+              'PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, external-state branch (OPEN)\n',
+              'PRIME2_THROW_ALT_AMPLITUDE = 300.0  # 200 * 1.5, NX Mode branch\n',
+          )
+          replace_once(
+              'src/stepnx/preview/visuals.py',
+              '    offset. Standard amplitude is 96; the unidentified alternate branch is 300.\n',
+              '    offset. Standard amplitude is 96; NX Mode selects the 300-unit branch.\n',
+          )
+
+          # Widget imports.
+          replace_once(
+              'src/stepnx/gui/preview_widget.py',
+              '''from PySide6.QtGui import (\n    QColor,\n''',
+              '''from PySide6.QtGui import (\n    QBrush,\n    QColor,\n    QImage,\n    QLinearGradient,\n''',
+          )
+          replace_once(
+              'src/stepnx/gui/preview_widget.py',
+              '''from stepnx.preview.geometry import PlayfieldGeometry\n''',
+              '''from stepnx.preview.geometry import PlayfieldGeometry\nfrom stepnx.preview.legacy_render import (\n    legacy_nx_homography,\n    legacy_visibility_gradient_stops,\n)\n''',
+          )
+
+          replace_region(
+              'src/stepnx/gui/preview_widget.py',
+              r'    def _sequence_affine\(.*?(?=    def _lane_map\()',
+              '''    def _sequence_affine(self) -> tuple[float, float, float, float]:\n        return sequence_zone_affine(\n            self._sequence_transform(),\n            float(self.width()),\n            float(self.height()),\n            normal_receptor_y=self._receptor_y(),\n        )\n\n    def _effective_nx_mode(self) -> bool:\n        return bool(self.command.nx_mode or self.session.runtime_modifier.nx)\n\n    def _playfield_transform(self, z: float = 0.0) -> QTransform:\n        transform = self._sequence_transform()\n        if self._effective_nx_mode():\n            return QTransform(\n                *legacy_nx_homography(\n                    float(self.width()),\n                    float(self.height()),\n                    z=float(z),\n                    drop=bool(transform & SequenceZoneTransform.DROP),\n                    under_attack=bool(\n                        transform & SequenceZoneTransform.UNDER_ATTACK\n                    ),\n                )\n            )\n        sx, sy, tx, ty = self._sequence_affine()\n        return QTransform(sx, 0.0, 0.0, sy, tx, ty)\n\n''',
+          )
+
+          replace_region(
+              'src/stepnx/gui/preview_widget.py',
+              r'    def _throw_projection\(.*?(?=    def _base_screen_y_for_beat_distance\()',
+              '''    def _throw_projection(\n        self, x: float, y: float, beat_distance: float\n    ) -> tuple[float, float, float]:\n        """Project legacy Throw when NX Mode is not handling the 3-D plane."""\n\n        mode = self._effective_throw()\n        if mode is ThrowMode.FLAT:\n            return float(x), float(y), 1.0\n        z = prime2_throw_z_offset(\n            beat_distance,\n            self.session.high_speed,\n            rise=mode is ThrowMode.RISE,\n            alternate_amplitude=self._effective_nx_mode(),\n        )\n        if self._effective_nx_mode():\n            # NX's fixed-Z QTransform below performs the source perspective.\n            return float(x), float(y), 1.0\n        scale = prime2_throw_perspective_scale(z)\n        centre_x = float(self.width()) / 2.0\n        centre_y = float(self.height()) / 2.0\n        return (\n            centre_x + (float(x) - centre_x) * scale,\n            centre_y + (float(y) - centre_y) * scale,\n            scale,\n        )\n\n    def _event_throw_z(self, event: PreviewEvent) -> float:\n        mode = self._effective_throw()\n        if mode is ThrowMode.FLAT:\n            return 0.0\n        _, beat_distance = self._path_anchor(event)\n        return prime2_throw_z_offset(\n            beat_distance,\n            self.session.high_speed,\n            rise=mode is ThrowMode.RISE,\n            alternate_amplitude=self._effective_nx_mode(),\n        )\n\n''',
+          )
+
+          replace_region(
+              'src/stepnx/gui/preview_widget.py',
+              r'    def _event_render_geometry\(.*?(?=    def visible_events\()',
+              '''    def _event_render_geometry(\n        self, event: PreviewEvent\n    ) -> tuple[float, float, float]:\n        centre_x = self.lane_center(event.lane) + self._event_x_offset(event)\n        centre_y = self._event_y(event)\n        if self._effective_nx_mode():\n            return centre_x, centre_y, self._geometry().note_size\n        _, beat_distance = self._path_anchor(event)\n        centre_x, centre_y, scale = self._throw_projection(\n            centre_x, centre_y, beat_distance\n        )\n        return centre_x, centre_y, self._geometry().note_size * scale\n\n    def _effective_visibility(self, event: PreviewEvent) -> int:\n        return self.command.effective_visibility(int(event.visibility))\n\n    def _flash_visible(self) -> bool:\n        return self.command.flash_visible(\n            self._chart_time_ms,\n            header_flash=self.session.runtime_modifier.flash,\n        )\n\n''',
+          )
+
+          replace_once(
+              'src/stepnx/gui/preview_widget.py',
+              '''        if self._effective_throw() is not ThrowMode.FLAT:\n            margin += 100.0 * (geometry.note_size / 72.0)\n''',
+              '''        if self._effective_throw() is not ThrowMode.FLAT:\n            margin += 100.0 * (geometry.note_size / 72.0)\n        if self._effective_nx_mode():\n            # The NX homography can project local coordinates well outside the\n            # ordinary flat viewport back into the visible trapezoid.\n            margin += float(self.height()) * 2.0\n''',
+          )
+
+          replace_region(
+              'src/stepnx/gui/preview_widget.py',
+              r'    def _draw_hold_shafts\(.*?(?=    def _draw_sequence_zone\()',
+              '''    def _draw_hold_shafts(\n        self,\n        painter: QPainter,\n        note_size: float,\n        visibility_filter: int,\n    ) -> None:\n        for head, tail in self._hold_pairs:\n            if self._effective_visibility(head) != int(visibility_filter):\n                continue\n            if tail.time_ms < self._chart_time_ms - 80.0:\n                continue\n\n            y1 = self._event_y(head)\n            y2 = self._event_y(tail)\n            if head.time_ms <= self._chart_time_ms <= tail.time_ms:\n                y1 = self._receptor_y()\n            anchor_x = self.lane_center(head.lane) + self._event_x_offset(head)\n            _, anchor_distance = self._path_anchor(head)\n            if self._effective_nx_mode():\n                x1 = x2 = anchor_x\n                scale = 1.0\n            else:\n                x1, y1, scale = self._throw_projection(\n                    anchor_x, y1, anchor_distance\n                )\n                x2, y2, _ = self._throw_projection(\n                    anchor_x, y2, anchor_distance\n                )\n            centre = (x1 + x2) / 2.0\n            rendered_note_size = note_size * scale\n            if (\n                not self._effective_nx_mode()\n                and (max(y1, y2) < -100 or min(y1, y2) > self.height() + 100)\n            ):\n                continue\n            target = QRectF(\n                centre - rendered_note_size / 2,\n                min(y1, y2),\n                rendered_note_size,\n                max(2.0, abs(y2 - y1)),\n            )\n            bank = (\n                None\n                if self._noteskin_pack is None\n                else self._noteskin_pack.bank(head.raw[2])\n            )\n            drawn = False\n            painter.save()\n            try:\n                if self._effective_nx_mode():\n                    painter.setTransform(\n                        self._playfield_transform(self._event_throw_z(head)),\n                        False,\n                    )\n                if bank is not None:\n                    frame = int(max(0.0, self._chart_time_ms) // 80) % len(\n                        bank.animation\n                    )\n                    atlas = bank.animation[frame]\n                    pixmap = self._pixmap(atlas)\n                    if pixmap is not None:\n                        atlas_lane = (\n                            self.start_column + self._visual_lane(head.lane)\n                        ) % 5\n                        tile_x, tile_y, tile_width, _ = atlas.tile(atlas_lane, 0)\n                        painter.drawPixmap(\n                            target,\n                            pixmap,\n                            QRectF(tile_x, tile_y, tile_width, 8),\n                        )\n                        drawn = True\n                if not drawn:\n                    width = max(8.0, rendered_note_size * 0.34)\n                    painter.fillRect(\n                        QRectF(\n                            centre - width / 2,\n                            min(y1, y2),\n                            width,\n                            max(2.0, abs(y2 - y1)),\n                        ),\n                        QColor(88, 160, 230, 210),\n                    )\n            finally:\n                painter.restore()\n\n    def _draw_note_group(\n        self,\n        painter: QPainter,\n        geometry: PlayfieldGeometry,\n        visibility_filter: int,\n    ) -> None:\n        self._draw_hold_shafts(painter, geometry.note_size, visibility_filter)\n        for note in self.visible_events():\n            if note.note_type == 0xB:\n                continue\n            if self._effective_visibility(note) != int(visibility_filter):\n                continue\n            key = self.session.event_key(note)\n            if (\n                key in self.session.judgments\n                and note.time_ms < self._chart_time_ms - 80\n            ):\n                continue\n            centre_x, centre_y, rendered_note_size = self._event_render_geometry(note)\n            rect = QRectF(\n                centre_x - rendered_note_size / 2,\n                centre_y - rendered_note_size / 2,\n                rendered_note_size,\n                rendered_note_size,\n            )\n            painter.save()\n            try:\n                if self._effective_nx_mode():\n                    painter.setTransform(\n                        self._playfield_transform(self._event_throw_z(note)),\n                        False,\n                    )\n                if not self._draw_asset(painter, note, rect):\n                    self._fallback_note(painter, note.note_type, rect)\n            finally:\n                painter.restore()\n\n    def _render_visibility_layer(\n        self,\n        geometry: PlayfieldGeometry,\n        visibility: int,\n    ) -> QImage:\n        image = QImage(self.size(), QImage.Format.Format_ARGB32_Premultiplied)\n        image.fill(0)\n        layer = QPainter(image)\n        try:\n            layer.setRenderHint(QPainter.RenderHint.Antialiasing, True)\n            layer.setTransform(self._playfield_transform(), False)\n            self._draw_note_group(layer, geometry, visibility)\n        finally:\n            layer.end()\n\n        mask = QPainter(image)\n        try:\n            mask.setCompositionMode(\n                QPainter.CompositionMode.CompositionMode_DestinationIn\n            )\n            gradient = QLinearGradient(0.0, 0.0, 0.0, float(self.height()))\n            for position, alpha in legacy_visibility_gradient_stops(visibility):\n                colour = QColor(255, 255, 255)\n                colour.setAlphaF(float(alpha))\n                gradient.setColorAt(float(position), colour)\n            mask.fillRect(\n                QRectF(0.0, 0.0, float(self.width()), float(self.height())),\n                QBrush(gradient),\n            )\n        finally:\n            mask.end()\n        return image\n\n''',
+          )
+
+          replace_region(
+              'src/stepnx/gui/preview_widget.py',
+              r'    def paintEvent\(.*?(?=    def _judgment_text\()',
+              '''    def paintEvent(self, event) -> None:\n        paint_started = perf_counter()\n        painter = QPainter(self)\n        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)\n        painter.fillRect(self.rect(), QColor("#05070b"))\n        geometry = self._geometry()\n        left = geometry.left\n        field_width = geometry.field_width\n        painter.fillRect(\n            QRectF(left, 0.0, field_width, float(self.height())), QColor("#10141e")\n        )\n        receptor_y = self._receptor_y()\n        playfield_transform = self._playfield_transform()\n        painter.save()\n        painter.setTransform(playfield_transform, False)\n        if self._show_guide:\n            painter.setPen(QPen(QColor("#ffd166"), 1.0, Qt.PenStyle.DashLine))\n            painter.drawLine(\n                QPointF(left, receptor_y), QPointF(left + field_width, receptor_y)\n            )\n        self._draw_sequence_zone(painter, geometry, receptor_y)\n        if self._flash_visible():\n            self._draw_note_group(painter, geometry, 3)\n        painter.restore()\n\n        if self._flash_visible():\n            # NXA/Prime apply Appear/Vanish through a screen-space alpha texture.\n            # Render each transition family into a device-space layer, then\n            # multiply by that exact vertical mask after all 3-D transforms.\n            for visibility in (1, 2):\n                layer = self._render_visibility_layer(geometry, visibility)\n                painter.drawImage(0, 0, layer)\n\n        painter.save()\n        painter.setTransform(playfield_transform, False)\n        self._draw_pad_feedback(painter, geometry)\n        painter.restore()\n\n        stats = self.session.stats\n        painter.setPen(QColor("#ffffff"))\n        if self.session.last_judgment is not None:\n            painter.drawText(\n                QRectF(left, 142, field_width, 40),\n                Qt.AlignmentFlag.AlignCenter,\n                self._judgment_text(self.session.last_judgment),\n            )\n        if stats.combo > 1:\n            painter.drawText(\n                QRectF(left, 178, field_width, 28),\n                Qt.AlignmentFlag.AlignCenter,\n                f"{stats.combo} COMBO",\n            )\n\n        mode = "AUTO" if self.session.autoplay else "MANUAL"\n        painter.setPen(QColor("#d7dbe5"))\n        painter.drawText(\n            QRectF(12, self.height() - 28, self.width() - 24, 20),\n            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,\n            f"{mode} · {self.session.selected_speed:g}x · "\n            f"{self._chart_time_ms / 1000:.3f}s · "\n            f"{self.field_mode} · COMMAND {self.command.raw or '—'}",\n        )\n        if self._show_debug:\n            self._draw_debug(painter, left, field_width)\n        painted_at = perf_counter()\n        self._paint_timestamps.append(painted_at)\n        self._paint_cost_ms = (painted_at - paint_started) * 1000.0\n\n''',
+          )
+
+          # Pure runtime regressions. 221/222 code and tests are intentionally
+          # left byte-for-byte untouched after visual validation.
+          replace_once(
+              'tests/unit/test_rise_visual_modifiers.py',
+              '''    PRIME2_THROW_AMPLITUDE,\n''',
+              '''    PRIME2_THROW_ALT_AMPLITUDE,\n    PRIME2_THROW_AMPLITUDE,\n''',
+          )
+          replace_once(
+              'tests/unit/test_rise_visual_modifiers.py',
+              '''from tests.fixture_factory import make_normal_nx20\n''',
+              '''from stepnx.preview.legacy_render import (\n    LEGACY_NX_FOV_DEGREES,\n    LEGACY_VISIBILITY_ALPHA_BIAS,\n    LEGACY_VISIBILITY_ALPHA_SLOPE,\n    LEGACY_VISIBILITY_SCREEN_CENTER,\n    legacy_nx_project_point,\n    legacy_visibility_alpha,\n)\nfrom tests.fixture_factory import make_normal_nx20\n''',
+          )
+          replace_once(
+              'tests/unit/test_rise_visual_modifiers.py',
+              '''        self.assertAlmostEqual(rise_z, -96.0, places=5)\n''',
+              '''        self.assertAlmostEqual(rise_z, -96.0, places=5)\n        self.assertEqual(PRIME2_THROW_ALT_AMPLITUDE, 300.0)\n        self.assertAlmostEqual(\n            prime2_throw_z_offset(\n                half_peak_beat,\n                1.0,\n                rise=False,\n                alternate_amplitude=True,\n            ),\n            300.0,\n            places=5,\n        )\n''',
+          )
+          replace_region(
+              'tests/unit/test_rise_visual_modifiers.py',
+              r'    def test_legacy_vanish_and_appear_keep_continuous_fade\(.*?(?=\n\nclass SequenceZoneTransformTests)',
+              '''    def test_prime_nxa_visibility_mask_is_screen_space_and_source_exact(self) -> None:\n        self.assertEqual(LEGACY_VISIBILITY_SCREEN_CENTER, 240.5)\n        self.assertEqual(LEGACY_VISIBILITY_ALPHA_BIAS, 128.0)\n        self.assertEqual(LEGACY_VISIBILITY_ALPHA_SLOPE, 8.0)\n        self.assertAlmostEqual(\n            legacy_visibility_alpha(240.5, 480.0, 1), 128.0 / 255.0\n        )\n        self.assertAlmostEqual(\n            legacy_visibility_alpha(240.5, 480.0, 2), 128.0 / 255.0\n        )\n        self.assertEqual(legacy_visibility_alpha(224.625, 480.0, 1), 1.0)\n        self.assertEqual(legacy_visibility_alpha(256.5, 480.0, 1), 0.0)\n        self.assertEqual(legacy_visibility_alpha(224.5, 480.0, 2), 0.0)\n        self.assertEqual(legacy_visibility_alpha(256.375, 480.0, 2), 1.0)\n        # Viewport resize scales logical screen coordinates, not the mask shape.\n        self.assertAlmostEqual(\n            legacy_visibility_alpha(481.0, 960.0, 1), 128.0 / 255.0\n        )\n\n    def test_nx_mode_projection_matches_nxa_prime_pipeline(self) -> None:\n        self.assertEqual(LEGACY_NX_FOV_DEGREES, 75.0)\n        centre_receptor = legacy_nx_project_point(320.0, 82.0, 640.0, 480.0)\n        self.assertAlmostEqual(centre_receptor[0], 320.0, places=5)\n        self.assertAlmostEqual(centre_receptor[1], 239.4348315793912, places=5)\n        lower = legacy_nx_project_point(320.0, 400.0, 640.0, 480.0)\n        self.assertAlmostEqual(lower[1], 60.0, places=5)\n        doubled = legacy_nx_project_point(640.0, 164.0, 1280.0, 960.0)\n        self.assertAlmostEqual(doubled[0], centre_receptor[0] * 2.0, places=5)\n        self.assertAlmostEqual(doubled[1], centre_receptor[1] * 2.0, places=5)\n        flat_drop = legacy_nx_project_point(320.0, 240.0, 640.0, 480.0, drop=True)\n        flat_normal = legacy_nx_project_point(320.0, 240.0, 640.0, 480.0)\n        self.assertAlmostEqual(flat_drop[1], flat_normal[1], places=5)\n        depth_normal = legacy_nx_project_point(\n            320.0, 240.0, 640.0, 480.0, z=100.0\n        )\n        depth_drop = legacy_nx_project_point(\n            320.0, 240.0, 640.0, 480.0, z=100.0, drop=True\n        )\n        self.assertNotAlmostEqual(depth_normal[1], depth_drop[1])\n''',
+          )
+          replace_once(
+              'tests/unit/test_rise_visual_modifiers.py',
+              '''        self.assertEqual(nx.pending_effects, ("^",))\n''',
+              '''        self.assertEqual(nx.pending_effects, ())\n''',
+          )
+
+          replace_once(
+              'tests/unit/test_preview.py',
+              '''        self.assertEqual(command.approximate_effects, ("V", "X"))\n        self.assertEqual(command.pending_effects, ("^",))\n''',
+              '''        self.assertEqual(command.approximate_effects, ("X",))\n        self.assertEqual(command.pending_effects, ())\n''',
+          )
+          replace_region(
+              'tests/unit/test_preview.py',
+              r'    def test_chart_visibility_composes_with_nonstep_vanish_and_flash\(.*?(?=    def test_launch_speed_overrides_legacy_cumulative_command_digits)',
+              '''    def test_chart_visibility_resolves_before_screen_space_mask(self) -> None:\n        plain = parse_gameplay_command("")\n        self.assertEqual(plain.effective_visibility(0), 0)\n        self.assertEqual(plain.effective_visibility(1), 1)\n        self.assertEqual(plain.effective_visibility(2), 2)\n        self.assertEqual(plain.effective_visibility(3), 3)\n        self.assertEqual(parse_gameplay_command("n").effective_visibility(3), 0)\n        self.assertEqual(parse_gameplay_command("p").effective_visibility(3), 1)\n        self.assertEqual(parse_gameplay_command("v").effective_visibility(3), 2)\n        self.assertEqual(parse_gameplay_command("vp").effective_visibility(3), 0)\n        flashing = parse_gameplay_command("w")\n        self.assertTrue(flashing.flash_visible(50.0))\n        self.assertFalse(flashing.flash_visible(150.0))\n\n''',
+          )
+
+          replace_once(
+              'tests/unit/test_qt_preview.py',
+              '''    from PySide6.QtCore import QEvent, QPoint, Qt\n''',
+              '''    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt\n''',
+          )
+          replace_once(
+              'tests/unit/test_qt_preview.py',
+              '''        legacy_acc_dec_distance,\n''',
+              '''        legacy_acc_dec_distance,\n''',
+          )
+          replace_once(
+              'tests/unit/test_qt_preview.py',
+              '''except ImportError as exc:\n''',
+              '''    from stepnx.preview.legacy_render import (\n        legacy_nx_project_point,\n        legacy_visibility_gradient_stops,\n    )\nexcept ImportError as exc:\n''',
+          )
+          replace_region(
+              'tests/unit/test_qt_preview.py',
+              r'    def test_legacy_visibility_fade_is_local_to_note_scale\(.*?(?=    def test_event_culling_uses_chart_time_without_mutating_stream)',
+              '''    def test_legacy_visibility_uses_native_screen_mask(self) -> None:\n        widget = self._widget("v")\n        try:\n            widget.resize(640, 480)\n            self.assertEqual(widget._effective_visibility(widget.stream.events[0]), 2)\n            stops = legacy_visibility_gradient_stops(2)\n            self.assertAlmostEqual(stops[1][0] * 480.0, 224.5, places=5)\n            self.assertAlmostEqual(stops[2][0] * 480.0, 256.375, places=5)\n        finally:\n            widget.close()\n\n    def test_nx_mode_qtransform_matches_recovered_projection(self) -> None:\n        widget = self._widget("^")\n        try:\n            widget.resize(640, 480)\n            self.assertTrue(widget._effective_nx_mode())\n            mapped = widget._playfield_transform().map(QPointF(320.0, 82.0))\n            expected_x, expected_y = legacy_nx_project_point(\n                320.0, 82.0, 640.0, 480.0\n            )\n            self.assertAlmostEqual(mapped.x(), expected_x, places=5)\n            self.assertAlmostEqual(mapped.y(), expected_y, places=5)\n        finally:\n            widget.close()\n\n''',
+          )
+
+          # Replace the earlier provisional audit notes with recovered binary facts.
+          audit = Path('docs/PRIME2_PATH_MODIFIER_AUDIT.md')
+          text = audit.read_text(encoding='utf-8')
+          text = text.replace(
+              'Prime 2 also contains an external-state branch choosing `200/-200`, giving `300/-300` after the 1.5 multiplier. The producer of that external state is not identified, so StepNX does not enable the alternate amplitude implicitly.',
+              'Prime/NXA identify the `200/-200` branch as **NX Mode**. After the same 1.5 multiplier, NX Mode therefore uses `+/-300` while the normal branch remains `+/-96`. StepNX selects the 300-unit depth branch whenever Header 22 or COMMAND `^` enables NX Mode.',
+          )
+          text = text.replace(
+              '- Legacy Appear/Vanish remains a continuous fade, but its spatial window is compact around the judge line. StepNX now scales that window to `1.5 * rendered note size` instead of viewport height; the exact legacy easing curve remains approximate.\n- PIUTESTER/NX2 compatibility command `^` is restored to the selector as **NX Mode**. It is distinct from `x` / Exceed. No visual consumer is invented until source evidence establishes its rendering behavior.',
+              '''- NX20 Snake Path `221/222` remains locked after visual validation; this port does not alter its code or interpolation.\n\n## Prime/NXA visibility mask and NX Mode\n\nPrime and NXA independently generate the same 32x512 RGBA visibility texture. The low VisualEffect states are 0 Invisible, 1 Appear, 2 Vanish, 3 Visible. The recovered mask constants are centre 256, vertex offset 16.5, alpha bias 128 and slope +/-8 per logical pixel. On the native 640x480 viewport, alpha 128 occurs at screen Y 240.5 and the complete transition occupies only about 32 logical pixels (roughly Y 224.5..256.5). StepNX now renders Appear/Vanish into screen-space layers and applies that vertical mask after path/perspective transforms, matching the texture consumer rather than assigning one opacity to the entire sprite.\n\nHeader 22 and COMMAND `^` feed the same **NX Mode** state. Both supplied executables select a 75-degree perspective instead of the normal 90-degree projection. NXA then applies the recovered 1.5 scale and X-axis tilt: -120 degrees in the normal branch and -60 degrees in the Drop branch. StepNX collapses each fixed-Z plane to the equivalent projective homography, so arrow artwork and long-note geometry are warped rather than merely repositioned. Sink/Rise uses the recovered NX-specific +/-300 Z branch.\n\nThe standalone preview preserves Under Attack as the already-validated independent 180-degree field transform before the NX homography. The native combined UA+NX branch was not separately used as an arbiter in this pass.''',
+          )
+          audit.write_text(text, encoding='utf-8')
+          PY
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libpulse0 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+      - name: Install StepNX Studio with GUI dependencies
+        run: python -m pip install -e '.[gui]'
+      - name: Run complete repository suite
+        run: python -m unittest discover -s tests -v
+      - name: Commit verified port
+        run: |
+          git config user.name 'OpenAI'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/port-native-visibility-nx.yml
+          git add src/stepnx/preview/legacy_render.py \
+                  src/stepnx/preview/commands.py \
+                  src/stepnx/preview/visuals.py \
+                  src/stepnx/gui/preview_widget.py \
+                  tests/unit/test_rise_visual_modifiers.py \
+                  tests/unit/test_preview.py \
+                  tests/unit/test_qt_preview.py \
+                  docs/PRIME2_PATH_MODIFIER_AUDIT.md
+          git diff --cached --check
+          git commit -m 'Port native visibility mask and NX Mode rendering'
+          git push origin HEAD:audit/rise-visual-command-re
