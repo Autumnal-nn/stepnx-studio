@@ -114,13 +114,14 @@ if rawSpeed < 0:
 | ID | Area | Status | Native evidence | Studio state / action |
 |---|---|---|---|---|
 | RV-001 | Base note Y projection | MATCH | `LineBase.RePos()` uses `PlayBase.GetBlockBeat(block,line) * _baseVelocity`. | Renderer uses native beat distance and recovered base velocity. |
-| RV-002 | Accel / Decel | FIXED scalar path | `LineBase.GetAccDecYOffset()` normalizes Y over `_yMin=200`..`_yMax=550`; Accel is `(1-pow(t,1.5))*-200`, Decel is `pow(1-t,1.5)*-200`, then `_accScale=1`. | Synthetic pixel powers were removed. The flattened preview cannot exactly reproduce `TryGetMaxVisibleSplitLocalY` aggregation for grouped split children, so that grouping detail remains an explicit presentation limitation. |
+| RV-002 | Accel / Decel | FIXED, generation-separated | R!SE Header ID 2 uses `LineBase.GetAccDecYOffset()` with the normalized 1.5-power curves. Prime 1 and NXA independently prove the historical launch-command path: with `x=beatDistance*60*highSpeed`, Acceleration is `600-50000/(x+83.33333587646484)` and Deceleration is `x^3/1600`. | Header state keeps the R!SE LineBase path; PIUTESTER/NX2 A/D now use the Prime/NXA formulas instead of conflating the two generations. |
 | RV-003 | Snake | OPEN in R!SE / FIXED historical projection | The current R!SE image preserves Snake state and a 20-unit LineBase helper, but this audit has no validated gameplay consumer making that dormant path authoritative. Prime 2 `exec` proves the historical runtime path `sin(pi*phase) * 60 * 0.5`, i.e. amplitude 30. | StepNX deliberately ignores the dormant R!SE 20-unit implementation and uses the Prime 2 30-unit path for Snake visualization, including Header Snake state. Path-modified long shafts are sampled along the same trajectory. |
 | RV-004 | Earthworm | FIXED | `PUMPPlayer.DrawStep()` reads `Step.msCurTime`, multiplies `Div.nBeatSplit` by the loaded offset-0x14 `_BPM` slot, which `StepLoader` has overwritten with `msPerLine`, then selects 500 ms 3x/2x or 360 ms 2x/1x square waves around the 333.33334 threshold. Skip loads the slot as zero. | Earthworm is evaluated on an internal 1/60 s DrawStep cadence, independent of UI `advance()` chunk size, updates `_modeSpeedExt`, and then follows `_modeSpeed`/`SpeedProc`; it no longer moves notes horizontally. |
-| RV-005 | Random Velocity | APPROXIMATION only for RNG stream | DrawStep gate is exact `Line % 48 == 0`; native RNG result is converted with signed `% 4 + 1` before updating `_modeSpeedExt`, and DrawStep rerolls on each update while the qualifying line remains current. | Gate, 1/60 s cadence, repeated qualifying-line reroll, and `%4+1` conversion are implemented. Python's deterministic RNG substitutes for the unrecovered Unity RNG sequence, which is the remaining approximation. |
+| RV-005 | Random Velocity | FIXED behavioral projection | DrawStep gate is exact `Line % 48 == 0`; native RNG result is converted with signed `% 4 + 1` before updating `_modeSpeedExt`, and DrawStep rerolls on each update while the qualifying line remains current. | Gate, 1/60 s cadence, repeated qualifying-line reroll and `%4+1` conversion are implemented. The preview uses a deterministic local RNG; matching Unity's internal RNG state is deliberately not a parity requirement. |
 | RV-006 | Header Visibility | FIXED state / APPROXIMATION presentation | `PlayBase.InitData` rewrites only the low `VisualEffect` nibble: Vanish=2, Appear=1, Hidden=0; high bits such as `Effects.bZigZag=0x10` survive. | Runtime event bytes receive the rewrite without mutating the canonical NX document. Exact Animator fade curves remain asset-dependent; preview opacity is therefore not claimed pixel-perfect. |
-| RV-007 | ZigZag | OPEN | `Effects.bZigZag=0x10`, Header `GameModifier.bZigZag`, and Div params 221/222 are named in metadata. | No source-supported gameplay transform consumer has been recovered strongly enough to replace this with a guessed animation. State/raw bits remain preserved. |
+| RV-007 | ZigZag | FIXED historical projection | Prime 1 has a live `path_zigzag` consumer around `0x806D6EF`: Div 222=start, Div 221=interval, nine interpolated lane-permutation keyframes for phase 0..8, generated with the recovered `state=state*0x0019660D+0x3C6EF35F` LCG. | Header ZigZag drives the recovered path and Split 221/222 are retained in the runtime stream. The engine-owned per-player seed contribution is unavailable, so the resolved route seed initializes the otherwise recovered permutation generator. |
 | RV-008 | Throw | FIXED historical compatibility projection | R!SE exposes Flat/Sink/Rise and `LineBase.PlayThrowAnim()` but delegates movement to Animator/assets. Prime 2 provides a reproducible historical sine path: span 453, amplitude 96, with Rise reversing the sign. | Preview uses the Prime 2 path as an explicit compatibility projection for Sink/Rise. Path-modified long shafts follow the sampled curve. The unidentified Prime 2 alternate 300-unit producer is not enabled. |
+| RV-009 | Under Attack / Drop | FIXED | Prime 1 applies sequence-zone matrix transforms around the whole rendered field; Under Attack uses a 180-degree rotation and Drop is the independent vertical flip. | The shared painter transform covers receptor artwork, note coordinates, note artwork, holds and pad feedback; input mapping follows the transformed field. |
 
 ## Editor / authoring
 
@@ -173,9 +174,9 @@ if rawSpeed < 0:
 The completed repository-wide validation for this audit pass is:
 
 ```text
-GitHub Actions run: 33256211227
-Commit tested: 9ff6f29f042a41e4e163e0df81d88074eb95a622
-Ran 476 tests in 1.975s
+GitHub Actions run: 33274239781
+Production commit: 9aebcb53634fbdc14462dc1553a77a0d6cacc3d9
+Ran 491 tests in 4.477s
 OK
 ```
 

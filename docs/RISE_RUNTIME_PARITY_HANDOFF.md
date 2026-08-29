@@ -317,6 +317,19 @@ Decel: pow(1 - t, 1.5)   * -200
 
 The previous synthetic pixel powers were removed. `TryGetMaxVisibleSplitLocalY` can substitute a grouped child maximum before this scalar formula; flattened preview events cannot reproduce that grouping perfectly and the limitation is explicit.
 
+That modern Header path is **not** the historical PIUTESTER/NX2 Acceleration/Deceleration command path. The supplied unpacked Prime 1 and NXA executables independently agree on the older renderer. With `x = beatDistance * 60 * highSpeed`:
+
+```text
+Acceleration (mode 1): 600 - 50000 / (x + 83.33333587646484)
+Deceleration (mode 2): x^3 / 1600
+```
+
+Prime 1 uses the same constants through its SSE branch around `0x806D350..0x806D809`; NXA reproduces them through the x87 branch around `0x8093475..0x809377C`. StepNX now keeps these historical A/D commands separate from the R!SE Header ID 2 LineBase curve instead of incorrectly routing both through one formula.
+
+### Under Attack / Drop
+
+Prime 1 confirms the sequence-zone transform applies to the complete rendered field, not just the receptor strip. Under Attack performs the 180-degree field rotation; the same painter transform therefore affects receptor artwork, note positions, note artwork, holds and pad feedback. Drop remains the independent vertical-flip bit. Their composition is preserved as the native bitmask rather than collapsed into a lane permutation.
+
 ### Snake
 
 The current R!SE image preserves Snake state plus a 20-unit `LineBase` helper, but no validated gameplay consumer for that state was recovered. Per the audit policy, that dormant implementation is **not** treated as preview behavior.
@@ -377,7 +390,18 @@ Line % 48 == 0
 native RNG result % 4 + 1
 ```
 
-before writing `_modeSpeedExt`. StepNX uses the exact line gate, 1/60 s DrawStep cadence, repeated rerolls while a qualifying line remains current, and signed modulo conversion. The exact Unity RNG stream is still unrecovered, so a deterministic Python RNG supplies the sequence; that sequence is the remaining approximation.
+before writing `_modeSpeedExt`. StepNX uses the exact line gate, 1/60 s DrawStep cadence, repeated rerolls while a qualifying line remains current, and signed modulo conversion. The standalone preview intentionally uses its deterministic RNG rather than attempting to clone Unity's private RNG state; exact RNG identity is not a parity requirement for this modifier.
+
+### ZigZag
+
+Prime 1 contains a live `path_zigzag` consumer around `0x806D6EF`. Split param 222 is the path start and param 221 is the keyframe interval; both default to 1. After the start, the renderer interpolates through nine lane-permutation keyframes for phase 0 through 8 and then holds keyframe eight. The permutation generator uses the recovered 32-bit LCG:
+
+```text
+state = state * 0x0019660D + 0x3C6EF35F
+pick  = (state >> 8) % remaining
+```
+
+StepNX ports that consumer and preserves Split 221/222 into the runtime stream. Prime also mixes an engine-owned per-player value into the initial seed; the standalone preview substitutes its resolved route seed, so the path mechanics are recovered while the exact native permutation sequence is intentionally preview-local. Header ZigZag state now drives this path.
 
 ### COMMAND launch selector
 
@@ -389,31 +413,30 @@ Speed remains a separate 1x..9x selector. Acceleration/Deceleration and Random V
 
 Do not invent transforms for:
 
-- ZigZag: `Effects.bZigZag=0x10`, Header `bZigZag`, and Div params 221/222 are known, but a sufficiently strong direct gameplay consumer has not been recovered;
 - R!SE's exact Throw Animator/asset movement; the preview intentionally uses the recovered Prime 2 sine path as a historical compatibility projection;
-- exact Appear/Vanish Animator/material fade curves;
-- exact Random Velocity Unity RNG sequence.
+- exact Appear/Vanish Animator/material fade curves.
+
+ZigZag is no longer source-gated: Prime 1 supplied the historical consumer. Random Velocity's exact Unity RNG sequence is deliberately not a parity target; its gate, cadence and speed conversion are the behaviorally relevant pieces.
 
 ## Final validation checkpoint
 
 The completed repository-wide validation after the visual-command correction pass is:
 
 ```text
-GitHub Actions run: 33269051446
-Commit tested: 0549562fa48f8927e1193fbc6059c5b21698b007
-Ran 486 tests
+GitHub Actions run: 33274239781
+Commit tested before the resulting production commit: 9f540e350fcb27e66bb8e61b4c305405258d8c6f
+Production commit: 9aebcb53634fbdc14462dc1553a77a0d6cacc3d9
+Ran 491 tests in 4.477s
 OK
 ```
 
-This checkpoint includes dedicated regressions for independent UA/Drop bitmask geometry, row-wise Random projection with hold continuity, Accel/Decel transform order, Prime 2 Snake amplitude 30, Prime 2 Sink/Rise paths, Header Visibility without document mutation, Earthworm fixed DrawStep cadence, Random Velocity repeated qualifying-line rerolls, external-advance chunk invariance, and the 18-entry semantic modifier selector. Path-modified long-note shafts are rendered by sampling the same trajectory as their note heads.
+This checkpoint includes dedicated regressions for independent UA/Drop bitmask geometry, whole-field Under Attack rotation, row-wise Random projection with hold continuity, the Prime/NXA historical Acceleration/Deceleration formulas, the distinct R!SE Header AccDec curve, Prime 2 Snake amplitude 30, Prime 2 Sink/Rise paths, Prime 1 ZigZag keyframes plus Split 221/222 preservation, Header Visibility without document mutation, Earthworm fixed DrawStep cadence, Random Velocity repeated qualifying-line rerolls, external-advance chunk invariance, and the complete 18-entry semantic modifier selector. Path-modified long-note shafts are rendered by sampling the same trajectory as their note heads.
 
 The dormant R!SE Snake 20-unit helper is deliberately **not** accepted as behavior because no validated gameplay consumer was recovered; Prime 2 is the historical runtime arbiter for Snake.
 
 ## Remaining source-gated side paths
 
-- exact ZigZag transform consumer;
 - exact R!SE Throw Animator/asset curve; the preview uses the recovered Prime 2 historical sine projection instead;
-- exact Random Velocity Unity RNG sequence; gate, conversion and DrawStep cadence are implemented;
 - exact Appear/Vanish Animator/material curves; the current fade is an explicit visual approximation;
 - exact legacy Exceed affine coefficient; current X-mode projection is explicitly approximate and isolated;
 - real producer of `CommonModifier.SpeedBoost`;
