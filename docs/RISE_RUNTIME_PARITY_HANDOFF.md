@@ -396,25 +396,26 @@ Do not invent transforms for:
 
 ## Final validation checkpoint
 
-The completed repository-wide validation for Items 0 through 6 is:
+The completed repository-wide validation after the visual-command correction pass is:
 
 ```text
-GitHub Actions run: 33256211227
-Commit tested: 9ff6f29f042a41e4e163e0df81d88074eb95a622
-Ran 476 tests in 1.975s
+GitHub Actions run: 33269051446
+Commit tested: 0549562fa48f8927e1193fbc6059c5b21698b007
+Ran 486 tests
 OK
 ```
 
-The run includes dedicated regressions for LineBase constants and curves, Snake, Header Visibility without document mutation, Earthworm including the loaded `_BPM`/`msPerLine` alias and Skip behavior, Random Velocity gate/conversion, speed-mode resolution, and the selectable COMMAND dialog.
+This checkpoint includes dedicated regressions for independent UA/Drop bitmask geometry, row-wise Random projection with hold continuity, Accel/Decel transform order, Prime 2 Snake amplitude 30, Prime 2 Sink/Rise paths, Header Visibility without document mutation, Earthworm fixed DrawStep cadence, Random Velocity repeated qualifying-line rerolls, external-advance chunk invariance, and the 18-entry semantic modifier selector. Path-modified long-note shafts are rendered by sampling the same trajectory as their note heads.
 
-The first final-attempt run exposed two test regressions, not production behavior defects: a source-string assertion tied to the old renderer shape and a zero-tolerance assumption incompatible with R!SE's float32 pi. Both were corrected before the green checkpoint without weakening the native implementation.
+The dormant R!SE Snake 20-unit helper is deliberately **not** accepted as behavior because no validated gameplay consumer was recovered; Prime 2 is the historical runtime arbiter for Snake.
 
 ## Remaining source-gated side paths
 
 - exact ZigZag transform consumer;
-- Throw Animator/asset movement;
-- exact Random Velocity RNG stream/cadence;
-- exact Appear/Vanish Animator curves;
+- exact R!SE Throw Animator/asset curve; the preview uses the recovered Prime 2 historical sine projection instead;
+- exact Random Velocity Unity RNG sequence; gate, conversion and DrawStep cadence are implemented;
+- exact Appear/Vanish Animator/material curves; the current fade is an explicit visual approximation;
+- exact legacy Exceed affine coefficient; current X-mode projection is explicitly approximate and isolated;
 - real producer of `CommonModifier.SpeedBoost`;
 - challenge-mode HPBar.Add branch;
 - forced-judgment Div 999 consumer;
