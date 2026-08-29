@@ -2,7 +2,7 @@
 
 Date: 2026-08-29
 
-Scope: use the supplied Pump It Up Prime 2 `exec` only as a historical runtime arbiter for legacy path modifiers where R!SE and PIUTESTER expose different constants. R!SE remains the primary specification for modern Header StepParam behavior.
+Scope: use the supplied Pump It Up Prime 2 `exec` as the historical runtime arbiter for legacy path modifiers whenever the current R!SE build only preserves modifier state or otherwise lacks a validated gameplay consumer. R!SE remains the primary specification where an actual reproducible consumer exists. Snake is the explicit exception: its dormant R!SE state/helper is not treated as a behavioral specification.
 
 Supplied executable SHA-256:
 
@@ -10,7 +10,7 @@ Supplied executable SHA-256:
 
 The executable is UPX-packed. Analysis was performed on a reconstructed/unfiltered copy without executing the game.
 
-## Snake: 30 is correct for Prime 2
+## Snake: 30 is the runtime arbiter
 
 The Prime 2 rendering path around VA `0x08070bbf` tests its Snake state and enters this scalar path:
 
@@ -32,12 +32,7 @@ xOffset = sin(pi * phase) * 60 * 0.5
         = sin(pi * phase) * 30
 ```
 
-This resolves the 20-versus-30 discrepancy:
-
-- R!SE `LineBase.PlaySnakeAnim`: amplitude **20** (`LineBase.xAmplitude` constructor default).
-- Prime 2 legacy Snake: amplitude **30**.
-
-StepNX intentionally keeps these as separate helpers rather than forcing one generation's constant onto the other.
+The current R!SE image contains a 20-unit `LineBase` Snake helper/state path, but this audit did not validate a gameplay consumer that makes that helper authoritative. Per project policy, dormant implementation is not promoted into preview semantics. StepNX therefore uses the Prime 2 30-unit path for Snake visualization, including when a loaded Header exposes Snake state.
 
 ## Sink / Rise
 
@@ -54,14 +49,18 @@ The second active state substitutes `-64.0` before the same sine path, yielding 
 
 Prime 2 also contains an external-state branch choosing `200/-200`, giving `300/-300` after the 1.5 multiplier. The producer of that external state is not identified, so StepNX does not enable the alternate amplitude implicitly.
 
+## Exceed
+
+Prime 2 and the PIUTESTER lineage confirm that Exceed/X Mode is a real horizontal path transform, not a lane permutation. The exact affine coefficient has not yet been recovered strongly enough to call the current 2D projection source-exact. The preview keeps that approximation isolated in `legacy_exceed_x_offset()` rather than contaminating Mirror, Under Attack, Drop, or Random semantics.
+
 ## Implementation boundary
 
 The Studio preview now treats:
 
-- R!SE Header Snake as the modern 20-unit LineBase path;
-- selectable legacy Snake as the Prime 2 30-unit path;
+- Snake as the Prime 2 30-unit historical path; the dormant R!SE 20-unit helper is deliberately ignored as behavioral evidence;
 - selectable Sink/Rise as the recovered Prime 2 sine path;
-- R!SE Header Throw as using the historical curve only as a compatibility projection because the modern runtime ultimately drives an Animator;
+- R!SE Header Throw as using the historical curve as a compatibility projection because the modern runtime ultimately drives an Animator;
+- path-modified long-note shafts as sampled trajectories rather than straight endpoint rectangles;
 - Exceed as a separately labelled approximation until its exact legacy affine coefficient is recovered.
 
 No proprietary executable bytes or game assets are copied into the repository.
