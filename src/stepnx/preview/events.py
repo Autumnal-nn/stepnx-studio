@@ -93,9 +93,15 @@ class RuntimeEventStream:
         )
 
     def position_at(self, time_ms: float) -> float:
-        """Return the current source-native Block/Line beat coordinate."""
+        """Return the compatibility cumulative-row preview coordinate.
 
-        if self.native_timing is not None:
+        Skip routes retain the native absolute coordinate because zero-duration
+        Divs cannot be represented by the old monotonic segment interpolation.
+        Runtime note placement never depends on this compatibility axis;
+        ``beat_distance_at`` uses PlayBase.GetBlockBeat directly for every route.
+        """
+
+        if self.uses_native_skip_projection and self.native_timing is not None:
             return self.native_timing.current_position(time_ms)
         if not self.timing:
             return 0.0
@@ -217,10 +223,11 @@ def build_event_stream(
 
         # Negative serialized Speed is not a local visual freeze in R!SE.
         # StepLoader uses the sign only while deciding whether to construct Gap,
-        # then normalizes Speed positive. The timing segment is kept only for
-        # culling/compatibility; runtime placement uses native Block/Line state.
-        start_position = native_timing.line_position(selected_index, 0)
-        end_position = native_timing.line_position(selected_index, len(block.rows))
+        # then normalizes Speed positive. PreviewTimingSegment remains a stable
+        # authored-coordinate compatibility/culling axis; runtime Y placement
+        # uses native Block/Line state through beat_distance_at().
+        start_position = authored_position
+        end_position = authored_position + len(block.rows) * native_div.beat_per_line
         timing.append(
             PreviewTimingSegment(
                 split.stable_id,
@@ -245,9 +252,6 @@ def build_event_stream(
             # spatial rows and fully judgeable according to note semantics.
             time_ms = native_timing.judgment_time(selected_index, row_index)
             beat = row_index / block.beat_split
-            # ``position`` remains the stable authored cumulative-row coordinate
-            # used by older preview APIs. Runtime Y placement never consumes it;
-            # beat_distance_at() routes through PlayBase.GetBlockBeat instead.
             event_position = authored_position + row_index * native_div.beat_per_line
             for lane, cell in enumerate(row.cells):
                 if cell.raw == b"\x00\x00\x00\x00":
@@ -266,7 +270,7 @@ def build_event_stream(
                         selected_index,
                     )
                 )
-        authored_position += len(block.rows) * native_div.beat_per_line
+        authored_position = end_position
 
     timing.sort(key=lambda item: (item.start_time_ms, item.split_id, item.block_id))
     events.sort(
