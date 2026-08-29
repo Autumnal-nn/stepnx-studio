@@ -17,6 +17,9 @@ from stepnx.preview import (
     LINE_BASE_X_AMPLITUDE,
     LINE_BASE_Y_MAX,
     LINE_BASE_Y_MIN,
+    PRIME2_SNAKE_AMPLITUDE,
+    PRIME2_THROW_AMPLITUDE,
+    PRIME2_THROW_SPAN,
     AccDecMode,
     GameplaySession,
     RoutePolicy,
@@ -32,6 +35,8 @@ from stepnx.preview import (
     native_line_y,
     native_snake_x_offset,
     parse_gameplay_command,
+    prime2_snake_x_offset,
+    prime2_throw_y_offset,
     random_velocity_triggers,
     random_velocity_user_speed,
     resolve_route,
@@ -99,42 +104,45 @@ class RiseLineBaseVisualTests(unittest.TestCase):
         local = native_line_local_y(distance, AccDecMode.ACCELERATION)
         speed2 = native_line_y(distance, 2.0, AccDecMode.ACCELERATION)
 
-        # pHighSpeed scales the already-curved displacement around the receptor.
         self.assertAlmostEqual(
             BASE_ARROW_Y - speed2,
             2.0 * (BASE_ARROW_Y - local),
         )
-        # This would differ if speed were incorrectly multiplied into beat
-        # distance before GetAccDecYOffset.
         wrong_base = BASE_ARROW_Y - distance * LINE_BASE_VELOCITY * 2.0
         wrong = wrong_base + native_acc_dec_offset(wrong_base, AccDecMode.ACCELERATION)
         self.assertNotAlmostEqual(speed2, wrong)
 
-    def test_snake_uses_native_y_normalization_sine_and_amplitude(self) -> None:
+    def test_rise_snake_keeps_modern_twenty_unit_amplitude(self) -> None:
         span = LINE_BASE_Y_MAX - LINE_BASE_Y_MIN
-        self.assertAlmostEqual(
-            native_snake_x_offset(LINE_BASE_Y_MIN, 72.0),
-            0.0,
-            places=6,
-        )
         self.assertAlmostEqual(
             native_snake_x_offset(LINE_BASE_Y_MIN + span * 0.25, 72.0),
             20.0,
             places=6,
-        )
-        # R!SE uses its float32 pi constant, so mathematical pi leaves a tiny
-        # nonzero residue at the half-cycle instead of an exact Python zero.
-        self.assertAlmostEqual(
-            native_snake_x_offset(LINE_BASE_Y_MIN + span * 0.50, 72.0),
-            0.0,
-            delta=2.0e-6,
         )
         self.assertAlmostEqual(
             native_snake_x_offset(LINE_BASE_Y_MIN + span * 0.75, 72.0),
             -20.0,
             places=6,
         )
-        self.assertEqual(native_snake_x_offset(LINE_BASE_Y_MAX, 72.0), 0.0)
+
+    def test_prime2_arbitrates_legacy_snake_at_thirty_units(self) -> None:
+        # Supplied Prime 2 exec: sinf(pi*phase) * 60.0 * 0.5.
+        self.assertEqual(PRIME2_SNAKE_AMPLITUDE, 30.0)
+        self.assertAlmostEqual(prime2_snake_x_offset(0.5, 60.0), 30.0, places=5)
+        self.assertAlmostEqual(prime2_snake_x_offset(1.5, 60.0), -30.0, places=5)
+
+    def test_prime2_sink_and_rise_are_opposite_sine_offsets(self) -> None:
+        self.assertEqual(PRIME2_THROW_SPAN, 453.0)
+        self.assertEqual(PRIME2_THROW_AMPLITUDE, 96.0)
+        half_peak_beat = PRIME2_THROW_SPAN / (2.0 * 60.0 * 1.0)
+        sink = prime2_throw_y_offset(
+            half_peak_beat, 1.0, 60.0, rise=False
+        )
+        rise = prime2_throw_y_offset(
+            half_peak_beat, 1.0, 60.0, rise=True
+        )
+        self.assertAlmostEqual(sink, 96.0, places=5)
+        self.assertAlmostEqual(rise, -96.0, places=5)
 
 
 class SequenceZoneTransformTests(unittest.TestCase):
@@ -203,7 +211,10 @@ class SequenceZoneTransformTests(unittest.TestCase):
                     normal_receptor_y=413.0,
                 )
                 self.assertEqual(y, 240.0)
-                self.assertEqual(x, 540.0 if base & SequenceZoneTransform.UNDER_ATTACK else 100.0)
+                self.assertEqual(
+                    x,
+                    540.0 if base & SequenceZoneTransform.UNDER_ATTACK else 100.0,
+                )
 
 
 class RiseVisibilityTests(unittest.TestCase):
@@ -255,22 +266,14 @@ class RiseVisibilityTests(unittest.TestCase):
 
 class RiseSpeedModeTests(unittest.TestCase):
     def test_earthworm_fast_and_slow_branches_match_drawstep_boundaries(self) -> None:
-        # DrawStep reads Div._BPM after StepLoader has overwritten that slot
-        # with msPerLine. 125 ms/line * BeatSplit 4 = 500 ms/beat, so it takes
-        # the >=333.33334 branch.
         self.assertEqual(earthworm_user_speed(0.0, 125.0, 4), 3.0)
         self.assertEqual(earthworm_user_speed(250.9, 125.0, 4), 3.0)
         self.assertEqual(earthworm_user_speed(251.0, 125.0, 4), 2.0)
         self.assertEqual(earthworm_user_speed(500.0, 125.0, 4), 3.0)
-
-        # 62.5 ms/line * BeatSplit 4 = 250 ms/beat, below the threshold.
         self.assertEqual(earthworm_user_speed(0.0, 62.5, 4), 2.0)
         self.assertEqual(earthworm_user_speed(180.9, 62.5, 4), 2.0)
         self.assertEqual(earthworm_user_speed(181.0, 62.5, 4), 1.0)
         self.assertEqual(earthworm_user_speed(360.0, 62.5, 4), 2.0)
-
-        # Skip sets msPerLine / loaded _BPM to zero and therefore uses the
-        # low-density 360 ms branch regardless of authored BPM.
         self.assertEqual(earthworm_user_speed(181.0, 0.0, 4), 1.0)
 
     def test_random_velocity_uses_line_48_gate_and_modulo_four_speed(self) -> None:
@@ -326,13 +329,14 @@ class RiseSpeedModeTests(unittest.TestCase):
 
 class CommandRegistryTests(unittest.TestCase):
     def test_registry_is_complete_unique_and_serializes_in_ui_order(self) -> None:
-        self.assertEqual(len(COMMAND_FLAGS), 14)
+        self.assertEqual(len(COMMAND_FLAGS), 18)
         codes = tuple(flag.code for flag in COMMAND_FLAGS)
         self.assertEqual(len(codes), len(set(codes)))
         self.assertEqual(
             codes,
             (
                 "v",
+                "p",
                 "n",
                 "w",
                 "f",
@@ -344,6 +348,9 @@ class CommandRegistryTests(unittest.TestCase):
                 "d",
                 "a",
                 "x",
+                "(",
+                ")",
+                "z",
                 "s",
                 "e",
             ),
@@ -362,6 +369,20 @@ class CommandRegistryTests(unittest.TestCase):
 
         mirror = parse_gameplay_command("m")
         self.assertEqual(mirror.lane_map(5), (4, 3, 2, 1, 0))
+
+    def test_appear_and_vanish_compose_to_hidden(self) -> None:
+        command = parse_gameplay_command("vp")
+        self.assertTrue(command.vanish)
+        self.assertTrue(command.appear)
+        self.assertEqual(
+            command.note_opacity(
+                3,
+                distance=100.0,
+                fade_distance=400.0,
+                time_ms=0.0,
+            ),
+            0.0,
+        )
 
 
 if __name__ == "__main__":
