@@ -9,6 +9,9 @@ from stepnx.preview.modifiers import EffectiveModifier
 JUDGE_FRAME_MS = 16.66666603088379
 DEFAULT_JUDGE_DELAY_FRAMES = 2.5
 DEFAULT_JUDGE_GRADES = 4
+DEFAULT_JUDGE_PERFECT_MS = JUDGE_FRAME_MS * 2.5
+DEFAULT_JUDGE_INTERVAL_MS = JUDGE_FRAME_MS * 2.5
+DEFAULT_JUDGE_DELAY_MS = JUDGE_FRAME_MS * DEFAULT_JUDGE_DELAY_FRAMES
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,9 +23,9 @@ class NativeJudgeTiming:
     consumes ``Delay`` before Step.GetGrade sees the remaining error.
     """
 
-    perfect_ms: float
-    interval_ms: float
-    delay_ms: float
+    perfect_ms: float = DEFAULT_JUDGE_PERFECT_MS
+    interval_ms: float = DEFAULT_JUDGE_INTERVAL_MS
+    delay_ms: float = DEFAULT_JUDGE_DELAY_MS
     n_grade: int = DEFAULT_JUDGE_GRADES
 
     @classmethod
