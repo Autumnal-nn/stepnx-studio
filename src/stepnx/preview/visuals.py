@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from math import pow, sin
 
-from stepnx.preview.modifiers import AccDecMode, VisibilityMode
+from stepnx.preview.modifiers import (
+    AccDecMode,
+    SequenceZoneTransform,
+    VisibilityMode,
+)
 from stepnx.preview.speed import (
     BASE_ARROW_Y,
     LINE_BASE_VELOCITY,
@@ -55,6 +59,36 @@ def native_acc_dec_offset(
     return shape * LINE_BASE_ACC_OFFSET * float(acc_scale)
 
 
+def native_line_local_y(
+    beat_distance: float,
+    mode: AccDecMode = AccDecMode.LINEAR,
+    *,
+    base_arrow_y: float = BASE_ARROW_Y,
+    base_velocity: float = LINE_BASE_VELOCITY,
+    y_min: float = LINE_BASE_Y_MIN,
+    y_max: float = LINE_BASE_Y_MAX,
+    acc_pow: float = LINE_BASE_ACC_POW,
+    acc_scale: float = LINE_BASE_ACC_SCALE,
+) -> float:
+    """Return LineBase local Y before NoteMaker applies ``pHighSpeed``.
+
+    This ordering matters. R!SE's LineBase.RePos computes beat displacement and
+    GetAccDecYOffset first; the visible high-speed scale belongs to the parent
+    NoteMaker transform afterward. Applying speed before the curve changes the
+    Acceleration/Deceleration shape and was the old Studio bug.
+    """
+
+    base_y = float(base_arrow_y) - float(beat_distance) * float(base_velocity)
+    return base_y + native_acc_dec_offset(
+        base_y,
+        mode,
+        y_min=y_min,
+        y_max=y_max,
+        acc_pow=acc_pow,
+        acc_scale=acc_scale,
+    )
+
+
 def native_line_y(
     beat_distance: float,
     high_speed: float,
@@ -67,18 +101,25 @@ def native_line_y(
     acc_pow: float = LINE_BASE_ACC_POW,
     acc_scale: float = LINE_BASE_ACC_SCALE,
 ) -> float:
-    """Return LineBase's native local Y after RePos and Acc/Dec offset."""
+    """Return the speed-scaled effective native Y used by the 2-D preview.
 
-    base_y = float(base_arrow_y) - (
-        float(beat_distance) * float(base_velocity) * float(high_speed)
-    )
-    return base_y + native_acc_dec_offset(
-        base_y,
+    The compatibility helper keeps its historical signature but now mirrors the
+    native order: LineBase local placement/AccDec first, parent pHighSpeed scale
+    second around the sequence-zone anchor.
+    """
+
+    local_y = native_line_local_y(
+        beat_distance,
         mode,
+        base_arrow_y=base_arrow_y,
+        base_velocity=base_velocity,
         y_min=y_min,
         y_max=y_max,
         acc_pow=acc_pow,
         acc_scale=acc_scale,
+    )
+    return float(base_arrow_y) - (
+        (float(base_arrow_y) - local_y) * float(high_speed)
     )
 
 
@@ -90,7 +131,12 @@ def native_screen_y(
     upside_down: bool = False,
     base_arrow_y: float = BASE_ARROW_Y,
 ) -> float:
-    """Project native LineBase Y into StepNX's scaled preview coordinate."""
+    """Project native LineBase Y into StepNX's scaled preview coordinate.
+
+    ``upside_down`` is retained only for compatibility with older callers.
+    Metadata 32 Drop is now modeled by the sequence-zone affine transform and
+    should not use this flag in the gameplay renderer.
+    """
 
     pixels = (float(base_arrow_y) - float(native_y)) * (
         float(note_size) / NOTE_RENDER_UNIT
@@ -117,10 +163,67 @@ def native_snake_x_offset(
     if y_max <= y_min or y >= y_max:
         return 0.0
     t = _clamp01((float(y) - float(y_min)) / (float(y_max) - float(y_min)))
-    native_x = (
-        sin(t * LINE_BASE_PI * float(wave_rate)) * float(amplitude)
-    )
+    native_x = sin(t * LINE_BASE_PI * float(wave_rate)) * float(amplitude)
     return native_x * (float(note_size) / NOTE_RENDER_UNIT)
+
+
+def sequence_zone_affine(
+    transform: SequenceZoneTransform,
+    width: float,
+    height: float,
+    *,
+    normal_receptor_y: float,
+) -> tuple[float, float, float, float]:
+    """Return ``(sx, sy, tx, ty)`` for UA/Drop/Mid composition.
+
+    Evidence basis:
+
+    * Under Attack is a 180-degree playfield rotation.
+    * Drop is a vertical reflection (historical 480-space: ``Y -> 480-Y``).
+    * NXA-patched Mid translates the normal receptor anchor to the exact field
+      midpoint before the other independent bits are applied.
+
+    Keeping these as independent affine bits makes value 3 literally UA|Drop
+    and values 4..7 the patched compositions instead of invented enum presets.
+    """
+
+    flags = SequenceZoneTransform(transform)
+    under_attack = bool(flags & SequenceZoneTransform.UNDER_ATTACK)
+    drop = bool(flags & SequenceZoneTransform.DROP)
+    mid = bool(flags & SequenceZoneTransform.MID)
+
+    sx = -1.0 if under_attack else 1.0
+    # UA flips Y; Drop also flips Y. Together the two reflections cancel on Y.
+    sy = -1.0 if under_attack ^ drop else 1.0
+    tx = float(width) if sx < 0.0 else 0.0
+    ty = float(height) if sy < 0.0 else 0.0
+
+    if mid:
+        local_mid_translation = float(height) / 2.0 - float(normal_receptor_y)
+        # Mid is a local translation performed before the reflection/rotation.
+        ty += sy * local_mid_translation
+
+    return sx, sy, tx, ty
+
+
+def transform_sequence_zone_point(
+    x: float,
+    y: float,
+    transform: SequenceZoneTransform,
+    width: float,
+    height: float,
+    *,
+    normal_receptor_y: float,
+) -> tuple[float, float]:
+    """Apply the exact affine composition returned by ``sequence_zone_affine``."""
+
+    sx, sy, tx, ty = sequence_zone_affine(
+        transform,
+        width,
+        height,
+        normal_receptor_y=normal_receptor_y,
+    )
+    return sx * float(x) + tx, sy * float(y) + ty
 
 
 def apply_global_visibility_effect(effect: int, mode: VisibilityMode) -> int:
