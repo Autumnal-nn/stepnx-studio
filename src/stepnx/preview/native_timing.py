@@ -23,10 +23,11 @@ class NativeDivTiming:
     """Runtime timing values produced by the native NX20 StepLoader.
 
     Names intentionally mirror the R!SE IL2CPP types where useful. In the
-    loaded Div, the raw BPM slot is replaced by msPerLine. The original BPM and
-    BeatSplit are retained separately because DrawStep speed modes consume them
-    even after timing conversion. bSkip therefore means msPerLine == 0 while
-    BeatPerLine and nLine remain fully meaningful.
+    loaded Div, the raw BPM slot is replaced by msPerLine. The compatibility
+    ``bpm`` attribute below therefore stores that loaded offset-0x14 value,
+    because DrawStep's Earthworm path reads the field directly after loading.
+    bSkip means both msPerLine and this loaded slot are zero while BeatPerLine
+    and nLine remain fully meaningful.
     """
 
     split_id: int
@@ -319,8 +320,9 @@ def build_native_timing(
             )
         flags = int(block.smooth_speed) & 0xFF
         is_skip = bool(flags & DIV_FLAG_SKIP)
-        # StepLoader stores this derived value back into a float field. Round
-        # at the same point so later GetLine boundary arithmetic matches IL2CPP.
+        # StepLoader stores this derived value back into the Div_h_t._BPM slot
+        # at offset 0x14. Round at the same point so later GetLine arithmetic
+        # and DrawStep's direct read of that slot match IL2CPP.
         ms_per_line = (
             0.0
             if is_skip
@@ -356,7 +358,7 @@ def build_native_timing(
             len(block.rows),
             block.speed_or_freeze,
             flags,
-            bpm=block.bpm,
+            bpm=ms_per_line,
             beat_split=block.beat_split,
         )
         blocks.append(div)
