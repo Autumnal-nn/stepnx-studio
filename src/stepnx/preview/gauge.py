@@ -70,7 +70,7 @@ class RuntimeGauge:
             bar_type = HPBarType.HALF_DOUBLE
 
         preset = _GAUGE_FACTORS[bar_type]
-        level = 0 if modifier.level is None else max(0, int(modifier.level))
+        level = 0 if modifier.level is None else int(modifier.level)
         capped_level = min(level, LEVEL_LIMIT)
         limit = GAUGE_LIMIT_DEFAULT + 3 * capped_level * capped_level
         display_max = GAUGE_DISPLAY_MAX_DEFAULT
