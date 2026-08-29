@@ -39,6 +39,7 @@ from stepnx.preview.modifiers import (
     ComboDisplay,
     DirectionMode,
     EffectiveModifier,
+    SequenceZoneTransform,
     SpeedMode,
     StepParam,
     ThrowMode,
@@ -96,9 +97,12 @@ from stepnx.preview.visuals import (
     LINE_BASE_Y_MIN,
     apply_global_visibility_effect,
     native_acc_dec_offset,
+    native_line_local_y,
     native_line_y,
     native_screen_y,
     native_snake_x_offset,
+    sequence_zone_affine,
+    transform_sequence_zone_point,
 )
 
 __all__ = [
@@ -155,6 +159,7 @@ __all__ = [
     "RuntimeSpeedState",
     "SPEED_PROC_INCREMENT",
     "SPEED_PROC_INTERVAL_SECONDS",
+    "SequenceZoneTransform",
     "SpeedMode",
     "StepParam",
     "ThrowMode",
@@ -169,6 +174,7 @@ __all__ = [
     "native_acc_dec_offset",
     "native_base_score",
     "native_base_velocity_pixels",
+    "native_line_local_y",
     "native_line_y",
     "native_score_delta",
     "native_screen_y",
@@ -178,6 +184,8 @@ __all__ = [
     "random_velocity_triggers",
     "random_velocity_user_speed",
     "resolve_route",
+    "sequence_zone_affine",
     "serialize_command_flags",
     "summarize_judge_line",
+    "transform_sequence_zone_point",
 ]
