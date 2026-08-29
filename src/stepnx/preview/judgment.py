@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import nan
 from typing import TYPE_CHECKING, Iterable
 
 if TYPE_CHECKING:
@@ -20,16 +21,13 @@ EFFECT_VISIBLE_BIT = 0x01
 PARAM_MASK = 0x3FFF
 BANK_SHIFT = 14
 EXTRA_JUDGE_BY_NOTE_CHECKED = 0x02
+JUDGE_MISS = 4
+JUDGE_GREAT = 1
 
 
 @dataclass(frozen=True, slots=True)
 class JudgeLineSummary:
-    """Arguments assembled by PUMPPlayer.JudgeLine before JudgeUnit.
-
-    This intentionally stops at the JudgeUnit boundary. Judgment-window math,
-    score and gauge side effects belong to later parity items and are not
-    smuggled into this structural pass.
-    """
+    """Arguments assembled by PUMPPlayer.JudgeLine before JudgeUnit."""
 
     bank: int
     eligible: tuple[PreviewEvent, ...]
@@ -58,6 +56,30 @@ class JudgeNoteDecision:
     alt_skin_count: int
     visible: bool
     no_miss: bool
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeUnitProjection:
+    """JudgeUnit state immediately before JudgeStep_PostProcess.
+
+    Counter writes, sound/effect calls, score and gauge are deliberately left
+    out. Those are consumers of this state and belong to the later scoring and
+    gauge parity item.
+    """
+
+    bank: int
+    input_grade: int
+    judgment: int
+    visible: bool
+    no_miss: bool
+    no_miss_invisible: bool
+    note_count: int
+    long_note_count: int
+    total_note_count: int
+    alt_skin_count: int
+    alt_skin_factor: float
+    play_sound: bool
+    return_value: bool
 
 
 def summarize_judge_line(
@@ -138,12 +160,7 @@ def judge_note_decision(
     *,
     judge_by_note: bool,
 ) -> JudgeNoteDecision:
-    """Port the routing part of PUMPPlayer.JudgeNote RVA 0x747320.
-
-    A rush long (LongMask != 0 without bNoRush) ignores non-negative per-note
-    grades here; a negative grade becomes the dedicated long Miss postprocess.
-    Otherwise JudgeNote is dormant unless GameModifier.JudgeByNote is enabled.
-    """
+    """Port the routing part of PUMPPlayer.JudgeNote RVA 0x747320."""
 
     rush_long = bool(event.long_kind) and not event.no_rush
     if rush_long:
@@ -171,4 +188,52 @@ def judge_note_decision(
         alt_skin_count=event.param // 3,
         visible=event.visible_for_judge,
         no_miss=bool(event.attribute & 0x60),
+    )
+
+
+def project_judge_unit(
+    *,
+    bank: int,
+    grade: int,
+    visible: bool,
+    no_miss: bool,
+    note_count: int,
+    long_note_count: int,
+    alt_skin_count: int,
+    alt_skin_score_factor: float,
+    play_sound: bool = False,
+) -> JudgeUnitProjection:
+    """Port the source-stable pre-PostProcess core of JudgeUnit RVA 0x747A60.
+
+    The native method maps a negative grade to Miss for the public Judgement
+    state, keeps a distinct ``bNoMiss && !bVisible`` path, computes the AltSkin
+    score factor from the proportion of alternate-skin notes, and returns
+    ``grade <= Great``. Its later counter/effect writes and PostProcess call are
+    intentionally outside this helper.
+    """
+
+    total_note_count = note_count + long_note_count
+    if total_note_count:
+        alt_skin_factor = 1.0 + (
+            alt_skin_count / total_note_count
+        ) * alt_skin_score_factor
+    else:
+        # divss 0/0 is NaN in the native float path. This should not occur for
+        # a meaningful JudgeUnit, but retaining it avoids inventing a clamp.
+        alt_skin_factor = nan
+
+    return JudgeUnitProjection(
+        bank=bank,
+        input_grade=grade,
+        judgment=grade if grade >= 0 else JUDGE_MISS,
+        visible=visible,
+        no_miss=no_miss,
+        no_miss_invisible=no_miss and not visible,
+        note_count=note_count,
+        long_note_count=long_note_count,
+        total_note_count=total_note_count,
+        alt_skin_count=alt_skin_count,
+        alt_skin_factor=alt_skin_factor,
+        play_sound=play_sound,
+        return_value=grade <= JUDGE_GREAT,
     )
