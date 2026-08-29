@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, replace
 from typing import Iterable
 
 
 @dataclass(frozen=True, slots=True)
 class CommandFlag:
+    """One selectable preview modifier.
+
+    ``code`` is retained only as the PIUTESTER/NX2 compatibility key used by
+    serialized preview launch options. The Studio UI displays ``label`` and does
+    not expose the historical command alphabet as its primary vocabulary.
+    """
+
     code: str
     field: str
     label: str
@@ -19,7 +25,8 @@ COMMAND_FLAGS = (
     CommandFlag("f", "freedom", "Freedom"),
     CommandFlag("m", "mirror", "Mirror"),
     CommandFlag("r", "randomize", "Random"),
-    CommandFlag("u", "upside_down", "Upside Down"),
+    CommandFlag("u", "under_attack", "Under Attack"),
+    CommandFlag("!", "drop", "Drop"),
     CommandFlag("j", "judge_reverse", "Judge Reverse"),
     CommandFlag("d", "deceleration", "Deceleration"),
     CommandFlag("a", "acceleration", "Acceleration"),
@@ -32,7 +39,7 @@ _FLAGS = {flag.code: flag.field for flag in COMMAND_FLAGS}
 
 
 def serialize_command_flags(codes: Iterable[str]) -> str:
-    """Serialize selected auxiliary flags in one canonical UI order."""
+    """Serialize selected auxiliary flags in one stable internal order."""
 
     selected = {str(code).strip().casefold() for code in codes}
     unknown = selected.difference(_FLAGS)
@@ -51,7 +58,8 @@ class GameplayCommand:
     freedom: bool = False
     mirror: bool = False
     randomize: bool = False
-    upside_down: bool = False
+    under_attack: bool = False
+    drop: bool = False
     judge_reverse: bool = False
     deceleration: bool = False
     acceleration: bool = False
@@ -61,20 +69,27 @@ class GameplayCommand:
     unknown: tuple[str, ...] = ()
 
     @property
+    def upside_down(self) -> bool:
+        """Compatibility alias for the old Studio name; semantically this is Drop."""
+
+        return self.drop
+
+    @property
     def approximate_effects(self) -> tuple[str, ...]:
         """Return effects whose remaining presentation is not source-exact."""
 
         enabled = (
-            ("V", self.vanish),  # Animator fade curve is asset-dependent.
-            ("X", self.exceed_mode),
-            # R!SE trigger/range is exact, but its RNG stream/cadence is not.
-            ("S", self.random_velocity),
+            ("Vanish", self.vanish),  # Animator/material fade curve is asset-dependent.
+            ("Random", self.randomize),
+            ("Exceed", self.exceed_mode),
+            # R!SE trigger/range is exact, but its RNG stream/cadence is not yet exact.
+            ("Random Velocity", self.random_velocity),
         )
         return tuple(flag for flag, active in enabled if active)
 
     @property
     def pending_effects(self) -> tuple[str, ...]:
-        """Return parsed flags that have no runtime projection yet."""
+        """Return parsed flags that still have no complete runtime projection."""
 
         return ()
 
@@ -84,16 +99,18 @@ class GameplayCommand:
         return replace(self, speed=float(speed))
 
     def lane_map(self, columns: int, *, seed: int = 0) -> tuple[int, ...]:
+        """Return only fixed lane permutations.
+
+        Under Attack and Drop are sequence-zone geometry, not lane maps. Random
+        is a chart/event transformation whose mapping evolves by row, so it is
+        deliberately excluded here as well. ``seed`` remains accepted for API
+        compatibility with older callers.
+        """
+
+        del seed
         lanes = list(range(columns))
         if self.mirror:
             lanes.reverse()
-        if self.upside_down:
-            if columns == 5:
-                lanes = [lanes[index] for index in (1, 0, 2, 4, 3)]
-            else:
-                lanes.reverse()
-        if self.randomize:
-            random.Random(seed).shuffle(lanes)
         return tuple(lanes)
 
     def note_opacity(
@@ -108,8 +125,8 @@ class GameplayCommand:
 
         Header Visibility has already rewritten the runtime event's VisualEffect
         nibble before this function is called. Appear/Vanish animation curves
-        live in Unity Animator assets, so the distance fade below remains an
-        explicit display approximation while the loaded visibility state is exact.
+        live in Unity Animator/material assets, so the distance fade below remains
+        an explicit display approximation while the loaded visibility state is exact.
         """
 
         if self.nonstep or visibility == 0:
@@ -130,11 +147,12 @@ class GameplayCommand:
 
 
 def parse_gameplay_command(value: str) -> GameplayCommand:
-    """Parse PIUTESTER-style cumulative auxiliary commands.
+    """Parse PIUTESTER/NX2-style compatibility command characters.
 
-    The launch UI now exposes flags as checkable choices and keeps 1x..9x in a
-    separate Speed control. This parser retains the legacy cumulative digit rule
-    for non-UI callers and historical compatibility.
+    The launch UI exposes semantic named choices and keeps 1x..9x in a separate
+    Speed control. This parser retains historical characters for interoperability:
+    ``u`` is Under Attack/180 and ``!`` is Drop/UpsideDown. Digits keep the
+    legacy cumulative quarter-speed rule for non-UI callers.
     """
 
     raw = value.strip().casefold()
