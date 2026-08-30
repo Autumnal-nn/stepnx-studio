@@ -185,6 +185,7 @@ class GameplayPreviewWidget(QWidget):
         self._paint_timestamps: deque[float] = deque(maxlen=120)
         self._paint_cost_ms = 0.0
         self._advance_cost_ms = 0.0
+        self._host_paint_cost_ms = 0.0
         self.setMinimumSize(420, 360)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -1168,6 +1169,7 @@ class GameplayPreviewWidget(QWidget):
             (
                 f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms  "
                 f"ADV {self._advance_cost_ms:6.2f} ms  "
+                f"HOST {self._host_paint_cost_ms:6.2f} ms  "
                 f"E/G {self.session.last_advance_event_count}/"
                 f"{self.session.last_advance_group_count}"
             ),

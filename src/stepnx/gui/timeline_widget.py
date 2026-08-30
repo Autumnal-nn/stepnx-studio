@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from math import ceil, isfinite
+from time import perf_counter
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
@@ -56,6 +57,7 @@ class TimelineWidget(QAbstractScrollArea):
         self._playback_time_ms: float | None = None
         self._playback_y: float | None = None
         self._playback_active = False
+        self._paint_cost_ms = 0.0
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self._sync_scrollbars()
@@ -464,6 +466,7 @@ class TimelineWidget(QAbstractScrollArea):
         super().mouseReleaseEvent(event)
 
     def paintEvent(self, event) -> None:
+        paint_started = perf_counter()
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.fillRect(self.viewport().rect(), QColor("#15171b"))
@@ -480,6 +483,7 @@ class TimelineWidget(QAbstractScrollArea):
                 QPointF(0, self._playback_y),
                 QPointF(self._layout.chart_width, self._playback_y),
             )
+        self._paint_cost_ms = (perf_counter() - paint_started) * 1000.0
 
     def _draw_segment(self, painter: QPainter, visible) -> None:
         segment = visible.segment
@@ -509,6 +513,21 @@ class TimelineWidget(QAbstractScrollArea):
 
         beat_markers = {marker.row_index: marker for marker in self._layout.beat_markers(visible)}
         deferred_hold_heads: list[tuple[int, float, float, bytes]] = []
+        body_runs: dict[int, tuple[bytes, float, float]] = {}
+
+        def flush_body(lane: int) -> None:
+            run = body_runs.pop(lane, None)
+            if run is None:
+                return
+            raw, start_y, end_y = run
+            self._draw_hold_body_span(
+                painter, lane, start_y, max(1.0, end_y - start_y), raw
+            )
+
+        def flush_all_bodies() -> None:
+            for lane in tuple(body_runs):
+                flush_body(lane)
+
         for row_index in range(visible.first_row, visible.last_row):
             y = segment.y_for_row(row_index)
             if self._waveform is not None and segment.block.bpm > 0 and segment.block.beat_split > 0:
@@ -556,8 +575,12 @@ class TimelineWidget(QAbstractScrollArea):
                 painter.setPen(QPen(QColor("#f4d35e"), 2.0))
                 painter.drawRect(rect)
             if isinstance(row, EmptyRow):
+                if self._playback_active:
+                    flush_all_bodies()
                 continue
             if isinstance(row, LightmapRow):
+                if self._playback_active:
+                    flush_all_bodies()
                 self._draw_lightmap_row(
                     painter, row.raw_channels, y, segment.row_height
                 )
@@ -565,6 +588,21 @@ class TimelineWidget(QAbstractScrollArea):
             if isinstance(row, (NoteRow, PackedNoteRow)):
                 for lane in range(row.cell_count):
                     cell = row.cell(lane) if isinstance(row, PackedNoteRow) else row.cells[lane]
+                    if self._playback_active and cell.note_type == 0xB:
+                        run = body_runs.get(lane)
+                        end_y = y + segment.row_height
+                        if (
+                            run is not None
+                            and run[0] == cell.raw
+                            and abs(run[2] - y) <= 1e-6
+                        ):
+                            body_runs[lane] = (run[0], run[1], end_y)
+                        else:
+                            flush_body(lane)
+                            body_runs[lane] = (cell.raw, y, end_y)
+                        continue
+                    if self._playback_active:
+                        flush_body(lane)
                     if cell.note_type:
                         if cell.note_type == 0x7:
                             deferred_hold_heads.append(
@@ -574,6 +612,9 @@ class TimelineWidget(QAbstractScrollArea):
                             self._draw_note(
                                 painter, lane, y, segment.row_height, cell.raw
                             )
+
+        if self._playback_active:
+            flush_all_bodies()
 
         # Hold heads are the top terminal layer. This matters when BeatSplit is
         # high enough that head/body/tail artwork overlaps into one tap-sized
@@ -602,6 +643,38 @@ class TimelineWidget(QAbstractScrollArea):
                 color = colors[index]
                 color.setAlpha(max(40, min(255, value)))
                 painter.fillRect(rect, color)
+
+    def _draw_hold_body_span(
+        self,
+        painter: QPainter,
+        lane: int,
+        y: float,
+        span_height: float,
+        raw: bytes,
+    ) -> None:
+        """Draw one playback-only shaft for a contiguous explicit BODY run.
+
+        The encoded BODY rows remain present in the snapshot and paused editor.
+        This is only a rasterization reduction: a split-128 run that would issue
+        hundreds of identical 8-pixel atlas-strip draws becomes one stretched
+        strip over the exact same screen-space interval.
+        """
+
+        span_height = max(1.0, float(span_height))
+        rect = QRectF(*self._geometry.note_rect(lane, y, span_height))
+        if self._draw_noteskin_note(painter, lane, y, span_height, raw, rect):
+            return
+        color = _NOTE_COLORS.get(0xB, QColor("#5f91cf"))
+        shaft_width = max(4.0, rect.width() * 0.28)
+        painter.fillRect(
+            QRectF(
+                rect.center().x() - shaft_width / 2.0,
+                y,
+                shaft_width,
+                span_height,
+            ),
+            color,
+        )
 
     def _draw_note(
         self, painter: QPainter, lane: int, y: float, row_height: float, raw: bytes

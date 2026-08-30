@@ -1425,8 +1425,11 @@ def _open_external_gameplay_preview(window) -> None:
 
 def _sync_external_previews(window, audio_ms: int):
     chart_ms = window.audio_alignment.audio_to_chart(float(audio_ms))
+    active = window.tabs.currentWidget() if hasattr(window, "tabs") else None
+    host_paint_ms = float(getattr(active, "_paint_cost_ms", 0.0))
     for preview in tuple(getattr(window, "phase10_preview_windows", ())):
         if preview is not None and hasattr(preview, "set_playback_time"):
+            preview._host_paint_cost_ms = host_paint_ms
             preview.set_playback_time(chart_ms)
 
 

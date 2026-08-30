@@ -21,6 +21,7 @@ try:
         load_noteskin_pack,
     )
     from stepnx.codecs.nx20 import parse_bytes
+    from stepnx.core.model import NoteCell, NoteRow
     from stepnx.core.profiles import MetadataScope
     from stepnx.gui.audio_transport import AudioTransport
     from stepnx.gui.metadata_dialog import MetadataCollectionDialog
@@ -206,6 +207,89 @@ class QtViewportSmokeTests(unittest.TestCase):
         finally:
             widget.close()
 
+
+    def test_dense_playback_bodies_coalesce_into_one_raster_shaft(self) -> None:
+        document = parse_bytes(
+            make_normal_nx20(), source="dense-body.NX", row_storage="rich"
+        )
+        split = document.splits[0]
+        block = split.blocks[0]
+        rows = list(block.rows)
+        body_count = 2
+        self.assertGreaterEqual(len(rows), body_count)
+        next_id = document.next_stable_id
+        for index in range(body_count):
+            row = rows[index]
+            if hasattr(row, "cells"):
+                cells = list(row.cells)
+                cells[0] = replace(cells[0], raw=bytes((0x0B, 0x03, 0, 0)))
+            else:
+                cells = []
+                for lane in range(int(document.columns.value)):
+                    raw = bytes((0x0B, 0x03, 0, 0)) if lane == 0 else bytes(4)
+                    cells.append(NoteCell(next_id, raw, None))
+                    next_id += 1
+            rows[index] = NoteRow(row.stable_id, tuple(cells), None)
+        block = replace(block, rows=tuple(rows))
+        document = replace(
+            document,
+            splits=(replace(split, blocks=(block,)),),
+            next_stable_id=next_id,
+        )
+        widget = TimelineWidget(create_authoring_snapshot(document))
+        try:
+            widget.resize(640, 900)
+            widget.set_playback_active(True)
+            visible = widget._layout.visible_segments(
+                0.0, float(widget.viewport().height()), overscan_rows=2
+            )[0]
+            image = QImage(widget.viewport().size(), QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            spans = []
+            notes = []
+            original_span = widget._draw_hold_body_span
+            original_note = widget._draw_note
+
+            def record_span(painter_arg, lane, y, span_height, raw):
+                spans.append((lane, y, span_height, raw))
+                return original_span(painter_arg, lane, y, span_height, raw)
+
+            def record_note(painter_arg, lane, y, row_height, raw):
+                notes.append(raw[0] & 0x0F)
+                return original_note(painter_arg, lane, y, row_height, raw)
+
+            try:
+                with patch.object(widget, "_draw_hold_body_span", side_effect=record_span), patch.object(
+                    widget, "_draw_note", side_effect=record_note
+                ):
+                    widget._draw_segment(painter, visible)
+            finally:
+                painter.end()
+            self.assertEqual(len(spans), 1)
+            self.assertEqual(spans[0][0], 0)
+            self.assertNotIn(0x0B, notes)
+
+            widget.set_playback_active(False)
+            visible = widget._layout.visible_segments(
+                0.0, float(widget.viewport().height()), overscan_rows=2
+            )[0]
+            image = QImage(widget.viewport().size(), QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            paused_notes = []
+            try:
+                def record_paused(painter_arg, lane, y, row_height, raw):
+                    paused_notes.append(raw[0] & 0x0F)
+                    return original_note(painter_arg, lane, y, row_height, raw)
+
+                with patch.object(widget, "_draw_note", side_effect=record_paused):
+                    widget._draw_segment(painter, visible)
+            finally:
+                painter.end()
+            self.assertEqual(paused_notes.count(0x0B), body_count)
+        finally:
+            widget.close()
 
     def test_hold_terminals_meet_their_per_column_silhouettes(self) -> None:
         document = parse_bytes(
