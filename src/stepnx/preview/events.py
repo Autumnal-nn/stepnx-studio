@@ -1,13 +1,25 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import random
+from dataclasses import dataclass, replace
 from enum import Enum, IntEnum
 from math import isfinite
 
 from stepnx.core.model import NoteRow, PackedNoteRow
 from stepnx.core.validation import Severity
+from stepnx.preview.modifiers import (
+    EffectiveModifier,
+    StepParam,
+    apply_header_step_params,
+)
+from stepnx.preview.native_timing import (
+    NativeTimingProjection,
+    NativeTimingState,
+    build_native_timing,
+)
 from stepnx.preview.routes import ResolvedRoute
 from stepnx.preview.snapshot import PreviewSnapshot
+from stepnx.preview.visuals import apply_global_visibility_effect
 
 
 class PreviewNoteFunction(str, Enum):
@@ -35,10 +47,70 @@ class PreviewEvent:
     raw: bytes
     scroll: float
     position: float
+    native_block_index: int = -1
 
     @property
     def note_type(self) -> int:
+        """Historical low-nibble note type used by preview drawing."""
         return self.raw[0] & 0x0F
+
+    @property
+    def attribute(self) -> int:
+        return self.raw[0]
+
+    @property
+    def visual_effect(self) -> int:
+        return self.raw[1]
+
+    @property
+    def snake_path(self) -> bool:
+        """NX20 per-note Snake Path flag (VisualEffect bit 0x10)."""
+        return bool(self.visual_effect & 0x10)
+
+    @property
+    def bank_param(self) -> int:
+        return self.raw[2] | (self.raw[3] << 8)
+
+    @property
+    def base_note_type(self) -> int:
+        """PIUMobileStepDLL.Attributes.TypeMask (low two bits)."""
+        return self.attribute & 0x03
+
+    @property
+    def judge_mask(self) -> int:
+        return self.attribute & 0xE0
+
+    @property
+    def no_judge(self) -> bool:
+        return self.judge_mask == 0x20
+
+    @property
+    def no_rush(self) -> bool:
+        return bool(self.attribute & 0x10)
+
+    @property
+    def long_kind(self) -> int:
+        return self.attribute & 0x0C
+
+    @property
+    def long_flags(self) -> int:
+        return self.attribute & 0x1C
+
+    @property
+    def y_table(self) -> int:
+        return self.visual_effect & 0x0F
+
+    @property
+    def param(self) -> int:
+        return self.bank_param & 0x3FFF
+
+    @property
+    def bank(self) -> int:
+        return self.bank_param >> 14
+
+    @property
+    def visible_for_judge(self) -> bool:
+        return bool(self.visual_effect & 0x01)
 
     @property
     def function(self) -> PreviewNoteFunction:
@@ -63,6 +135,88 @@ class PreviewEvent:
         return self.scroll if isfinite(self.scroll) else 1.0
 
 
+def randomize_event_lanes(
+    events: tuple[PreviewEvent, ...],
+    *,
+    columns: int,
+    native_timing: NativeTimingProjection | None,
+    seed: int,
+) -> tuple[PreviewEvent, ...]:
+    """Project Step.Randomize as an evolving per-row lane mapping.
+
+    The recovered R!SE loop evaluates every cell with ``attribute & 0x0C <= 4``.
+    Empty cells therefore participate in the shuffle, while long body/tail cells
+    lock their current mapping so hold continuity survives. The mapping persists
+    across rows and the current row is rewritten through it after each shuffle.
+
+    R!SE uses its managed/native RNG stream; StepNX keeps a deterministic Python
+    RNG seeded by the resolved route. The structural granularity and long-note
+    locking are source-exact, while the exact random sequence remains an explicit
+    approximation until the runtime seed/state producer is recovered.
+    """
+
+    if columns <= 1 or not events:
+        return events
+
+    by_row: dict[tuple[int, int], list[PreviewEvent]] = {}
+    for event in events:
+        by_row.setdefault((event.native_block_index, event.row_index), []).append(event)
+
+    rng = random.Random(int(seed))
+    lane_map = list(range(int(columns)))
+    replacements: dict[tuple[int, int, int, int], PreviewEvent] = {}
+
+    if native_timing is not None:
+        rows = (
+            (block.index, row_index)
+            for block in native_timing.blocks
+            for row_index in range(block.n_line)
+        )
+    else:
+        rows = iter(sorted(by_row))
+
+    for block_index, row_index in rows:
+        row_events = by_row.get((block_index, row_index), ())
+        locked = {
+            event.lane
+            for event in row_events
+            if (event.attribute & 0x0C) > 0x04
+        }
+        eligible = [lane for lane in range(columns) if lane not in locked]
+        shuffled = [lane_map[lane] for lane in eligible]
+        rng.shuffle(shuffled)
+        for lane, target in zip(eligible, shuffled):
+            lane_map[lane] = target
+
+        for event in row_events:
+            key = (
+                event.native_block_index,
+                event.row_index,
+                event.lane,
+                event.bank_param,
+            )
+            replacements[key] = replace(event, lane=lane_map[event.lane])
+
+    randomized = tuple(
+        replacements.get(
+            (event.native_block_index, event.row_index, event.lane, event.bank_param),
+            event,
+        )
+        for event in events
+    )
+    return tuple(
+        sorted(
+            randomized,
+            key=lambda item: (
+                item.time_ms,
+                item.native_block_index,
+                item.row_index,
+                item.lane,
+            ),
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeEventStream:
     source_name: str | None
@@ -71,12 +225,63 @@ class RuntimeEventStream:
     events: tuple[PreviewEvent, ...]
     timing: tuple[PreviewTimingSegment, ...]
     warnings: tuple[str, ...]
+    native_timing: NativeTimingProjection | None = None
+    effective_modifier: EffectiveModifier | None = None
+    header_step_params: tuple[StepParam, ...] = ()
+    start_column: int = 0
+    columns: int = 5
+    split_step_params: tuple[tuple[int, tuple[StepParam, ...]], ...] = ()
+    block_step_params: tuple[tuple[int, tuple[StepParam, ...]], ...] = ()
+
+    def split_param(
+        self, split_id: int, metadata_id: int, default: float = 1.0
+    ) -> float:
+        """Return the first matching Split StepParam as a signed float."""
+
+        for current_split_id, params in self.split_step_params:
+            if current_split_id != int(split_id):
+                continue
+            for param in params:
+                if param.metadata_id == int(metadata_id):
+                    return float(param.signed_value)
+            break
+        return float(default)
+
+    def block_param(
+        self, block_id: int, metadata_id: int, default: float = 1.0
+    ) -> float:
+        """Return the first matching Div/Block StepParam as a signed float."""
+
+        for current_block_id, params in self.block_step_params:
+            if current_block_id != int(block_id):
+                continue
+            for param in params:
+                if param.metadata_id == int(metadata_id):
+                    return float(param.signed_value)
+            break
+        return float(default)
 
     @property
     def duration_ms(self) -> float:
         return max((event.time_ms for event in self.events), default=0.0)
 
+    @property
+    def uses_native_skip_projection(self) -> bool:
+        return self.native_timing is not None and any(
+            div.is_skip for div in self.native_timing.blocks
+        )
+
     def position_at(self, time_ms: float) -> float:
+        """Return the compatibility cumulative-row preview coordinate.
+
+        Skip routes retain the native absolute coordinate because zero-duration
+        Divs cannot be represented by the old monotonic segment interpolation.
+        Runtime note placement never depends on this compatibility axis;
+        ``beat_distance_at`` uses PlayBase.GetBlockBeat directly for every route.
+        """
+
+        if self.uses_native_skip_projection and self.native_timing is not None:
+            return self.native_timing.current_position(time_ms)
         if not self.timing:
             return 0.0
         if time_ms < self.timing[0].start_time_ms:
@@ -88,24 +293,70 @@ class RuntimeEventStream:
             selected = segment
         return selected.position_at(time_ms)
 
-    def speed_factor_at(self, time_ms: float) -> float:
-        """Return the engine scroll factor active at ``time_ms``.
+    def native_state_at(self, time_ms: float) -> NativeTimingState | None:
+        return None if self.native_timing is None else self.native_timing.state_at(time_ms)
 
-        The fifth Block float is the visual speed factor (negative values also
-        mark freezes). ``smooth_speed`` does not remove a Block: any non-zero
-        value requests a transition from the preceding factor.
+    def beat_distance_at(
+        self,
+        event: PreviewEvent,
+        time_ms: float,
+        *,
+        state: NativeTimingState | None = None,
+    ) -> float:
+        """Return the exact native GetBlockBeat distance for one event."""
+
+        if self.native_timing is not None and event.native_block_index >= 0:
+            if state is None:
+                state = self.native_timing.state_at(time_ms)
+            return self.native_timing.block_beat_from_state(
+                event.native_block_index,
+                event.row_index,
+                state,
+            )
+        return event.position - self.position_at(time_ms)
+
+    def speed_factor_at(self, time_ms: float) -> float:
+        """Return R!SE's active Div block speed, including Smooth handling."""
+
+        if self.native_timing is None:
+            return 1.0
+        return self.native_timing.block_speed_at(time_ms)
+
+    def current_gap_at(self, time_ms: float) -> float:
+        """Return the active Step.currentGap() value in milliseconds."""
+
+        if self.native_timing is None:
+            return 0.0
+        return self.native_timing.current_gap(time_ms)
+
+    def modifier_for_launch_speed(self, speed: float) -> EffectiveModifier:
+        """Apply Header StepParams after the user-selected launch speed.
+
+        PlayBase stores the selected high-speed value into GameModifier.Speed
+        before calling ApplyStepParamToMod. Header ID 0 may therefore replace
+        it and Header 1111 may multiply the result. Keeping this order here is
+        necessary for the runtime speed state used by GameplaySession.
         """
 
-        if not self.timing:
-            return 1.0
-        if time_ms < self.timing[0].start_time_ms:
-            return self.timing[0].start_speed_factor
-        selected = self.timing[0]
-        for segment in self.timing:
-            if time_ms < segment.start_time_ms:
-                break
-            selected = segment
-        return selected.speed_factor_at(time_ms)
+        base = EffectiveModifier(speed=float(speed))
+        return apply_header_step_params(
+            self.header_step_params,
+            self.profile,
+            base,
+        )
+
+    def with_randomized_lanes(self, *, seed: int) -> RuntimeEventStream:
+        """Return a runtime-only Random projection without mutating NX data."""
+
+        return replace(
+            self,
+            events=randomize_event_lanes(
+                self.events,
+                columns=self.columns,
+                native_timing=self.native_timing,
+                seed=seed,
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,9 +371,6 @@ class PreviewTimingSegment:
     beat_split: int
     scroll: float
     freeze_delay_ms: float
-    start_speed_factor: float
-    end_speed_factor: float
-    speed_transition_end_ms: float
 
     def position_at(self, time_ms: float) -> float:
         if time_ms <= self.start_time_ms or self.end_time_ms <= self.start_time_ms:
@@ -132,19 +380,16 @@ class PreviewTimingSegment:
             self.end_position - self.start_position
         )
 
-    def speed_factor_at(self, time_ms: float) -> float:
-        if (
-            time_ms <= self.start_time_ms
-            or self.speed_transition_end_ms <= self.start_time_ms
-        ):
-            return self.start_speed_factor
-        ratio = (time_ms - self.start_time_ms) / (
-            self.speed_transition_end_ms - self.start_time_ms
-        )
-        ratio = min(1.0, max(0.0, ratio))
-        return self.start_speed_factor + ratio * (
-            self.end_speed_factor - self.start_speed_factor
-        )
+
+def _runtime_raw(raw: bytes, modifier: EffectiveModifier) -> bytes:
+    """Project PlayBase.InitData mutations without touching canonical NX bytes."""
+
+    if len(raw) != 4:
+        return raw
+    visual = apply_global_visibility_effect(raw[1], modifier.visibility)
+    if visual == raw[1]:
+        return raw
+    return bytes((raw[0], visual, raw[2], raw[3]))
 
 
 def build_event_stream(
@@ -156,78 +401,66 @@ def build_event_stream(
         raise ValueError("cannot build events from a non-playable preview snapshot")
     if not route.is_executable:
         raise ValueError("cannot build events from an unresolved route")
+
+    native_timing = build_native_timing(snapshot, route)
+    runtime_modifier = snapshot.effective_modifier()
     events: list[PreviewEvent] = []
     timing: list[PreviewTimingSegment] = []
     warnings: list[str] = []
-    position = 0.0
-    previous_speed_factor = 1.0
+    authored_position = 0.0
     selected_blocks = [
         (split, split.block(route.block_id(split.stable_id)))
         for split in snapshot.splits
     ]
+
     for selected_index, (split, block) in enumerate(selected_blocks):
         if block.bpm <= 0.0 or block.beat_split <= 0:
             warnings.append(f"Block {block.stable_id} has invalid BPM or Beat Split")
             continue
-        freeze_delay = (
-            max(0.0, block.offset_or_delay_ms) if block.speed_or_freeze < 0.0 else 0.0
-        )
+        native_div = native_timing.blocks[selected_index]
+
         if not isfinite(block.scroll):
             warnings.append(
                 f"Block {block.stable_id} has no finite Scroll; "
                 "renderer uses one row fraction"
             )
-        safe_scroll = (
-            block.scroll
-            if isfinite(block.scroll)
-            else 1.0 / block.beat_split
-        )
-        row_ms = 60_000.0 / (block.bpm * block.beat_split)
-        motion_start = block.start_time_ms + freeze_delay
-        motion_end = motion_start + len(block.rows) * row_ms
-        end_position = position + len(block.rows) * safe_scroll
         if not isfinite(block.speed_or_freeze):
             warnings.append(
-                f"Block {block.stable_id} has a non-finite Speed/Freeze factor; "
-                "renderer uses 1x"
+                f"Block {block.stable_id} has a non-finite Speed/Freeze factor"
             )
-            target_speed_factor = 1.0
-        else:
-            target_speed_factor = abs(block.speed_or_freeze)
-        smooth_transition = block.smooth_speed != 0
-        start_speed_factor = (
-            previous_speed_factor if smooth_transition else target_speed_factor
-        )
-        if selected_index + 1 < len(selected_blocks):
-            next_block = selected_blocks[selected_index + 1][1]
-            transition_end = max(motion_start, next_block.start_time_ms)
-        else:
-            transition_end = motion_end
-        if not smooth_transition or transition_end <= motion_start:
-            start_speed_factor = target_speed_factor
-            transition_end = motion_start
+
+        # Negative serialized Speed is not a local visual freeze in R!SE.
+        # StepLoader uses the sign only while deciding whether to construct Gap,
+        # then normalizes Speed positive. PreviewTimingSegment remains a stable
+        # authored-coordinate compatibility/culling axis; runtime Y placement
+        # uses native Block/Line state through beat_distance_at().
+        start_position = authored_position
+        end_position = authored_position + len(block.rows) * native_div.beat_per_line
         timing.append(
             PreviewTimingSegment(
                 split.stable_id,
                 block.stable_id,
-                motion_start,
-                motion_end,
-                position,
+                native_div.start_time_ms,
+                native_div.end_time_ms,
+                start_position,
                 end_position,
                 block.bpm,
                 block.beat_split,
-                safe_scroll,
-                freeze_delay,
-                start_speed_factor,
-                target_speed_factor,
-                transition_end,
+                native_div.beat_per_line,
+                0.0,
             )
         )
+
         for row_index, row in enumerate(block.rows):
             if not isinstance(row, (NoteRow, PackedNoteRow)):
                 continue
-            time_ms = motion_start + row_index * row_ms
+            # Step.Judge and LineBase.CreateSplits both use exactly
+            # msStart + line * msPerLine. For bSkip msPerLine is zero, so all
+            # encoded rows share the Div StartTime while remaining independent
+            # spatial rows and fully judgeable according to note semantics.
+            time_ms = native_timing.judgment_time(selected_index, row_index)
             beat = row_index / block.beat_split
+            event_position = authored_position + row_index * native_div.beat_per_line
             for lane, cell in enumerate(row.cells):
                 if cell.raw == b"\x00\x00\x00\x00":
                     continue
@@ -239,22 +472,42 @@ def build_event_stream(
                         block.stable_id,
                         row_index,
                         lane,
-                        cell.raw,
+                        _runtime_raw(cell.raw, runtime_modifier),
                         block.scroll,
-                        position + row_index * safe_scroll,
+                        event_position,
+                        selected_index,
                     )
                 )
-        position = end_position
-        previous_speed_factor = target_speed_factor
+        authored_position = end_position
+
     timing.sort(key=lambda item: (item.start_time_ms, item.split_id, item.block_id))
     events.sort(
-        key=lambda item: (item.time_ms, item.split_id, item.row_index, item.lane)
+        key=lambda item: (item.time_ms, item.native_block_index, item.row_index, item.lane)
     )
+    event_tuple = tuple(events)
+    if runtime_modifier.random:
+        event_tuple = randomize_event_lanes(
+            event_tuple,
+            columns=int(snapshot.columns),
+            native_timing=native_timing,
+            seed=route.seed or 0,
+        )
     return RuntimeEventStream(
         snapshot.source_name,
         snapshot.profile,
         route,
-        tuple(events),
+        event_tuple,
         tuple(timing),
         tuple(warnings),
+        native_timing,
+        runtime_modifier,
+        snapshot.header_step_params,
+        int(snapshot.start_column),
+        int(snapshot.columns),
+        tuple((split.stable_id, split.step_params) for split in snapshot.splits),
+        tuple(
+            (block.stable_id, block.step_params)
+            for split in snapshot.splits
+            for block in split.blocks
+        ),
     )

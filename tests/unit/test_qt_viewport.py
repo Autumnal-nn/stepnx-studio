@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,6 +21,7 @@ try:
         load_noteskin_pack,
     )
     from stepnx.codecs.nx20 import parse_bytes
+    from stepnx.core.model import NoteCell, NoteRow
     from stepnx.core.profiles import MetadataScope
     from stepnx.gui.audio_transport import AudioTransport
     from stepnx.gui.metadata_dialog import MetadataCollectionDialog
@@ -30,7 +32,7 @@ except ImportError as exc:
 else:
     QT_UNAVAILABLE = ""
 
-from tests.fixture_factory import make_large_lightmap
+from tests.fixture_factory import make_large_lightmap, make_normal_nx20
 
 
 @unittest.skipIf(QApplication is None, f"Qt runtime unavailable: {QT_UNAVAILABLE}")
@@ -165,7 +167,131 @@ class QtViewportSmokeTests(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_hold_terminals_meet_their_per_column_silhouettes(self) -> None:
+    def test_collapsed_long_draws_head_as_top_terminal_in_editor(self) -> None:
+        document = parse_bytes(
+            make_normal_nx20(), source="short-long.NX", row_storage="rich"
+        )
+        split = document.splits[0]
+        block = split.blocks[0]
+        row = block.rows[0]
+        cells = list(row.cells)
+        cells[0] = replace(cells[0], raw=bytes((0x07, 0x03, 0, 0)))
+        cells[3] = replace(cells[3], raw=bytes((0x0F, 0x03, 0, 0)))
+        row = replace(row, cells=tuple(cells))
+        block = replace(block, rows=(row,) + tuple(block.rows[1:]))
+        document = replace(document, splits=(replace(split, blocks=(block,)),))
+        widget = TimelineWidget(create_authoring_snapshot(document))
+        try:
+            widget.resize(640, 360)
+            visible = widget._layout.visible_segments(
+                0.0, float(widget.viewport().height()), overscan_rows=2
+            )[0]
+            image = QImage(widget.viewport().size(), QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            order = []
+            original = widget._draw_note
+
+            def record(painter_arg, lane, y, row_height, raw):
+                order.append(raw[0] & 0x0F)
+                return original(painter_arg, lane, y, row_height, raw)
+
+            try:
+                with patch.object(widget, "_draw_note", side_effect=record):
+                    widget._draw_segment(painter, visible)
+            finally:
+                painter.end()
+            self.assertIn(0x0F, order)
+            self.assertEqual(order[-1], 0x07)
+            self.assertLess(order.index(0x0F), order.index(0x07))
+        finally:
+            widget.close()
+
+
+    def test_dense_playback_bodies_coalesce_into_one_raster_shaft(self) -> None:
+        document = parse_bytes(
+            make_normal_nx20(), source="dense-body.NX", row_storage="rich"
+        )
+        split = document.splits[0]
+        block = split.blocks[0]
+        rows = list(block.rows)
+        body_count = 2
+        self.assertGreaterEqual(len(rows), body_count)
+        next_id = document.next_stable_id
+        for index in range(body_count):
+            row = rows[index]
+            if hasattr(row, "cells"):
+                cells = list(row.cells)
+                cells[0] = replace(cells[0], raw=bytes((0x0B, 0x03, 0, 0)))
+            else:
+                cells = []
+                for lane in range(int(document.columns.value)):
+                    raw = bytes((0x0B, 0x03, 0, 0)) if lane == 0 else bytes(4)
+                    cells.append(NoteCell(next_id, raw, None))
+                    next_id += 1
+            rows[index] = NoteRow(row.stable_id, tuple(cells), None)
+        block = replace(block, rows=tuple(rows))
+        document = replace(
+            document,
+            splits=(replace(split, blocks=(block,)),),
+            next_stable_id=next_id,
+        )
+        widget = TimelineWidget(create_authoring_snapshot(document))
+        try:
+            widget.resize(640, 900)
+            widget.set_playback_active(True)
+            visible = widget._layout.visible_segments(
+                0.0, float(widget.viewport().height()), overscan_rows=2
+            )[0]
+            image = QImage(widget.viewport().size(), QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            spans = []
+            notes = []
+            original_span = widget._draw_hold_body_span
+            original_note = widget._draw_note
+
+            def record_span(painter_arg, lane, y, span_height, raw):
+                spans.append((lane, y, span_height, raw))
+                return original_span(painter_arg, lane, y, span_height, raw)
+
+            def record_note(painter_arg, lane, y, row_height, raw):
+                notes.append(raw[0] & 0x0F)
+                return original_note(painter_arg, lane, y, row_height, raw)
+
+            try:
+                with patch.object(widget, "_draw_hold_body_span", side_effect=record_span), patch.object(
+                    widget, "_draw_note", side_effect=record_note
+                ):
+                    widget._draw_segment(painter, visible)
+            finally:
+                painter.end()
+            self.assertEqual(len(spans), 1)
+            self.assertEqual(spans[0][0], 0)
+            self.assertNotIn(0x0B, notes)
+
+            widget.set_playback_active(False)
+            visible = widget._layout.visible_segments(
+                0.0, float(widget.viewport().height()), overscan_rows=2
+            )[0]
+            image = QImage(widget.viewport().size(), QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            paused_notes = []
+            try:
+                def record_paused(painter_arg, lane, y, row_height, raw):
+                    paused_notes.append(raw[0] & 0x0F)
+                    return original_note(painter_arg, lane, y, row_height, raw)
+
+                with patch.object(widget, "_draw_note", side_effect=record_paused):
+                    widget._draw_segment(painter, visible)
+            finally:
+                painter.end()
+            self.assertEqual(paused_notes.count(0x0B), body_count)
+        finally:
+            widget.close()
+
+    def test_hold_terminals_do_not_bake_shaft_into_head_artwork(self) -> None:
         document = parse_bytes(
             make_large_lightmap(rows=4), source="LM.NX", row_storage="compact"
         )
@@ -178,69 +304,106 @@ class QtViewportSmokeTests(unittest.TestCase):
                 atlas.fill(Qt.GlobalColor.transparent)
                 atlas_painter = QPainter(atlas)
                 try:
-                    # The repeatable shaft comes from the top of tail row 0.
                     atlas_painter.fillRect(QRectF(0, 0, 96, 8), QColor("#00ff00"))
-                    # The head has a diagonal lower edge. A global bottom bound
-                    # would leave a gap below its shorter left half.
                     atlas_painter.fillRect(
-                        QRectF(0, 96 + 20, 48, 31), QColor("#0000ff")
+                        QRectF(0, 96 + 20, 96, 31), QColor("#0000ff")
                     )
-                    atlas_painter.fillRect(
-                        QRectF(48, 96 + 20, 48, 41), QColor("#0000ff")
-                    )
-                    # Tail artwork begins below the source strip. The shaft
-                    # must fill the transparent interval up to its upper edge.
-                    atlas_painter.fillRect(QRectF(0, 30, 48, 41), QColor("#ff00ff"))
-                    atlas_painter.fillRect(QRectF(48, 40, 48, 31), QColor("#ff00ff"))
                 finally:
                     atlas_painter.end()
                 for frame in range(6):
                     self.assertTrue(atlas.save(str(bank / f"{frame}.png")))
-
                 widget.set_noteskin_pack(load_noteskin_pack(temporary))
-                canvas = QImage(200, 200, QImage.Format.Format_ARGB32)
+                canvas = QImage(96, 96, QImage.Format.Format_ARGB32)
                 canvas.fill(Qt.GlobalColor.transparent)
-                canvas_painter = QPainter(canvas)
+                painter = QPainter(canvas)
                 try:
-                    for note_type in (0x7, 0xF):
-                        self.assertTrue(
-                            widget._draw_noteskin_note(
-                                canvas_painter,
-                                0,
-                                0.0,
-                                24.0,
-                                bytes((note_type, 0, 0, 0)),
-                                QRectF(0, 0, 96, 96),
-                            )
+                    self.assertTrue(
+                        widget._draw_noteskin_note(
+                            painter,
+                            0,
+                            0.0,
+                            24.0,
+                            bytes((0x07, 0, 0, 0)),
+                            QRectF(0, 0, 96, 96),
                         )
+                    )
                 finally:
-                    canvas_painter.end()
-                head = widget._hold_terminal_pixmap(
-                    widget._pixmap(bank / "0.png"),
-                    widget._noteskin_pack.bank(0).animation[0],
-                    0,
-                    1,
-                    shaft_above=False,
-                ).toImage()
-                tail = widget._hold_terminal_pixmap(
-                    widget._pixmap(bank / "0.png"),
-                    widget._noteskin_pack.bank(0).animation[0],
-                    0,
-                    0,
-                    shaft_above=True,
-                ).toImage()
+                    painter.end()
+                self.assertEqual(canvas.pixelColor(48, 35), QColor("#0000ff"))
+                self.assertEqual(canvas.pixelColor(48, 70).alpha(), 0)
+        finally:
+            widget.close()
 
-                # Head continuation meets each different lower edge exactly.
-                self.assertEqual(head.pixelColor(24, 50), QColor("#0000ff"))
-                self.assertEqual(head.pixelColor(24, 51), QColor("#00ff00"))
-                self.assertEqual(head.pixelColor(72, 60), QColor("#0000ff"))
-                self.assertEqual(head.pixelColor(72, 61), QColor("#00ff00"))
-                # Tail continuation fills the gap after the source strip and
-                # stops independently at each upper edge.
-                self.assertEqual(tail.pixelColor(24, 29), QColor("#00ff00"))
-                self.assertEqual(tail.pixelColor(24, 30), QColor("#ff00ff"))
-                self.assertEqual(tail.pixelColor(72, 39), QColor("#00ff00"))
-                self.assertEqual(tail.pixelColor(72, 40), QColor("#ff00ff"))
+    def test_low_projection_collapses_body_and_tail_to_head_in_editor(self) -> None:
+        document = parse_bytes(
+            make_normal_nx20(), source="collapsed.NX", row_storage="rich"
+        )
+        split = document.splits[0]
+        block = split.blocks[0]
+        rows = list(block.rows)
+        next_id = document.next_stable_id
+        while len(rows) < 3:
+            row_id = next_id
+            next_id += 1
+            cells = []
+            for lane in range(int(document.columns.value)):
+                cells.append(NoteCell(next_id, bytes(4), None))
+                next_id += 1
+            rows.append(NoteRow(row_id, tuple(cells), None))
+        for index, note_type in enumerate((0x07, 0x0B, 0x0F)):
+            row = rows[index]
+            if hasattr(row, "cells"):
+                cells = list(row.cells)
+                cells[0] = replace(cells[0], raw=bytes((note_type, 0x03, 0, 0)))
+            else:
+                cells = []
+                for lane in range(int(document.columns.value)):
+                    raw = bytes((note_type, 0x03, 0, 0)) if lane == 0 else bytes(4)
+                    cells.append(NoteCell(next_id, raw, None))
+                    next_id += 1
+            rows[index] = NoteRow(row.stable_id, tuple(cells), None)
+        block = replace(block, rows=tuple(rows), scroll=block.scroll.with_value(0.1))
+        document = replace(
+            document,
+            splits=(replace(split, blocks=(block,)),),
+            next_stable_id=next_id,
+        )
+        widget = TimelineWidget(create_authoring_snapshot(document))
+        try:
+            widget.resize(640, 900)
+            widget.set_playback_active(True)
+            collapsed = widget._collapsed_hold_cells()
+            self.assertIn((rows[1].stable_id, 0), collapsed)
+            self.assertIn((rows[2].stable_id, 0), collapsed)
+            self.assertNotIn((rows[0].stable_id, 0), collapsed)
+            visible = widget._layout.visible_segments(
+                0.0, float(widget.viewport().height()), overscan_rows=2
+            )[0]
+            image = QImage(widget.viewport().size(), QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            notes = []
+            spans = []
+            original_note = widget._draw_note
+            original_span = widget._draw_hold_body_span
+            try:
+                def record_note(painter_arg, lane, y, row_height, raw):
+                    notes.append(raw[0] & 0x0F)
+                    return original_note(painter_arg, lane, y, row_height, raw)
+
+                def record_span(painter_arg, lane, y, span_height, raw):
+                    spans.append((lane, y, span_height))
+                    return original_span(painter_arg, lane, y, span_height, raw)
+
+                with patch.object(widget, "_draw_note", side_effect=record_note), patch.object(
+                    widget, "_draw_hold_body_span", side_effect=record_span
+                ):
+                    widget._draw_segment(painter, visible)
+            finally:
+                painter.end()
+            self.assertIn(0x07, notes)
+            self.assertNotIn(0x0F, notes)
+            self.assertEqual(spans, [])
         finally:
             widget.close()
 

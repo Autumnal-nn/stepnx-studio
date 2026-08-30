@@ -18,6 +18,7 @@ from stepnx.core.profiles import (
     ValueKind,
     authorable_metadata,
     metadata_definition,
+    metadata_display_id,
     metadata_variant_label,
     pack_dm120,
     pack_u16_range,
@@ -213,6 +214,22 @@ class ProfileRegistryTests(unittest.TestCase):
         self.assertEqual(metadata_variant_label(0x0004044F), "Chinese")
         self.assertEqual(metadata_variant_label(0x0005044F), "Japanese")
         self.assertIsNone(metadata_variant_label(1103))
+        self.assertEqual(
+            metadata_display_id("fiesta2", MetadataScope.HEADER, 1103),
+            "0/1103",
+        )
+        self.assertEqual(
+            metadata_display_id("fiesta2", MetadataScope.HEADER, 66639),
+            "1/1103",
+        )
+        self.assertEqual(
+            metadata_display_id("fiesta2", MetadataScope.HEADER, 132175),
+            "2/1103",
+        )
+        self.assertEqual(
+            metadata_display_id("fiesta2", MetadataScope.HEADER, 1150),
+            "1150",
+        )
 
     def test_official_corpus_metadata_gaps_are_registered_raw_or_typed(self) -> None:
         coverage = {

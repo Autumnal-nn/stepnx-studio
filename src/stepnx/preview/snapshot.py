@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from stepnx.authoring.semantics import ConditionClause, DivisionTrigger, project_routes
 from stepnx.core.model import NX20Document, Row
 from stepnx.core.validation import Severity, validate
+from stepnx.preview.modifiers import (
+    EffectiveModifier,
+    StepParam,
+    apply_header_step_params,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +30,7 @@ class PreviewBlock:
     conditions: tuple[ConditionClause, ...]
     triggers: tuple[DivisionTrigger, ...]
     brain_question_count: int
+    step_params: tuple[StepParam, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +43,7 @@ class PreviewSplit:
     force_select: bool
     group: int
     blocks: tuple[PreviewBlock, ...]
+    step_params: tuple[StepParam, ...] = ()
 
     def block(self, stable_id: int) -> PreviewBlock:
         for block in self.blocks:
@@ -64,12 +71,30 @@ class PreviewSnapshot:
     columns: int
     splits: tuple[PreviewSplit, ...]
     diagnostics: tuple[PreviewDiagnostic, ...]
+    header_step_params: tuple[StepParam, ...] = ()
 
     def split(self, stable_id: int) -> PreviewSplit:
         for split in self.splits:
             if split.stable_id == stable_id:
                 return split
         raise KeyError(stable_id)
+
+    def effective_modifier(
+        self, base: EffectiveModifier | None = None
+    ) -> EffectiveModifier:
+        """Apply Header StepParams with profile-gated Metadata 32 extensions."""
+
+        return apply_header_step_params(
+            self.header_step_params,
+            self.profile,
+            base,
+        )
+
+
+def _step_params(entries) -> tuple[StepParam, ...]:
+    return tuple(
+        StepParam(int(entry.meta_id.value), int(entry.value.value)) for entry in entries
+    )
 
 
 def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
@@ -120,6 +145,7 @@ def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
                     () if branch is None else branch.conditions,
                     () if branch is None else branch.triggers,
                     max(0, question_count),
+                    _step_params(block.divisions),
                 )
             )
         raw = int(split.raw_select.value)
@@ -133,6 +159,7 @@ def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
                 bool(raw & 0x20),
                 raw & 0x1F,
                 tuple(blocks),
+                _step_params(split.metadata),
             )
         )
     return PreviewSnapshot(
@@ -143,4 +170,5 @@ def create_preview_snapshot(document: NX20Document) -> PreviewSnapshot:
         int(document.columns.value),
         tuple(splits),
         tuple(diagnostics),
+        _step_params(document.header_metadata),
     )

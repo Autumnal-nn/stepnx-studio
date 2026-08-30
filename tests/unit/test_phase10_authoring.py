@@ -193,6 +193,74 @@ class Phase10AdapterTests(unittest.TestCase):
         self.assertEqual(Phase10TimelineWidget._phase10_special_tile(Atlas(), 95), (31, 2))
         self.assertIsNone(Phase10TimelineWidget._phase10_special_tile(Atlas(), 96))
 
+    def test_external_preview_suspends_follow_chart_until_last_window_closes(self):
+        from stepnx.gui.phase10_install import (
+            _restore_follow_chart_after_preview,
+            _suspend_follow_chart_for_preview,
+        )
+
+        class Action:
+            def __init__(self, checked=True, enabled=True):
+                self.checked = checked
+                self.enabled = enabled
+
+            def isChecked(self):
+                return self.checked
+
+            def isEnabled(self):
+                return self.enabled
+
+            def setChecked(self, value):
+                self.checked = bool(value)
+
+            def setEnabled(self, value):
+                self.enabled = bool(value)
+
+        class Window:
+            pass
+
+        window = Window()
+        window.follow_audio_action = Action(checked=True, enabled=True)
+        first = object()
+        second = object()
+        window.phase10_preview_windows = [first]
+        window.phase10_follow_chart_restore = None
+
+        _suspend_follow_chart_for_preview(window)
+        self.assertFalse(window.follow_audio_action.isChecked())
+        self.assertFalse(window.follow_audio_action.isEnabled())
+        self.assertEqual(window.phase10_follow_chart_restore, (True, True))
+
+        window.phase10_preview_windows.append(second)
+        _suspend_follow_chart_for_preview(window)
+        self.assertEqual(window.phase10_follow_chart_restore, (True, True))
+
+        window.phase10_preview_windows.remove(first)
+        _restore_follow_chart_after_preview(window)
+        self.assertFalse(window.follow_audio_action.isChecked())
+        self.assertFalse(window.follow_audio_action.isEnabled())
+
+        window.phase10_preview_windows.clear()
+        _restore_follow_chart_after_preview(window)
+        self.assertTrue(window.follow_audio_action.isChecked())
+        self.assertTrue(window.follow_audio_action.isEnabled())
+        self.assertIsNone(window.phase10_follow_chart_restore)
+
+    def test_external_preview_close_has_deterministic_delete_on_close(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).parents[2]
+            / "src"
+            / "stepnx"
+            / "gui"
+            / "phase10_install.py"
+        )
+        text = source.read_text(encoding="utf-8")
+        self.assertIn("Qt.WidgetAttribute.WA_DeleteOnClose", text)
+        self.assertIn("_suspend_follow_chart_for_preview(window)", text)
+        self.assertIn("_restore_follow_chart_after_preview(window)", text)
+
     def test_external_preview_is_built_directly_without_base_tab_callback(self):
         from pathlib import Path
 
@@ -215,7 +283,7 @@ class Phase10AdapterTests(unittest.TestCase):
         self.assertNotIn("original_preview = window._open_gameplay_preview", text)
         self.assertNotIn("window.open_preview_action.triggered.disconnect()", text)
 
-    def test_gameplay_preview_scroll_pitch_is_receptor_spacing(self):
+    def test_gameplay_preview_uses_native_base_velocity_projection(self):
         from pathlib import Path
 
         source = (
@@ -226,22 +294,16 @@ class Phase10AdapterTests(unittest.TestCase):
             / "preview_widget.py"
         )
         text = source.read_text(encoding="utf-8")
+        self.assertIn("native_line_y(", text)
+        self.assertIn("native_screen_y(", text)
         self.assertIn(
-            "scroll_pitch = self._geometry().lane_spacing",
+            "base_velocity = native_base_velocity_pixels(geometry.note_size)",
             text,
         )
-        self.assertIn(
-            "pixels = distance * scroll_pitch * multiplier",
-            text,
-        )
-        self.assertNotIn(
-            "pixels = distance * 96.0 * multiplier",
-            text,
-        )
-        self.assertNotIn(
-            "            96.0 * multiplier",
-            text,
-        )
+        self.assertIn("self.session.high_speed", text)
+        self.assertNotIn("scroll_pitch = self._geometry().lane_spacing", text)
+        self.assertNotIn("** 1.08", text)
+        self.assertNotIn("** 0.92", text)
 
     def test_gameplay_preview_culls_events_after_chart_end(self):
         from pathlib import Path
@@ -255,9 +317,10 @@ class Phase10AdapterTests(unittest.TestCase):
         )
         text = source.read_text(encoding="utf-8")
         self.assertIn(
-            "self._chart_time_ms > self.stream.duration_ms + 250.0",
+            "self._chart_time_ms > self._duration_ms + 250.0",
             text,
         )
+        self.assertIn("self._duration_ms = stream.duration_ms", text)
 
     def test_audio_autoload_requires_exact_sibling_folder_mp3(self):
         from pathlib import Path

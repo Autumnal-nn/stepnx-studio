@@ -5,6 +5,7 @@ from bisect import bisect_right
 from dataclasses import dataclass
 
 from stepnx.authoring.snapshot import AuthoringSnapshot, BlockSnapshot
+from stepnx.authoring.timing import TimingProjection
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +36,10 @@ class TimelineGeometry:
     def zoomed(self, factor: float) -> TimelineGeometry:
         if not math.isfinite(factor) or factor <= 0:
             raise ValueError("zoom factor must be finite and positive")
-        height = min(self.maximum_row_height, max(self.minimum_row_height, self.row_height * factor))
+        height = min(
+            self.maximum_row_height,
+            max(self.minimum_row_height, self.row_height * factor),
+        )
         return TimelineGeometry(
             row_height=height,
             block_header_height=self.block_header_height,
@@ -59,10 +63,15 @@ class TimelineGeometry:
         if lane < 0:
             raise ValueError("lane must be non-negative")
         size = max(1.0, self.lane_width - 4.0)
-        x = self.ruler_width + lane * self.lane_width + (self.lane_width - size) / 2
+        x = (
+            self.ruler_width
+            + lane * self.lane_width
+            + (self.lane_width - size) / 2
+        )
         effective_height = self.row_height if row_height is None else row_height
         y = row_y + (effective_height - size) / 2
         return x, y, size, size
+
 
 @dataclass(frozen=True, slots=True)
 class TimelineSegment:
@@ -104,6 +113,7 @@ class TimelineLayout:
 
     __slots__ = (
         "_bottoms",
+        "_timing",
         "content_height",
         "geometry",
         "segments",
@@ -119,6 +129,7 @@ class TimelineLayout:
     ) -> None:
         self.snapshot = snapshot
         self.geometry = geometry or TimelineGeometry()
+        self._timing = TimingProjection(snapshot)
         segments: list[TimelineSegment] = []
         top = 0.0
         for split in snapshot.splits:
@@ -126,7 +137,7 @@ class TimelineLayout:
                 continue
             block = snapshot.active_block(split.stable_id)
             # Paused authoring keeps every encoded row editable at a constant
-            # height.  During transport, match gameplay's spatial projection:
+            # height. During transport, match gameplay's spatial projection:
             # Row time already includes Beat Split. Multiplying by it here a
             # second time makes equal-BPM blocks change visual speed merely
             # because their tickcount differs.
@@ -170,7 +181,13 @@ class TimelineLayout:
     def chart_width(self) -> float:
         return self.geometry.ruler_width + self.lane_area_width
 
-    def visible_segments(self, viewport_top: float, viewport_height: float, *, overscan_rows: int = 2) -> tuple[VisibleSegment, ...]:
+    def visible_segments(
+        self,
+        viewport_top: float,
+        viewport_height: float,
+        *,
+        overscan_rows: int = 2,
+    ) -> tuple[VisibleSegment, ...]:
         if not math.isfinite(viewport_top) or not math.isfinite(viewport_height):
             raise ValueError("viewport coordinates must be finite")
         if viewport_height < 0 or overscan_rows < 0:
@@ -187,7 +204,10 @@ class TimelineLayout:
                 break
             if segment.row_height <= 0:
                 continue
-            first = max(0, math.floor((top - segment.rows_top) / segment.row_height))
+            first = max(
+                0,
+                math.floor((top - segment.rows_top) / segment.row_height),
+            )
             last = min(
                 segment.block.row_count,
                 math.ceil((bottom - segment.rows_top) / segment.row_height),
@@ -214,7 +234,9 @@ class TimelineLayout:
             return None
         return segment, index
 
-    def cell_at(self, x: float, y: float) -> tuple[TimelineSegment, int, int] | None:
+    def cell_at(
+        self, x: float, y: float
+    ) -> tuple[TimelineSegment, int, int] | None:
         row = self.row_at_y(y)
         if row is None or x < self.geometry.ruler_width:
             return None
@@ -233,31 +255,29 @@ class TimelineLayout:
         return beats * max(1, segment.block.beat_split) * segment.row_height
 
     def y_for_chart_time(self, time_ms: float) -> float | None:
-        """Project absolute chart time onto the closest active Block row.
+        """Project chart time using native active-Div selection.
 
-        Blocks carry explicit time anchors, so gaps and discontinuities must
-        not be reconstructed from neighboring geometry. When time is outside
-        every Block, clamp to the closest endpoint.
+        The editable grid remains a lossless list of encoded rows. During
+        playback, however, the playhead must follow Step.GetBlock/GetLine.
+        That distinction matters for bSkip Divs: their msPerLine is zero, so
+        transport crosses their full encoded row span instantaneously instead
+        of crawling through it at BPM-derived row duration.
         """
-        if not math.isfinite(time_ms):
-            raise ValueError("chart time must be finite")
-        candidates: list[tuple[float, int, TimelineSegment]] = []
-        for segment in self.segments:
-            block = segment.block
-            if block.bpm <= 0.0 or block.beat_split <= 0:
-                continue
-            candidates.append((block.start_time, segment.split_index, segment))
-        if not candidates:
+        location = self._timing.locate(time_ms)
+        if location is None:
             return None
-        started = [candidate for candidate in candidates if candidate[0] <= time_ms]
-        if started:
-            _, _, selected = max(started, key=lambda candidate: candidate[:2])
-        else:
-            _, _, selected = min(candidates, key=lambda candidate: candidate[:2])
-        block = selected.block
-        row_duration = 60_000.0 / (block.bpm * block.beat_split)
-        row = (time_ms - block.start_time) / row_duration
-        clamped = min(float(block.row_count), max(0.0, row))
+        selected = next(
+            (
+                segment
+                for segment in self.segments
+                if segment.split_id == location.split_id
+                and segment.block.stable_id == location.block_id
+            ),
+            None,
+        )
+        if selected is None:
+            return None
+        clamped = min(float(selected.block.row_count), max(0.0, location.row))
         return selected.rows_top + clamped * selected.row_height
 
     @staticmethod

@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import math
-import random
 from bisect import bisect_left, bisect_right
 from collections import deque
 from time import perf_counter
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QImage,
+    QLinearGradient,
+    QKeyEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QTransform,
+)
 from PySide6.QtWidgets import QWidget
 
 from stepnx.authoring.noteskin import LocalNoteskinPack, PngAtlas
@@ -16,8 +26,33 @@ from stepnx.preview.events import (
     PreviewEvent,
     RuntimeEventStream,
 )
-from stepnx.preview.geometry import PlayfieldGeometry
+from stepnx.preview.geometry import (
+    PlayfieldGeometry,
+    PlayfieldStyle,
+    default_playfield_style,
+)
+from stepnx.preview.legacy_render import (
+    legacy_nx_homography,
+    legacy_visibility_gradient_stops,
+)
+from stepnx.preview.modifiers import AccDecMode, SequenceZoneTransform, ThrowMode
 from stepnx.preview.session import GameplaySession, Judgment
+from stepnx.preview.speed import native_base_velocity_pixels
+from stepnx.preview.visuals import (
+    LEGACY_ACCEL_LIMIT,
+    LEGACY_ACCDEC_PATH_UNIT,
+    LINE_BASE_ACC_OFFSET,
+    legacy_acc_dec_distance,
+    legacy_exceed_x_offset,
+    native_line_local_y,
+    native_line_y,
+    native_screen_y,
+    prime2_snake_path_lane_position,
+    prime2_snake_x_offset,
+    prime2_throw_perspective_scale,
+    prime2_throw_z_offset,
+    sequence_zone_affine,
+)
 
 _FALLBACK_COLORS = {
     0x1: QColor("#df8b42"),
@@ -60,13 +95,17 @@ class GameplayPreviewWidget(QWidget):
         super().__init__(parent)
         if columns <= 0:
             raise ValueError("gameplay preview requires at least one column")
+        resolved_command = command or parse_gameplay_command("")
+        header_random = bool(
+            stream.effective_modifier is not None and stream.effective_modifier.random
+        )
+        if resolved_command.randomize and not header_random:
+            stream = stream.with_randomized_lanes(seed=stream.route.seed or 0)
         self.stream = stream
         self.columns = int(columns)
         self.start_column = int(start_column)
         self.field_mode = "SINGLE" if self.columns <= 5 else "DOUBLE"
-        self.session = GameplaySession(
-            stream, command or parse_gameplay_command(""), autoplay=True
-        )
+        self.session = GameplaySession(stream, resolved_command, autoplay=True)
         self._chart_time_ms = 0.0
         self._noteskin_pack: LocalNoteskinPack | None = None
         self._pixmaps: dict[str, QPixmap] = {}
@@ -74,9 +113,79 @@ class GameplayPreviewWidget(QWidget):
         self._show_guide = False
         self._world_tour = False
         self._event_times = tuple(event.time_ms for event in stream.events)
+        # Long bodies (0xB) participate in judgment/runtime state, but the
+        # renderer never draws them as standalone notes. Keep a separate draw
+        # index so pathological BeatSplit=128 holds do not make paintEvent walk
+        # thousands of invisible body ticks every frame.
+        self._render_events = tuple(
+            event for event in stream.events if event.note_type != 0xB
+        )
+        self._render_event_times = tuple(
+            event.time_ms for event in self._render_events
+        )
+        self._duration_ms = stream.duration_ms
         self._hold_pairs = self._pair_holds(stream.events)
+        self._hold_pair_by_event = {
+            event: (head, tail)
+            for head, tail in self._hold_pairs
+            for event in (head, tail)
+        }
+        hold_pairs_by_visibility: dict[int, list[tuple[PreviewEvent, PreviewEvent]]] = {
+            0: [], 1: [], 2: [], 3: []
+        }
+        for head, tail in self._hold_pairs:
+            visibility = resolved_command.effective_visibility(int(head.visibility))
+            hold_pairs_by_visibility.setdefault(visibility, []).append((head, tail))
+        self._hold_pairs_by_visibility = {
+            visibility: tuple(pairs)
+            for visibility, pairs in hold_pairs_by_visibility.items()
+        }
+        # Shaft rendering is an interval query, not a chart-tail scan. Keep both
+        # endpoint orders so each frame can approach the visible window from the
+        # cheaper side while preserving arbitrarily long holds that span it.
+        self._hold_head_times_by_visibility = {
+            visibility: tuple(head.time_ms for head, _ in pairs)
+            for visibility, pairs in self._hold_pairs_by_visibility.items()
+        }
+        self._hold_pairs_by_tail_visibility = {
+            visibility: tuple(sorted(pairs, key=lambda pair: pair[1].time_ms))
+            for visibility, pairs in self._hold_pairs_by_visibility.items()
+        }
+        self._hold_tail_times_by_visibility = {
+            visibility: tuple(tail.time_ms for _, tail in pairs)
+            for visibility, pairs in self._hold_pairs_by_tail_visibility.items()
+        }
+        self._render_time_window: tuple[float, float] | None = None
+
+        self._lane_map_cache = resolved_command.lane_map(
+            self.columns, seed=stream.route.seed or 0
+        )
+        inverse_lanes = list(range(self.columns))
+        for visual_lane, source_lane in enumerate(self._lane_map_cache):
+            if 0 <= source_lane < self.columns:
+                inverse_lanes[source_lane] = visual_lane
+        self._visual_lane_cache = tuple(inverse_lanes)
+
+        block_styles: dict[int, PlayfieldStyle] = {}
+        for block_id, params in stream.block_step_params:
+            for param in params:
+                if param.metadata_id != 200:
+                    continue
+                try:
+                    block_styles[block_id] = PlayfieldStyle(param.raw_value)
+                except ValueError:
+                    pass
+                break
+        self._block_playfield_styles = block_styles
+        self._native_state_time = 0.0
+        self._native_state = stream.native_state_at(0.0)
+        self._geometry_cache_key: tuple[float, PlayfieldStyle] | None = None
+        self._geometry_cache: PlayfieldGeometry | None = None
+
         self._paint_timestamps: deque[float] = deque(maxlen=120)
         self._paint_cost_ms = 0.0
+        self._advance_cost_ms = 0.0
+        self._host_paint_cost_ms = 0.0
         self.setMinimumSize(420, 360)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -114,7 +223,11 @@ class GameplayPreviewWidget(QWidget):
         if not math.isfinite(chart_time_ms):
             raise ValueError("playback time must be finite")
         self._chart_time_ms = float(chart_time_ms)
+        self._native_state_time = self._chart_time_ms
+        self._native_state = self.stream.native_state_at(self._chart_time_ms)
+        advance_started = perf_counter()
         self.session.advance(self._chart_time_ms)
+        self._advance_cost_ms = (perf_counter() - advance_started) * 1000.0
         self.update()
 
     def set_noteskin_pack(self, pack: LocalNoteskinPack | None) -> None:
@@ -130,89 +243,355 @@ class GameplayPreviewWidget(QWidget):
                         self._pixmaps[str(path)] = pixmap
         self.update()
 
+    def _default_playfield_style(self) -> PlayfieldStyle:
+        return default_playfield_style(self.columns)
+
+    def _current_native_state(self):
+        timing = self.stream.native_timing
+        if timing is None:
+            return None
+        if self._native_state_time != self._chart_time_ms:
+            self._native_state_time = self._chart_time_ms
+            self._native_state = timing.state_at(self._chart_time_ms)
+        return self._native_state
+
+    def _active_playfield_style(self) -> PlayfieldStyle:
+        """Resolve the active Prime-style judge-line layout.
+
+        Division Metadata 200 is block-local and must be re-evaluated whenever
+        native timing selects a different block. Missing/unknown values fall
+        back to StepNX's launch default without mutating chart structure.
+        """
+
+        default = self._default_playfield_style()
+        timing = self.stream.native_timing
+        state = self._current_native_state()
+        if timing is None or not timing.blocks or state is None:
+            return default
+        block_id = timing.blocks[state.block_index].block_id
+        return self._block_playfield_styles.get(block_id, default)
+
     def _geometry(self) -> PlayfieldGeometry:
-        return PlayfieldGeometry(max(1.0, float(self.width())), self.columns)
+        width = max(1.0, float(self.width()))
+        style = self._active_playfield_style()
+        key = (width, style)
+        if self._geometry_cache_key != key or self._geometry_cache is None:
+            self._geometry_cache_key = key
+            self._geometry_cache = PlayfieldGeometry(
+                width,
+                self.columns,
+                style,
+                self.start_column,
+            )
+        return self._geometry_cache
+
+    def _sequence_transform(self) -> SequenceZoneTransform:
+        transform = self.session.runtime_modifier.sequence_transform
+        if self.command.under_attack:
+            transform |= SequenceZoneTransform.UNDER_ATTACK
+        if self.command.drop:
+            transform |= SequenceZoneTransform.DROP
+        return transform
 
     def _receptor_y(self) -> float:
-        return float(self.height() - 82) if self.command.upside_down else 82.0
+        # UA/Drop/Mid transform the complete playfield afterward. Keep one
+        # canonical local receptor anchor instead of baking Drop into note Y.
+        return 82.0
+
+    def _sequence_affine(self) -> tuple[float, float, float, float]:
+        return sequence_zone_affine(
+            self._sequence_transform(),
+            float(self.width()),
+            float(self.height()),
+            normal_receptor_y=self._receptor_y(),
+        )
+
+    def _effective_nx_mode(self) -> bool:
+        return bool(self.command.nx_mode or self.session.runtime_modifier.nx)
+
+    def _playfield_transform(self, z: float = 0.0) -> QTransform:
+        transform = self._sequence_transform()
+        if self._effective_nx_mode():
+            return QTransform(
+                *legacy_nx_homography(
+                    float(self.width()),
+                    float(self.height()),
+                    z=float(z),
+                    drop=bool(transform & SequenceZoneTransform.DROP),
+                    under_attack=bool(
+                        transform & SequenceZoneTransform.UNDER_ATTACK
+                    ),
+                )
+            )
+        sx, sy, tx, ty = self._sequence_affine()
+        return QTransform(sx, 0.0, 0.0, sy, tx, ty)
 
     def _lane_map(self) -> tuple[int, ...]:
-        return self.command.lane_map(self.columns, seed=self.stream.route.seed or 0)
+        return self._lane_map_cache
+
+    def _screen_lane_to_source(self, visual_lane: int) -> int:
+        lane = int(visual_lane)
+        if self._sequence_transform() & SequenceZoneTransform.UNDER_ATTACK:
+            lane = self.columns - 1 - lane
+        return self._lane_map()[lane]
 
     def _visual_lane(self, source_lane: int) -> int:
-        try:
-            return self._lane_map().index(source_lane)
-        except ValueError:
-            return source_lane
+        lane = int(source_lane)
+        if 0 <= lane < len(self._visual_lane_cache):
+            return self._visual_lane_cache[lane]
+        return lane
 
     def lane_center(self, source_lane: int) -> float:
         """Return the shared horizontal centre for one source lane."""
         return self._geometry().lane_center(self._visual_lane(source_lane))
 
-    def _event_y(self, event: PreviewEvent) -> float:
-        receptor_y = self._receptor_y()
-        current_position = self.stream.position_at(self._chart_time_ms)
-        distance = event.position - current_position
-        multiplier = self.command.speed * self.stream.speed_factor_at(
-            self._chart_time_ms
+    def _lane_position_x(self, visual_lane_position: float) -> float:
+        """Project a fractional visual-lane coordinate into the active layout."""
+
+        return self._geometry().lane_position(float(visual_lane_position))
+
+    def _legacy_command_acc_dec(self) -> AccDecMode:
+        """Resolve PIUTESTER/NX2 A/D without conflating it with R!SE Header 2."""
+
+        mode = AccDecMode.LINEAR
+        for character in self.command.raw:
+            if character == "d":
+                mode = AccDecMode.DECELERATION
+            elif character == "a":
+                mode = AccDecMode.ACCELERATION
+        return mode
+
+    def _effective_acc_dec(self) -> AccDecMode:
+        legacy = self._legacy_command_acc_dec()
+        return (
+            legacy
+            if legacy is not AccDecMode.LINEAR
+            else self.session.runtime_modifier.acc_dec
         )
-        if self.command.random_velocity:
-            seed = (
-                event.split_id * 1_000_003
-                + event.block_id * 10_007
-                + event.row_index * 101
-                + event.lane
+
+    def _effective_throw(self) -> ThrowMode:
+        mode = self.session.runtime_modifier.throw
+        # Historical COMMAND Sink/Rise target the same three-state path family.
+        for character in self.command.raw:
+            if character == "(":
+                mode = ThrowMode.SINK
+            elif character == ")":
+                mode = ThrowMode.RISE
+        return mode
+
+    def _event_beat_distance(self, event: PreviewEvent) -> float:
+        return self.stream.beat_distance_at(
+            event,
+            self._chart_time_ms,
+            state=self._current_native_state(),
+        )
+
+    def _event_local_y(self, event: PreviewEvent) -> float:
+        # Header ID 2 remains the modern R!SE LineBase curve. Historical A/D
+        # commands use a distinct Prime/NXA renderer and are applied in screen Y.
+        return native_line_local_y(
+            self._event_beat_distance(event), self.session.runtime_modifier.acc_dec
+        )
+
+    def _event_native_y(self, event: PreviewEvent) -> float:
+        return native_line_y(
+            self._event_beat_distance(event),
+            self.session.high_speed,
+            self.session.runtime_modifier.acc_dec,
+        )
+
+    def _path_anchor(
+        self, event: PreviewEvent
+    ) -> tuple[PreviewEvent, float]:
+        """Return the rigid path anchor used by legacy long notes."""
+
+        pair = self._hold_pair_by_event.get(event)
+        if pair is None:
+            return event, self._event_beat_distance(event)
+        head, tail = pair
+        if head.time_ms <= self._chart_time_ms <= tail.time_ms:
+            return head, 0.0
+        return head, self._event_beat_distance(head)
+
+    def _throw_projection(
+        self, x: float, y: float, beat_distance: float
+    ) -> tuple[float, float, float]:
+        """Project legacy Throw when NX Mode is not handling the 3-D plane."""
+
+        mode = self._effective_throw()
+        if mode is ThrowMode.FLAT:
+            return float(x), float(y), 1.0
+        z = prime2_throw_z_offset(
+            beat_distance,
+            self.session.high_speed,
+            rise=mode is ThrowMode.RISE,
+            alternate_amplitude=self._effective_nx_mode(),
+        )
+        if self._effective_nx_mode():
+            # NX's fixed-Z QTransform below performs the source perspective.
+            return float(x), float(y), 1.0
+        scale = prime2_throw_perspective_scale(z)
+        centre_x = float(self.width()) / 2.0
+        centre_y = float(self.height()) / 2.0
+        return (
+            centre_x + (float(x) - centre_x) * scale,
+            centre_y + (float(y) - centre_y) * scale,
+            scale,
+        )
+
+    def _event_throw_z(self, event: PreviewEvent) -> float:
+        mode = self._effective_throw()
+        if mode is ThrowMode.FLAT:
+            return 0.0
+        _, beat_distance = self._path_anchor(event)
+        return prime2_throw_z_offset(
+            beat_distance,
+            self.session.high_speed,
+            rise=mode is ThrowMode.RISE,
+            alternate_amplitude=self._effective_nx_mode(),
+        )
+
+    def _base_screen_y_for_beat_distance(self, beat_distance: float) -> float:
+        geometry = self._geometry()
+        legacy_mode = self._legacy_command_acc_dec()
+        if legacy_mode is not AccDecMode.LINEAR:
+            return self._receptor_y() + legacy_acc_dec_distance(
+                beat_distance,
+                self.session.high_speed,
+                geometry.path_unit,
+                legacy_mode,
             )
-            multiplier *= random.Random(seed).uniform(0.65, 1.35)
-        scroll_pitch = self._geometry().lane_spacing
-        pixels = distance * scroll_pitch * multiplier
-        if self.command.acceleration:
-            pixels = math.copysign(abs(pixels) ** 1.08, pixels)
-        elif self.command.deceleration:
-            pixels = math.copysign(abs(pixels) ** 0.92, pixels)
-        return receptor_y - pixels if self.command.upside_down else receptor_y + pixels
+        if self.command.exceed_mode or self.session.runtime_modifier.exceed:
+            # Prime/NXA path_exeed shares its unbounded linear distance with
+            # both axes. Keeping R!SE's 65.647/72 Y projection here made the
+            # diagonal about ten percent too shallow even after X was fixed.
+            return self._receptor_y() + legacy_acc_dec_distance(
+                beat_distance,
+                self.session.high_speed,
+                geometry.path_unit,
+                AccDecMode.LINEAR,
+            )
+        native_y = native_line_y(
+            beat_distance,
+            self.session.high_speed,
+            self.session.runtime_modifier.acc_dec,
+        )
+        return native_screen_y(
+            native_y,
+            self._receptor_y(),
+            geometry.note_size,
+        )
+
+    def _event_y(self, event: PreviewEvent) -> float:
+        return self._base_screen_y_for_beat_distance(self._event_beat_distance(event))
 
     def _event_x_offset(self, event: PreviewEvent) -> float:
-        if not self.command.earthworm:
-            return 0.0
-        phase = event.position * 0.9 + self._chart_time_ms / 280.0
-        return math.sin(phase) * 18.0
+        geometry = self._geometry()
+        _, beat_distance = self._path_anchor(event)
+        offset = 0.0
 
-    def _event_opacity(self, event: PreviewEvent) -> float:
-        distance = abs(self._event_y(event) - self._receptor_y())
-        return self.command.note_opacity(
-            int(event.visibility),
-            distance=distance,
-            fade_distance=max(1.0, self.height() * 0.42),
-            time_ms=self._chart_time_ms,
+        # NX20 Snake Path is a per-note VisualEffect bit. It is not Header 35
+        # ZigZag and it is not Header 34 / COMMAND z global Snake. The selected
+        # block supplies its phase start (222) and phase length (221).
+        if event.snake_path:
+            visual_lane = self._visual_lane(event.lane)
+            lane_position = prime2_snake_path_lane_position(
+                visual_lane,
+                beat_distance,
+                self.columns,
+                self.stream.route.seed or 0,
+                start=self.stream.block_param(event.block_id, 222, 1.0),
+                interval=self.stream.block_param(event.block_id, 221, 1.0),
+            )
+            offset += self._lane_position_x(lane_position) - self.lane_center(event.lane)
+
+        # Header 35 ZigZag remains effective state only until its distinct
+        # rendering equation is recovered. Do not alias it to Snake Path.
+        if self.command.snake or self.session.runtime_modifier.snake:
+            offset += prime2_snake_x_offset(beat_distance, geometry.path_unit)
+
+        if self.command.exceed_mode or self.session.runtime_modifier.exceed:
+            if self.columns <= 5:
+                # Prime stores one signed bank offset for the selected Single
+                # player. P1 approaches from the right; P2 approaches from left.
+                from_right = self.start_column < 5
+            else:
+                # Double keeps the two native five-lane bank origins: bank 0 gets
+                # +d and bank 1 gets -d. Do not normalize against field width.
+                from_right = (self.start_column + self._visual_lane(event.lane)) < 5
+            offset += legacy_exceed_x_offset(
+                beat_distance,
+                self.session.high_speed,
+                geometry.path_unit,
+                from_right=from_right,
+            )
+        return offset
+
+    def _screen_y_for_beat_distance(self, beat_distance: float) -> float:
+        return self._base_screen_y_for_beat_distance(beat_distance)
+
+    def _event_render_geometry(
+        self, event: PreviewEvent
+    ) -> tuple[float, float, float]:
+        centre_x = self.lane_center(event.lane) + self._event_x_offset(event)
+        centre_y = self._event_y(event)
+        if self._effective_nx_mode():
+            return centre_x, centre_y, self._geometry().note_size
+        _, beat_distance = self._path_anchor(event)
+        centre_x, centre_y, scale = self._throw_projection(
+            centre_x, centre_y, beat_distance
+        )
+        return centre_x, centre_y, self._geometry().note_size * scale
+
+    def _effective_visibility(self, event: PreviewEvent) -> int:
+        return self.command.effective_visibility(int(event.visibility))
+
+    def _flash_visible(self) -> bool:
+        return self.command.flash_visible(
+            self._chart_time_ms,
+            header_flash=self.session.runtime_modifier.flash,
         )
 
-    def visible_events(self) -> tuple[PreviewEvent, ...]:
-        margin = 130.0
+    def _visible_events_from(
+        self,
+        events: tuple[PreviewEvent, ...],
+        event_times: tuple[float, ...],
+    ) -> tuple[PreviewEvent, ...]:
+        # paintEvent calls this once before drawing notes and shafts. Store the
+        # exact time-domain projection of its screen-space culling window so
+        # long shafts can share it instead of examining the rest of the chart.
+        self._render_time_window = None
+        geometry = self._geometry()
+        # Accel/Decel can add up to 200 native Y units outside the linear
+        # projection. Include that exact bound in culling so transformed notes
+        # are not discarded before _event_y() evaluates them.
+        margin = 130.0 + abs(LINE_BASE_ACC_OFFSET) * (
+            geometry.note_size / 72.0
+        )
+        if self._legacy_command_acc_dec() is not AccDecMode.LINEAR:
+            margin += LEGACY_ACCEL_LIMIT * (
+                geometry.path_unit / LEGACY_ACCDEC_PATH_UNIT
+            )
+        if self._effective_throw() is not ThrowMode.FLAT:
+            margin += 100.0 * (geometry.note_size / 72.0)
+        if self._effective_nx_mode():
+            # The NX homography can project local coordinates well outside the
+            # ordinary flat viewport back into the visible trapezoid.
+            margin += float(self.height()) * 2.0
+        if self._sequence_transform() & SequenceZoneTransform.MID:
+            margin += abs(float(self.height()) / 2.0 - self._receptor_y())
         timing = self.stream.timing
-        if not timing or not self.stream.events:
+        if not timing or not events:
             return ()
-        # position_at() intentionally clamps beyond the final timing segment.
-        # Without a time-domain end guard, that can make the last notes appear
-        # again indefinitely after playback has passed the chart.
-        if self._chart_time_ms > self.stream.duration_ms + 250.0:
-            return ()
-        # position_at() intentionally clamps beyond the final timing segment.
-        # Without a time-domain end guard, that can make the last notes appear
-        # again indefinitely after playback has passed the chart.
-        if self._chart_time_ms > self.stream.duration_ms + 250.0:
+        # The native position axis clamps after the route endpoint. Keep the
+        # explicit time-domain guard so the last notes cannot reappear forever.
+        if self._chart_time_ms > self._duration_ms + 250.0:
             return ()
         current_position = self.stream.position_at(self._chart_time_ms)
-        multiplier = max(
-            0.001,
-            abs(
-                self.command.speed
-                * self.stream.speed_factor_at(self._chart_time_ms)
-            ),
-        )
-        scroll_pitch = self._geometry().lane_spacing
+        multiplier = max(0.001, abs(self.session.high_speed))
+        base_velocity = native_base_velocity_pixels(geometry.note_size)
         visible_position = (self.height() + margin + abs(self._receptor_y())) / (
-            scroll_pitch * multiplier
+            base_velocity * multiplier
         )
         positions = (
             current_position - visible_position,
@@ -242,13 +621,27 @@ class GameplayPreviewWidget(QWidget):
                 )
         if not time_bounds:
             return ()
-        first = bisect_left(self._event_times, min(time_bounds) - 250.0)
-        last = bisect_right(self._event_times, max(time_bounds) + 250.0)
+        self._render_time_window = (
+            min(time_bounds) - 250.0,
+            max(time_bounds) + 250.0,
+        )
+        first = bisect_left(event_times, self._render_time_window[0])
+        last = bisect_right(event_times, self._render_time_window[1])
         return tuple(
             event
-            for event in self.stream.events[first:last]
+            for event in events[first:last]
             if -margin <= self._event_y(event) <= self.height() + margin
         )
+
+    def visible_events(self) -> tuple[PreviewEvent, ...]:
+        """Return all visible runtime events, including long-body judgment ticks."""
+
+        return self._visible_events_from(self.stream.events, self._event_times)
+
+    def _visible_render_events(self) -> tuple[PreviewEvent, ...]:
+        """Return only events that can produce standalone draw calls."""
+
+        return self._visible_events_from(self._render_events, self._render_event_times)
 
     @staticmethod
     def _pair_holds(
@@ -397,21 +790,123 @@ class GameplayPreviewWidget(QWidget):
         else:
             painter.drawRoundedRect(rect, 5, 5)
 
-    def _draw_hold_shafts(self, painter: QPainter, note_size: float) -> None:
-        for head, tail in self._hold_pairs:
+    def _visible_hold_pairs(
+        self, visibility_filter: int
+    ) -> tuple[tuple[PreviewEvent, PreviewEvent], ...]:
+        """Return holds whose [head, tail] interval overlaps the draw window.
+
+        The old renderer walked every hold whose tail had not passed yet. On
+        dense charts that made frame cost proportional to the *remaining song*:
+        expensive at the start and progressively cheaper toward the end.
+        """
+
+        window = self._render_time_window
+        if window is None:
+            return ()
+        visibility = int(visibility_filter)
+        pairs_by_head = self._hold_pairs_by_visibility.get(visibility, ())
+        if not pairs_by_head:
+            return ()
+        head_times = self._hold_head_times_by_visibility.get(visibility, ())
+        pairs_by_tail = self._hold_pairs_by_tail_visibility.get(visibility, ())
+        tail_times = self._hold_tail_times_by_visibility.get(visibility, ())
+        window_start, window_end = window
+
+        head_last = bisect_right(head_times, window_end)
+        tail_first = bisect_left(tail_times, window_start)
+
+        # Query from whichever endpoint leaves fewer candidates. Filtering the
+        # opposite endpoint keeps long holds spanning the complete window. This
+        # avoids the previous O(all future holds) behaviour without imposing a
+        # maximum hold duration or assuming monotonic scrolling.
+        if head_last <= len(pairs_by_tail) - tail_first:
+            candidates = pairs_by_head[:head_last]
+        else:
+            candidates = pairs_by_tail[tail_first:]
+        return tuple(
+            (head, tail)
+            for head, tail in candidates
+            if head.time_ms <= window_end and tail.time_ms >= window_start
+        )
+
+    @staticmethod
+    def _hold_shaft_height(
+        y1: float,
+        y2: float,
+        rendered_note_size: float,
+        *,
+        head_terminal_visible: bool,
+        tail_terminal_visible: bool,
+    ) -> float:
+        span = abs(float(y2) - float(y1))
+        # Subpixel endpoint noise must not manufacture a visible long body.
+        if span <= 0.5:
+            return 0.0
+        # When both terminal quads are still present, there is no exposed shaft
+        # until their screen-space silhouettes stop overlapping.
+        if (
+            head_terminal_visible
+            and tail_terminal_visible
+            and span <= max(1.0, float(rendered_note_size))
+        ):
+            return 0.0
+        return span
+
+    def _draw_hold_shafts(
+        self,
+        painter: QPainter,
+        note_size: float,
+        visibility_filter: int,
+    ) -> None:
+        for head, tail in self._visible_hold_pairs(visibility_filter):
             if tail.time_ms < self._chart_time_ms - 80.0:
                 continue
-            y1, y2 = self._event_y(head), self._event_y(tail)
+
+            y1 = self._event_y(head)
+            y2 = self._event_y(tail)
             if head.time_ms <= self._chart_time_ms <= tail.time_ms:
                 y1 = self._receptor_y()
-            if max(y1, y2) < -100 or min(y1, y2) > self.height() + 100:
+            anchor_x = self.lane_center(head.lane) + self._event_x_offset(head)
+            _, anchor_distance = self._path_anchor(head)
+            if self._effective_nx_mode():
+                x1 = x2 = anchor_x
+                scale = 1.0
+            else:
+                x1, y1, scale = self._throw_projection(
+                    anchor_x, y1, anchor_distance
+                )
+                x2, y2, _ = self._throw_projection(
+                    anchor_x, y2, anchor_distance
+                )
+            centre = (x1 + x2) / 2.0
+            rendered_note_size = note_size * scale
+            head_visible = (
+                self.session.event_key(head) not in self.session.judgments
+                or head.time_ms >= self._chart_time_ms - 80.0
+            )
+            tail_visible = (
+                self.session.event_key(tail) not in self.session.judgments
+                or tail.time_ms >= self._chart_time_ms - 80.0
+            )
+            shaft_height = self._hold_shaft_height(
+                y1,
+                y2,
+                rendered_note_size,
+                head_terminal_visible=head_visible,
+                tail_terminal_visible=tail_visible,
+            )
+            if shaft_height <= 0.0:
                 continue
-            centre = self.lane_center(tail.lane)
+            if (
+                not self._effective_nx_mode()
+                and (max(y1, y2) < -100 or min(y1, y2) > self.height() + 100)
+            ):
+                continue
             target = QRectF(
-                centre - note_size / 2,
+                centre - rendered_note_size / 2,
                 min(y1, y2),
-                note_size,
-                max(2.0, abs(y2 - y1)),
+                rendered_note_size,
+                shaft_height,
             )
             bank = (
                 None
@@ -420,36 +915,167 @@ class GameplayPreviewWidget(QWidget):
             )
             drawn = False
             painter.save()
-            painter.setOpacity(self._event_opacity(head))
-            if bank is not None:
-                frame = int(max(0.0, self._chart_time_ms) // 80) % len(
-                    bank.animation
-                )
-                atlas = bank.animation[frame]
-                pixmap = self._pixmap(atlas)
-                if pixmap is not None:
-                    atlas_lane = (
-                        self.start_column + self._visual_lane(tail.lane)
-                    ) % 5
-                    tile_x, tile_y, tile_width, _ = atlas.tile(atlas_lane, 0)
-                    painter.drawPixmap(
-                        target,
-                        pixmap,
-                        QRectF(tile_x, tile_y, tile_width, 8),
+            try:
+                if self._effective_nx_mode():
+                    painter.setTransform(
+                        self._playfield_transform(self._event_throw_z(head)),
+                        False,
                     )
-                    drawn = True
-            if not drawn:
-                width = max(8.0, note_size * 0.34)
-                painter.fillRect(
-                    QRectF(
-                        centre - width / 2,
-                        min(y1, y2),
-                        width,
-                        max(2.0, abs(y2 - y1)),
-                    ),
-                    QColor(88, 160, 230, 210),
-                )
-            painter.restore()
+                if bank is not None:
+                    frame = int(max(0.0, self._chart_time_ms) // 80) % len(
+                        bank.animation
+                    )
+                    atlas = bank.animation[frame]
+                    pixmap = self._pixmap(atlas)
+                    if pixmap is not None:
+                        atlas_lane = (
+                            self.start_column + self._visual_lane(head.lane)
+                        ) % 5
+                        tile_x, tile_y, tile_width, _ = atlas.tile(atlas_lane, 0)
+                        painter.drawPixmap(
+                            target,
+                            pixmap,
+                            QRectF(tile_x, tile_y, tile_width, 8),
+                        )
+                        drawn = True
+                if not drawn:
+                    width = max(8.0, rendered_note_size * 0.34)
+                    painter.fillRect(
+                        QRectF(
+                            centre - width / 2,
+                            min(y1, y2),
+                            width,
+                            shaft_height,
+                        ),
+                        QColor(88, 160, 230, 210),
+                    )
+            finally:
+                painter.restore()
+
+    def _projected_note_centre_and_extent(
+        self, event: PreviewEvent
+    ) -> tuple[QPointF, float]:
+        centre_x, centre_y, rendered_note_size = self._event_render_geometry(event)
+        transform = self._playfield_transform(
+            self._event_throw_z(event) if self._effective_nx_mode() else 0.0
+        )
+        centre = transform.map(QPointF(centre_x, centre_y))
+        top = transform.map(
+            QPointF(centre_x, centre_y - rendered_note_size / 2.0)
+        )
+        bottom = transform.map(
+            QPointF(centre_x, centre_y + rendered_note_size / 2.0)
+        )
+        extent = math.hypot(bottom.x() - top.x(), bottom.y() - top.y())
+        return centre, max(1.0, extent)
+
+    def _collapsed_hold_tail(self, event: PreviewEvent) -> bool:
+        if event.note_type != 0xF:
+            return False
+        pair = self._hold_pair_by_event.get(event)
+        if pair is None:
+            return False
+        head, tail = pair
+        head_centre, head_extent = self._projected_note_centre_and_extent(head)
+        tail_centre, tail_extent = self._projected_note_centre_and_extent(tail)
+        distance = math.hypot(
+            tail_centre.x() - head_centre.x(),
+            tail_centre.y() - head_centre.y(),
+        )
+        return distance <= max(head_extent, tail_extent) + 1e-6
+
+    def _draw_note_group(
+        self,
+        painter: QPainter,
+        geometry: PlayfieldGeometry,
+        visibility_filter: int,
+        visible_notes: tuple[PreviewEvent, ...] | list[PreviewEvent] | None = None,
+    ) -> None:
+        self._draw_hold_shafts(painter, geometry.note_size, visibility_filter)
+        notes = self._visible_render_events() if visible_notes is None else visible_notes
+        # The native game collapses a hold whose complete projected length fits
+        # underneath one terminal into the head silhouette. Shaft is already
+        # suppressed by _hold_shaft_height; suppress the covered tail too.
+        drawable_notes = tuple(
+            note for note in notes if not self._collapsed_hold_tail(note)
+        )
+        ordered_notes = tuple(
+            note for note in drawable_notes if note.note_type != 0x7
+        ) + tuple(note for note in drawable_notes if note.note_type == 0x7)
+        for note in ordered_notes:
+            if self._effective_visibility(note) != int(visibility_filter):
+                continue
+            key = self.session.event_key(note)
+            if (
+                key in self.session.judgments
+                and note.time_ms < self._chart_time_ms - 80
+            ):
+                continue
+            centre_x, centre_y, rendered_note_size = self._event_render_geometry(note)
+            rect = QRectF(
+                centre_x - rendered_note_size / 2,
+                centre_y - rendered_note_size / 2,
+                rendered_note_size,
+                rendered_note_size,
+            )
+            painter.save()
+            try:
+                if self._effective_nx_mode():
+                    painter.setTransform(
+                        self._playfield_transform(self._event_throw_z(note)),
+                        False,
+                    )
+                if not self._draw_asset(painter, note, rect):
+                    self._fallback_note(painter, note.note_type, rect)
+            finally:
+                painter.restore()
+
+    def _render_visibility_layer(
+        self,
+        geometry: PlayfieldGeometry,
+        visibility: int,
+        visible_notes: tuple[PreviewEvent, ...] | list[PreviewEvent],
+    ) -> QImage:
+        image = QImage(self.size(), QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(0)
+        layer = QPainter(image)
+        try:
+            layer.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            layer.setTransform(self._playfield_transform(), False)
+            self._draw_note_group(
+                layer, geometry, visibility, visible_notes=visible_notes
+            )
+        finally:
+            layer.end()
+
+        mask = QPainter(image)
+        try:
+            mask.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_DestinationIn
+            )
+            gradient = QLinearGradient(0.0, 0.0, 0.0, float(self.height()))
+            for position, alpha in legacy_visibility_gradient_stops(visibility):
+                colour = QColor(255, 255, 255)
+                colour.setAlphaF(float(alpha))
+                gradient.setColorAt(float(position), colour)
+            mask.fillRect(
+                QRectF(0.0, 0.0, float(self.width()), float(self.height())),
+                QBrush(gradient),
+            )
+        finally:
+            mask.end()
+        return image
+
+    def _active_hold_visibilities(self) -> frozenset[int]:
+        time_ms = self._chart_time_ms
+        active: set[int] = set()
+        for visibility in (1, 2):
+            if any(
+                head.time_ms <= time_ms <= tail.time_ms
+                for head, tail in self._visible_hold_pairs(visibility)
+            ):
+                active.add(visibility)
+        return frozenset(active)
 
     def _draw_sequence_zone(
         self,
@@ -457,7 +1083,7 @@ class GameplayPreviewWidget(QWidget):
         geometry: PlayfieldGeometry,
         receptor_y: float,
     ) -> None:
-        if self.command.freedom:
+        if self.command.freedom or self.session.runtime_modifier.freedom:
             return
         bank = None if self._noteskin_pack is None else self._noteskin_pack.bank(0)
         if bank is not None and bank.base is not None:
@@ -509,37 +1135,49 @@ class GameplayPreviewWidget(QWidget):
             QRectF(left, 0.0, field_width, float(self.height())), QColor("#10141e")
         )
         receptor_y = self._receptor_y()
+        playfield_transform = self._playfield_transform()
+        painter.save()
+        painter.setTransform(playfield_transform, False)
         if self._show_guide:
             painter.setPen(QPen(QColor("#ffd166"), 1.0, Qt.PenStyle.DashLine))
             painter.drawLine(
                 QPointF(left, receptor_y), QPointF(left + field_width, receptor_y)
             )
         self._draw_sequence_zone(painter, geometry, receptor_y)
-        note_size = geometry.note_size
-        self._draw_hold_shafts(painter, note_size)
-        for note in self.visible_events():
-            if note.note_type == 0xB:
-                continue
-            key = self.session.event_key(note)
-            if (
-                key in self.session.judgments
-                and note.time_ms < self._chart_time_ms - 80
-            ):
-                continue
-            centre_x = self.lane_center(note.lane) + self._event_x_offset(note)
-            centre_y = self._event_y(note)
-            rect = QRectF(
-                centre_x - note_size / 2,
-                centre_y - note_size / 2,
-                note_size,
-                note_size,
+        flash_visible = self._flash_visible()
+        visible_by_visibility: dict[int, list[PreviewEvent]] = {1: [], 2: [], 3: []}
+        if flash_visible:
+            for note in self._visible_render_events():
+                visibility = self._effective_visibility(note)
+                if visibility in visible_by_visibility:
+                    visible_by_visibility[visibility].append(note)
+            self._draw_note_group(
+                painter,
+                geometry,
+                3,
+                visible_notes=visible_by_visibility[3],
             )
-            painter.save()
-            painter.setOpacity(self._event_opacity(note))
-            if not self._draw_asset(painter, note, rect):
-                self._fallback_note(painter, note.note_type, rect)
-            painter.restore()
+        painter.restore()
+
+        if flash_visible:
+            # NXA/Prime apply Appear/Vanish through a screen-space alpha texture.
+            # Full-size intermediate images are expensive, so create them only
+            # when a transition-family note is visible or a matching long is
+            # currently held across the receptor.
+            active_hold_visibilities = self._active_hold_visibilities()
+            for visibility in (1, 2):
+                notes = visible_by_visibility[visibility]
+                if not notes and visibility not in active_hold_visibilities:
+                    continue
+                layer = self._render_visibility_layer(
+                    geometry, visibility, visible_notes=notes
+                )
+                painter.drawImage(0, 0, layer)
+
+        painter.save()
+        painter.setTransform(playfield_transform, False)
         self._draw_pad_feedback(painter, geometry)
+        painter.restore()
 
         stats = self.session.stats
         painter.setPen(QColor("#ffffff"))
@@ -561,7 +1199,7 @@ class GameplayPreviewWidget(QWidget):
         painter.drawText(
             QRectF(12, self.height() - 28, self.width() - 24, 20),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            f"{mode} · {self.command.speed:g}x · "
+            f"{mode} · {self.session.selected_speed:g}x · "
             f"{self._chart_time_ms / 1000:.3f}s · "
             f"{self.field_mode} · COMMAND {self.command.raw or '—'}",
         )
@@ -572,7 +1210,9 @@ class GameplayPreviewWidget(QWidget):
         self._paint_cost_ms = (painted_at - paint_started) * 1000.0
 
     def _judgment_text(self, judgment: Judgment) -> str:
-        if not self.command.judge_reverse:
+        if not (
+            self.command.judge_reverse or self.session.runtime_modifier.judge_reverse
+        ):
             return judgment.value
         return {
             Judgment.PERFECT: Judgment.MISS,
@@ -594,20 +1234,35 @@ class GameplayPreviewWidget(QWidget):
         lines = (
             (
                 f"TIME {self._chart_time_ms:10.3f} ms   POS {position:9.3f}  "
-                f"SF {speed_factor:7.3f}"
+                f"BLOCK {speed_factor:7.3f}  HIGH {self.session.high_speed:7.3f}"
             ),
-            f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms",
+            (
+                f"SPEEDMODE {self.session.speed_mode.name}  "
+                f"ACCDEC {self._effective_acc_dec().name}  "
+                f"THROW {self._effective_throw().name}"
+            ),
+            (
+                f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms  "
+                f"ADV {self._advance_cost_ms:6.2f} ms  "
+                f"HOST {self._host_paint_cost_ms:6.2f} ms  "
+                f"E/G {self.session.last_advance_event_count}/"
+                f"{self.session.last_advance_group_count}"
+            ),
             (
                 "LOCAL P/G/GD/B/M "
                 f"{stats.perfect}/{stats.great}/{stats.good}/{stats.bad}/{stats.miss}"
             ),
             f"LOCAL COMBO {stats.combo}  MAX {stats.max_combo}  SCORE {stats.score}",
-            f"LOCAL GAUGE {stats.gauge}/1000  ROUTE {self.stream.route.policy.value}",
+            (
+                f"LOCAL GAUGE {stats.gauge}/{self.session.gauge_limit}  "
+                f"ROUTE {self.stream.route.policy.value}"
+            ),
             (
                 f"AUTO {int(self.session.autoplay)}  "
                 f"GUIDE {int(self._show_guide)}  WORLD {int(self._world_tour)}"
             ),
             (
+                f"TRANSFORM {int(self._sequence_transform())}  "
                 f"APPROX {','.join(self.command.approximate_effects) or '-'}  "
                 f"PENDING {','.join(self.command.pending_effects) or '-'}"
             ),
@@ -644,7 +1299,7 @@ class GameplayPreviewWidget(QWidget):
         elif Qt.Key.Key_1 <= key <= Qt.Key.Key_9:
             self.session.select_speed(key - Qt.Key.Key_0)
             self._refresh_tooltip()
-            self.statusChanged.emit(f"Speed {self.command.speed:g}x")
+            self.statusChanged.emit(f"Speed {self.session.selected_speed:g}x")
         elif key in _PAD_KEYS:
             self._press_global_pad(_PAD_KEYS[key])
         else:
@@ -661,7 +1316,7 @@ class GameplayPreviewWidget(QWidget):
             global_lane = 7 if keypad_five else _PAD_KEYS[event.key()]
             visual_lane = global_lane - self.start_column
             if 0 <= visual_lane < self.columns:
-                self.session.release(self._lane_map()[visual_lane])
+                self.session.release(self._screen_lane_to_source(visual_lane))
                 self.update()
             event.accept()
             return
@@ -671,5 +1326,5 @@ class GameplayPreviewWidget(QWidget):
         visual_lane = global_lane - self.start_column
         if 0 <= visual_lane < self.columns:
             self.session.press(
-                self._lane_map()[visual_lane], self._chart_time_ms
+                self._screen_lane_to_source(visual_lane), self._chart_time_ms
             )

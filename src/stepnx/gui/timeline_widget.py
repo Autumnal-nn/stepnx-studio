@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from math import ceil, isfinite
+from time import perf_counter
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
@@ -45,7 +46,7 @@ class TimelineWidget(QAbstractScrollArea):
         self._noteskin_pack: LocalNoteskinPack | None = None
         self._glyph_pixmaps: dict[str, QPixmap] = {}
         self._atlas_pixmaps: dict[str, QPixmap] = {}
-        self._hold_terminal_pixmaps: dict[tuple[str, int, int, bool], QPixmap] = {}
+        self._collapsed_hold_cells_cache: frozenset[tuple[int, int]] | None = None
         self._selection = CellSelection()
         self._selection_mode = False
         self._drag_start = None
@@ -56,6 +57,7 @@ class TimelineWidget(QAbstractScrollArea):
         self._playback_time_ms: float | None = None
         self._playback_y: float | None = None
         self._playback_active = False
+        self._paint_cost_ms = 0.0
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self._sync_scrollbars()
@@ -69,6 +71,7 @@ class TimelineWidget(QAbstractScrollArea):
         self._layout = TimelineLayout(
             snapshot, self._geometry, playback=self._playback_active
         )
+        self._collapsed_hold_cells_cache = None
         self._playback_y = (
             None
             if self._playback_time_ms is None
@@ -91,7 +94,6 @@ class TimelineWidget(QAbstractScrollArea):
     def set_noteskin_pack(self, pack: LocalNoteskinPack | None) -> None:
         self._noteskin_pack = pack
         self._atlas_pixmaps.clear()
-        self._hold_terminal_pixmaps.clear()
         self.viewport().update()
 
     def set_selected_cell(self, row_id: int, lane: int) -> None:
@@ -180,6 +182,7 @@ class TimelineWidget(QAbstractScrollArea):
         self._layout = TimelineLayout(
             self._snapshot, self._geometry, playback=self._playback_active
         )
+        self._collapsed_hold_cells_cache = None
         self._playback_y = (
             None
             if self._playback_time_ms is None
@@ -241,76 +244,6 @@ class TimelineWidget(QAbstractScrollArea):
         painter.drawPixmap(target, pixmap, source)
         return True
 
-    def _hold_terminal_pixmap(
-        self,
-        pixmap: QPixmap,
-        atlas: PngAtlas,
-        column: int,
-        row: int,
-        *,
-        shaft_above: bool,
-    ) -> QPixmap:
-        """Compose a terminal and shaft with a per-column silhouette mask."""
-
-        key = (str(atlas.path), column, row, shaft_above)
-        cached = self._hold_terminal_pixmaps.get(key)
-        if cached is not None:
-            return cached
-        tile_x, tile_y, tile_width, tile_height = atlas.tile(column, row)
-        source = pixmap.toImage()
-        terminal = source.copy(tile_x, tile_y, tile_width, tile_height)
-        shaft_height = min(8, tile_height)
-        shaft_source = source.copy(
-            tile_x, atlas.tile(column, 0)[1], tile_width, shaft_height
-        )
-        shaft = QImage(tile_width, tile_height, QImage.Format.Format_ARGB32)
-        shaft.fill(Qt.GlobalColor.transparent)
-        shaft_painter = QPainter(shaft)
-        try:
-            shaft_painter.drawImage(
-                QRectF(0, 0, tile_width, tile_height),
-                shaft_source,
-                QRectF(0, 0, shaft_source.width(), shaft_source.height()),
-            )
-        finally:
-            shaft_painter.end()
-
-        # A single global top/bottom bound leaves a visible gap on diagonal
-        # arrows. Mask each shaft column against that column's real artwork.
-        for x in range(tile_width):
-            # Tail row 0 also supplies the repeatable strip in its first few
-            # rows. Exclude that strip while locating the terminal silhouette.
-            search_start = shaft_height if shaft_above and row == 0 else 0
-            opaque_rows = [
-                y
-                for y in range(search_start, tile_height)
-                if terminal.pixelColor(x, y).alpha() > 0
-            ]
-            if not opaque_rows:
-                for y in range(tile_height):
-                    shaft.setPixelColor(x, y, Qt.GlobalColor.transparent)
-                continue
-            boundary = min(opaque_rows) if shaft_above else max(opaque_rows)
-            erase_rows = (
-                range(boundary, tile_height)
-                if shaft_above
-                else range(boundary + 1)
-            )
-            for y in erase_rows:
-                shaft.setPixelColor(x, y, Qt.GlobalColor.transparent)
-
-        composite = QImage(tile_width, tile_height, QImage.Format.Format_ARGB32)
-        composite.fill(Qt.GlobalColor.transparent)
-        composite_painter = QPainter(composite)
-        try:
-            composite_painter.drawImage(0, 0, shaft)
-            composite_painter.drawImage(0, 0, terminal)
-        finally:
-            composite_painter.end()
-        result = QPixmap.fromImage(composite)
-        self._hold_terminal_pixmaps[key] = result
-        return result
-
     def _sync_scrollbars(self) -> None:
         viewport_height = self.viewport().height()
         # Leave a virtual blank tail after the chart.  Without it, the
@@ -345,6 +278,7 @@ class TimelineWidget(QAbstractScrollArea):
             self._layout = TimelineLayout(
                 self._snapshot, self._geometry, playback=self._playback_active
             )
+            self._collapsed_hold_cells_cache = None
             self._sync_scrollbars()
             self.verticalScrollBar().setValue(round((old_scroll + anchor) * ratio - anchor))
             self.viewport().update()
@@ -464,6 +398,7 @@ class TimelineWidget(QAbstractScrollArea):
         super().mouseReleaseEvent(event)
 
     def paintEvent(self, event) -> None:
+        paint_started = perf_counter()
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.fillRect(self.viewport().rect(), QColor("#15171b"))
@@ -480,6 +415,40 @@ class TimelineWidget(QAbstractScrollArea):
                 QPointF(0, self._playback_y),
                 QPointF(self._layout.chart_width, self._playback_y),
             )
+        self._paint_cost_ms = (perf_counter() - paint_started) * 1000.0
+
+    def _collapsed_hold_cells(self) -> frozenset[tuple[int, int]]:
+        cached = self._collapsed_hold_cells_cache
+        if cached is not None:
+            return cached
+
+        note_size = max(1.0, self._geometry.lane_width - 4.0)
+        hidden: set[tuple[int, int]] = set()
+        open_holds: dict[int, tuple[float, list[tuple[int, int]]]] = {}
+
+        for segment in self._layout.segments:
+            for row_index, row in enumerate(segment.block.rows):
+                if not isinstance(row, (NoteRow, PackedNoteRow)):
+                    continue
+                centre_y = segment.y_for_row(row_index) + segment.row_height / 2.0
+                for lane in range(row.cell_count):
+                    cell = row.cell(lane) if isinstance(row, PackedNoteRow) else row.cells[lane]
+                    note_type = cell.note_type
+                    key = (row.stable_id, lane)
+                    if note_type == 0x7:
+                        open_holds[lane] = (centre_y, [])
+                    elif note_type == 0xB:
+                        if lane in open_holds:
+                            open_holds[lane][1].append(key)
+                    elif note_type == 0xF and lane in open_holds:
+                        head_y, interior = open_holds.pop(lane)
+                        if abs(centre_y - head_y) <= note_size + 1e-6:
+                            hidden.update(interior)
+                            hidden.add(key)
+
+        result = frozenset(hidden)
+        self._collapsed_hold_cells_cache = result
+        return result
 
     def _draw_segment(self, painter: QPainter, visible) -> None:
         segment = visible.segment
@@ -508,6 +477,23 @@ class TimelineWidget(QAbstractScrollArea):
             )
 
         beat_markers = {marker.row_index: marker for marker in self._layout.beat_markers(visible)}
+        deferred_hold_heads: list[tuple[int, float, float, bytes]] = []
+        body_runs: dict[int, tuple[bytes, float, float]] = {}
+        collapsed_hold_cells = self._collapsed_hold_cells()
+
+        def flush_body(lane: int) -> None:
+            run = body_runs.pop(lane, None)
+            if run is None:
+                return
+            raw, start_y, end_y = run
+            self._draw_hold_body_span(
+                painter, lane, start_y, end_y - start_y, raw
+            )
+
+        def flush_all_bodies() -> None:
+            for lane in tuple(body_runs):
+                flush_body(lane)
+
         for row_index in range(visible.first_row, visible.last_row):
             y = segment.y_for_row(row_index)
             if self._waveform is not None and segment.block.bpm > 0 and segment.block.beat_split > 0:
@@ -555,8 +541,12 @@ class TimelineWidget(QAbstractScrollArea):
                 painter.setPen(QPen(QColor("#f4d35e"), 2.0))
                 painter.drawRect(rect)
             if isinstance(row, EmptyRow):
+                if self._playback_active:
+                    flush_all_bodies()
                 continue
             if isinstance(row, LightmapRow):
+                if self._playback_active:
+                    flush_all_bodies()
                 self._draw_lightmap_row(
                     painter, row.raw_channels, y, segment.row_height
                 )
@@ -564,8 +554,43 @@ class TimelineWidget(QAbstractScrollArea):
             if isinstance(row, (NoteRow, PackedNoteRow)):
                 for lane in range(row.cell_count):
                     cell = row.cell(lane) if isinstance(row, PackedNoteRow) else row.cells[lane]
+                    if (row.stable_id, lane) in collapsed_hold_cells:
+                        if self._playback_active:
+                            flush_body(lane)
+                        continue
+                    if self._playback_active and cell.note_type == 0xB:
+                        run = body_runs.get(lane)
+                        end_y = y + segment.row_height
+                        if (
+                            run is not None
+                            and run[0] == cell.raw
+                            and abs(run[2] - y) <= 1e-6
+                        ):
+                            body_runs[lane] = (run[0], run[1], end_y)
+                        else:
+                            flush_body(lane)
+                            body_runs[lane] = (cell.raw, y, end_y)
+                        continue
+                    if self._playback_active:
+                        flush_body(lane)
                     if cell.note_type:
-                        self._draw_note(painter, lane, y, segment.row_height, cell.raw)
+                        if cell.note_type == 0x7:
+                            deferred_hold_heads.append(
+                                (lane, y, segment.row_height, cell.raw)
+                            )
+                        else:
+                            self._draw_note(
+                                painter, lane, y, segment.row_height, cell.raw
+                            )
+
+        if self._playback_active:
+            flush_all_bodies()
+
+        # Hold heads are the top terminal layer. This matters when BeatSplit is
+        # high enough that head/body/tail artwork overlaps into one tap-sized
+        # silhouette, as in Fiesta 2 EF1299.
+        for lane, y, row_height, raw in deferred_hold_heads:
+            self._draw_note(painter, lane, y, row_height, raw)
 
         painter.setPen(QColor("#303641"))
         for lane in range(self._snapshot.columns + 1):
@@ -588,6 +613,40 @@ class TimelineWidget(QAbstractScrollArea):
                 color = colors[index]
                 color.setAlpha(max(40, min(255, value)))
                 painter.fillRect(rect, color)
+
+    def _draw_hold_body_span(
+        self,
+        painter: QPainter,
+        lane: int,
+        y: float,
+        span_height: float,
+        raw: bytes,
+    ) -> None:
+        """Draw one playback-only shaft for a contiguous explicit BODY run.
+
+        The encoded BODY rows remain present in the snapshot and paused editor.
+        This is only a rasterization reduction: a split-128 run that would issue
+        hundreds of identical 8-pixel atlas-strip draws becomes one stretched
+        strip over the exact same screen-space interval.
+        """
+
+        span_height = float(span_height)
+        if span_height <= 0.5:
+            return
+        rect = QRectF(*self._geometry.note_rect(lane, y, span_height))
+        if self._draw_noteskin_note(painter, lane, y, span_height, raw, rect):
+            return
+        color = _NOTE_COLORS.get(0xB, QColor("#5f91cf"))
+        shaft_width = max(4.0, rect.width() * 0.28)
+        painter.fillRect(
+            QRectF(
+                rect.center().x() - shaft_width / 2.0,
+                y,
+                shaft_width,
+                span_height,
+            ),
+            color,
+        )
 
     def _draw_note(
         self, painter: QPainter, lane: int, y: float, row_height: float, raw: bytes
@@ -685,23 +744,9 @@ class TimelineWidget(QAbstractScrollArea):
             if pixmap is None:
                 return False
 
-            # Clip terminal continuation per source column. A global boundary
-            # leaves gaps on diagonal silhouettes; a full strip leaks through
-            # transparent pixels behind the arrow.
             plan = hold_atlas_plan(note_type)
             tile_x, tile_y, tile_width, tile_height = atlas.tile(atlas_lane, 0)
             body_source = QRectF(tile_x, tile_y, tile_width, min(8, tile_height))
-            if plan.shaft_above_terminal or plan.shaft_below_terminal:
-                assert plan.terminal_row is not None
-                terminal = self._hold_terminal_pixmap(
-                    pixmap,
-                    atlas,
-                    atlas_lane,
-                    plan.terminal_row,
-                    shaft_above=plan.shaft_above_terminal,
-                )
-                painter.drawPixmap(rect, terminal, QRectF(terminal.rect()))
-                return True
             if plan.terminal_row is not None:
                 return self._draw_atlas_tile(
                     painter, atlas, atlas_lane, plan.terminal_row, rect

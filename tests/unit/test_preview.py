@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import struct
 import unittest
 from dataclasses import replace
 from math import isnan
 
 from stepnx.codecs.nx20 import parse_bytes
-from stepnx.core.commands import InsertBlock, InsertMetadata, InsertRow, SetNoteAt
+from stepnx.core.commands import (
+    InsertBlock,
+    InsertMetadata,
+    InsertRow,
+    InsertSplit,
+    SetNoteAt,
+)
 from stepnx.core.profiles import pack_u16_range
 from stepnx.preview import (
     GameplaySession,
     Judgment,
     PlayfieldGeometry,
+    PlayfieldStyle,
     PreviewNoteFunction,
     PreviewNoteVisibility,
     RoutePolicy,
@@ -59,6 +67,54 @@ class PreviewSnapshotTests(unittest.TestCase):
         )
 
 
+class LegacyHeaderSpeedTests(unittest.TestCase):
+    @staticmethod
+    def _f32_bits(value: float) -> int:
+        return struct.unpack("<I", struct.pack("<f", value))[0]
+
+    def test_prime_family_header_zero_is_direct_float_and_overrides_launch_speed(self) -> None:
+        for profile in ("nxa-native", "fiesta2", "prime2", "nxa-step5-patched"):
+            with self.subTest(profile=profile):
+                document = parse_bytes(
+                    make_normal_nx20(),
+                    source="EF1299.NX",
+                    profile=profile,
+                    row_storage="compact",
+                )
+                document = InsertMetadata.from_ints(
+                    document.stable_id, 0, self._f32_bits(4.0)
+                ).apply(document)
+                snapshot = create_preview_snapshot(document)
+                route = resolve_route(snapshot, RoutePolicy.MANUAL)
+                stream = build_event_stream(snapshot, route)
+                session = GameplaySession(
+                    stream,
+                    parse_gameplay_command("").with_speed(9),
+                    autoplay=True,
+                )
+                self.assertEqual(session.selected_speed, 4.0)
+                self.assertEqual(session.runtime_modifier.speed, 4.0)
+
+    def test_prime_family_preserves_non_quarter_header_speed_values(self) -> None:
+        document = parse_bytes(
+            make_normal_nx20(),
+            source="Prime.NX",
+            profile="prime2",
+            row_storage="compact",
+        )
+        document = InsertMetadata.from_ints(
+            document.stable_id, 0, self._f32_bits(4.35)
+        ).apply(document)
+        snapshot = create_preview_snapshot(document)
+        route = resolve_route(snapshot, RoutePolicy.MANUAL)
+        session = GameplaySession(
+            build_event_stream(snapshot, route),
+            parse_gameplay_command("").with_speed(1),
+            autoplay=True,
+        )
+        self.assertAlmostEqual(session.selected_speed, 4.35, places=5)
+
+
 class GameplayCommandTests(unittest.TestCase):
     def test_piutester_digits_are_cumulative_quarter_speed_commands(self) -> None:
         command = parse_gameplay_command("v4x88")
@@ -69,43 +125,24 @@ class GameplayCommandTests(unittest.TestCase):
         self.assertEqual(command.unknown, ())
 
     def test_command_effects_report_only_remaining_unprojected_behavior(self) -> None:
-        command = parse_gameplay_command("vadenswfjx")
-        self.assertEqual(
-            command.approximate_effects, ("V", "D", "A", "X", "S", "E")
-        )
+        command = parse_gameplay_command("vadenswfjx^")
+        self.assertEqual(command.approximate_effects, ("X",))
         self.assertEqual(command.pending_effects, ())
-        self.assertEqual(parse_gameplay_command("u").pending_effects, ("U",))
+        self.assertEqual(parse_gameplay_command("u").pending_effects, ())
 
-    def test_chart_visibility_composes_with_nonstep_vanish_and_flash(self) -> None:
+    def test_chart_visibility_resolves_before_screen_space_mask(self) -> None:
         plain = parse_gameplay_command("")
-        self.assertEqual(
-            plain.note_opacity(0, distance=100, fade_distance=200, time_ms=0), 0
-        )
-        self.assertEqual(
-            plain.note_opacity(1, distance=50, fade_distance=200, time_ms=0),
-            0.75,
-        )
-        self.assertEqual(
-            plain.note_opacity(2, distance=50, fade_distance=200, time_ms=0),
-            0.25,
-        )
-        self.assertEqual(
-            parse_gameplay_command("n").note_opacity(
-                3, distance=100, fade_distance=200, time_ms=0
-            ),
-            0,
-        )
+        self.assertEqual(plain.effective_visibility(0), 0)
+        self.assertEqual(plain.effective_visibility(1), 1)
+        self.assertEqual(plain.effective_visibility(2), 2)
+        self.assertEqual(plain.effective_visibility(3), 3)
+        self.assertEqual(parse_gameplay_command("n").effective_visibility(3), 0)
+        self.assertEqual(parse_gameplay_command("p").effective_visibility(3), 1)
+        self.assertEqual(parse_gameplay_command("v").effective_visibility(3), 2)
+        self.assertEqual(parse_gameplay_command("vp").effective_visibility(3), 0)
         flashing = parse_gameplay_command("w")
-        self.assertEqual(
-            flashing.note_opacity(3, distance=100, fade_distance=200, time_ms=50),
-            1,
-        )
-        self.assertEqual(
-            flashing.note_opacity(
-                3, distance=100, fade_distance=200, time_ms=150
-            ),
-            0,
-        )
+        self.assertTrue(flashing.flash_visible(50.0))
+        self.assertFalse(flashing.flash_visible(150.0))
 
     def test_launch_speed_overrides_legacy_cumulative_command_digits(self) -> None:
         command = parse_gameplay_command("v4x88").with_speed(7)
@@ -121,40 +158,72 @@ class GameplayCommandTests(unittest.TestCase):
 
 
 class PreviewGeometryTests(unittest.TestCase):
-    def test_double_uses_one_continuous_ten_lane_playfield(self) -> None:
-        geometry = PlayfieldGeometry(960, 10)
-        centres = tuple(geometry.lane_center(lane) for lane in range(10))
+    def test_prime_sd_geometry_keeps_lane_path_and_quad_units_separate(self) -> None:
+        geometry = PlayfieldGeometry(640, 10, PlayfieldStyle.DOUBLE, 0)
 
-        self.assertEqual(centres, tuple(range(120, 841, 80)))
-        self.assertEqual(centres[5] - centres[4], geometry.lane_spacing)
+        self.assertEqual(geometry.lane_spacing, 50.0)
+        self.assertEqual(geometry.path_unit, 60.0)
+        self.assertEqual(geometry.note_size, 64.0)
         self.assertEqual(
-            geometry.panel_left(1) - geometry.panel_left(0),
-            5 * geometry.lane_spacing,
+            tuple(geometry.lane_center(lane) for lane in range(10)),
+            (94.0, 144.0, 194.0, 244.0, 294.0, 346.0, 396.0, 446.0, 496.0, 546.0),
         )
-        self.assertEqual(geometry.panel_width, 5 * geometry.lane_spacing)
+        self.assertEqual(geometry.panel_count, 2)
+        self.assertEqual(geometry.panel_left(0) + geometry.panel_width / 2.0, 194.0)
+        self.assertEqual(geometry.panel_left(1) + geometry.panel_width / 2.0, 446.0)
+        self.assertEqual(geometry.lane_position(4.5), 320.0)
+
+    def test_prime_styles_preserve_distinct_judge_line_origins(self) -> None:
+        versus = PlayfieldGeometry(640, 10, PlayfieldStyle.VERSUS, 0)
+        double = PlayfieldGeometry(640, 10, PlayfieldStyle.DOUBLE, 0)
+        single = PlayfieldGeometry(640, 10, PlayfieldStyle.SINGLE, 0)
+        centered = PlayfieldGeometry(640, 10, PlayfieldStyle.CENTERED, 0)
+
+        self.assertEqual(versus.lane_center(2), 160.0)
+        self.assertEqual(versus.lane_center(7), 480.0)
+        self.assertEqual(double.lane_center(2), 194.0)
+        self.assertEqual(double.lane_center(7), 446.0)
+        self.assertEqual(single.lane_center(2), 160.0)
+        self.assertEqual(single.lane_center(7), 160.0)
+        self.assertEqual(centered.lane_center(2), 320.0)
+        self.assertEqual(centered.lane_center(7), 320.0)
+        self.assertEqual(single.panel_count, 1)
+        self.assertEqual(centered.panel_count, 1)
+
+    def test_p2_single_uses_right_native_bank(self) -> None:
+        geometry = PlayfieldGeometry(640, 5, PlayfieldStyle.SINGLE, 5)
         self.assertEqual(
-            geometry.panel_left(0) + geometry.panel_width,
-            geometry.panel_left(1),
+            tuple(geometry.lane_center(lane) for lane in range(5)),
+            (380.0, 430.0, 480.0, 530.0, 580.0),
         )
-        for panel in range(2):
-            for local_lane in range(5):
-                self.assertEqual(
-                    geometry.panel_left(panel)
-                    + (local_lane + 0.5) * geometry.lane_spacing,
-                    geometry.lane_center(panel * 5 + local_lane),
-                )
 
-    def test_single_centres_one_native_sequence_zone_strip(self) -> None:
-        single = PlayfieldGeometry(640, 5)
-        double = PlayfieldGeometry(640, 10)
+    def test_launch_defaults_are_centered_for_five_and_double_for_six_or_ten(self) -> None:
+        five = PlayfieldGeometry(640, 5, start_column=0)
+        six = PlayfieldGeometry(640, 6, start_column=2)
+        ten = PlayfieldGeometry(640, 10, start_column=0)
 
-        self.assertAlmostEqual(single.lane_spacing, double.lane_spacing)
-        self.assertAlmostEqual(single.lane_center(2), 320.0)
-        self.assertAlmostEqual(
-            single.panel_left(0) + single.panel_width / 2.0,
-            320.0,
+        self.assertIs(five.style, PlayfieldStyle.CENTERED)
+        self.assertIs(six.style, PlayfieldStyle.DOUBLE)
+        self.assertIs(ten.style, PlayfieldStyle.DOUBLE)
+        self.assertEqual(five.lane_center(2), 320.0)
+        self.assertEqual(
+            tuple(six.lane_center(lane) for lane in range(6)),
+            (194.0, 244.0, 294.0, 346.0, 396.0, 446.0),
         )
-        self.assertAlmostEqual(single.panel_width, 5 * double.lane_spacing)
+
+    def test_wide_viewports_center_native_geometry_without_stretching_it(self) -> None:
+        geometry = PlayfieldGeometry(960, 10, PlayfieldStyle.DOUBLE, 0)
+        self.assertEqual(geometry.lane_spacing, 50.0)
+        self.assertEqual(geometry.path_unit, 60.0)
+        self.assertEqual(geometry.note_size, 64.0)
+        self.assertEqual(geometry.lane_center(0), 254.0)
+        self.assertEqual(geometry.lane_center(9), 706.0)
+
+    def test_narrow_viewports_scale_all_three_native_units_together(self) -> None:
+        geometry = PlayfieldGeometry(320, 10, PlayfieldStyle.DOUBLE, 0)
+        self.assertEqual(geometry.lane_spacing, 25.0)
+        self.assertEqual(geometry.path_unit, 30.0)
+        self.assertEqual(geometry.note_size, 32.0)
 
 
 class PreviewNoteSemanticsTests(unittest.TestCase):
@@ -434,7 +503,7 @@ class RuntimeEventTests(unittest.TestCase):
         rows = document.splits[0].blocks[0].rows
         for row, raw in zip(
             rows,
-            (b"\x47\x03\x00\x00", b"\x4b\x03\x00\x00", b"\x4f\x03\x00\x00"),
+            (b"\x57\x03\x00\x00", b"\x5b\x03\x00\x00", b"\x5f\x03\x00\x00"),
         ):
             document = SetNoteAt(row.stable_id, 0, raw).apply(document)
         snapshot = create_preview_snapshot(document)
@@ -453,6 +522,47 @@ class RuntimeEventTests(unittest.TestCase):
         self.assertEqual(session.stats.combo, 3)
         self.assertEqual(len(session.judgments), 3)
         self.assertEqual(len(session.step_effect_history), 1)
+
+    def test_dense_autoplay_batches_groups_without_running_manual_miss_cursor(self) -> None:
+        stream = self._hold_stream()
+        template = stream.events[1]
+        dense_events = tuple(
+            replace(
+                template,
+                time_ms=float(index) / 3.0,
+                beat=float(index) / 384.0,
+                row_index=index,
+                lane=index % 5,
+            )
+            for index in range(3000)
+        )
+        stream = replace(stream, events=dense_events)
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+        stats_identity = id(session.stats)
+
+        session.advance(1001.0)
+
+        self.assertEqual(len(session.judgments), 3000)
+        self.assertEqual(session.stats.perfect, 3000)
+        self.assertEqual(session.stats.combo, 3000)
+        self.assertEqual(id(session.stats), stats_identity)
+        self.assertEqual(session.last_advance_event_count, 3000)
+        self.assertEqual(session.last_advance_group_count, 3000)
+        self.assertEqual(session._miss_cursor, 0)
+
+    def test_autoplay_toggle_keeps_manual_past_and_future_cursor_boundaries(self) -> None:
+        stream = self._hold_stream()
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=False)
+        head, body, tail = stream.events
+        session.advance(body.time_ms + 0.1)
+        self.assertGreaterEqual(session._event_cursor, 2)
+
+        self.assertTrue(session.toggle_autoplay())
+        session.advance(tail.time_ms + 0.1)
+        self.assertIn(session.event_key(tail), session.judgments)
+
+        self.assertFalse(session.toggle_autoplay())
+        self.assertGreaterEqual(session._event_cursor, len(stream.events))
 
     def test_chord_produces_one_normal_judgment_not_jn_per_cell(self) -> None:
         stream = self._hold_stream()
@@ -516,25 +626,95 @@ class RuntimeEventTests(unittest.TestCase):
         self.assertTrue(isnan(stream.events[0].scroll))
         self.assertEqual(stream.events[0].effective_scroll, 1.0)
 
-    def test_smooth_speed_two_keeps_notes_and_interpolates_speed(self) -> None:
-        document = parse_bytes(make_normal_nx20(), source="NM.NX")
-        split = document.splits[0]
-        block = replace(
-            split.blocks[0],
-            speed_or_freeze=split.blocks[0].speed_or_freeze.with_value(2.0),
-            smooth_speed=split.blocks[0].smooth_speed.with_value(2),
-        )
-        document = replace(document, splits=(replace(split, blocks=(block,)),))
-        snapshot = create_preview_snapshot(document)
-        route = resolve_route(snapshot, RoutePolicy.MANUAL)
-        stream = build_event_stream(snapshot, route)
+    def test_div_flag_values_zero_through_three_keep_smooth_and_skip_independent(self) -> None:
+        expected = {
+            0: (False, False, 2.0, 125.0),
+            1: (True, False, 1.5, 125.0),
+            2: (False, True, 2.0, 0.0),
+            3: (True, True, 2.0, 0.0),
+        }
 
-        self.assertTrue(stream.events)
-        segment = stream.timing[0]
-        self.assertEqual(stream.speed_factor_at(segment.start_time_ms), 1.0)
-        midpoint = (segment.start_time_ms + segment.speed_transition_end_ms) / 2
-        self.assertAlmostEqual(stream.speed_factor_at(midpoint), 1.5)
-        self.assertEqual(stream.speed_factor_at(segment.speed_transition_end_ms), 2.0)
+        for flags, (is_smooth, is_skip, speed, sample_ms) in expected.items():
+            with self.subTest(flags=flags):
+                document = parse_bytes(make_normal_nx20(), source="NM.NX")
+                split = document.splits[0]
+                block = replace(
+                    split.blocks[0],
+                    start_time=split.blocks[0].start_time.with_value(0.0),
+                    speed_or_freeze=split.blocks[0].speed_or_freeze.with_value(2.0),
+                    smooth_speed=split.blocks[0].smooth_speed.with_value(flags),
+                )
+                document = replace(
+                    document,
+                    splits=(replace(split, blocks=(block,)),),
+                )
+                snapshot = create_preview_snapshot(document)
+                stream = build_event_stream(
+                    snapshot, resolve_route(snapshot, RoutePolicy.MANUAL)
+                )
+
+                self.assertTrue(stream.events)
+                div = stream.native_timing.blocks[0]
+                self.assertIs(div.is_smooth, is_smooth)
+                self.assertIs(div.is_skip, is_skip)
+                self.assertAlmostEqual(stream.speed_factor_at(sample_ms), speed)
+
+    def test_smooth_uses_previous_loaded_speed_and_current_div_end(self) -> None:
+        document = parse_bytes(make_normal_nx20(), source="NM.NX")
+        first_split = document.splits[0]
+        first = replace(
+            first_split.blocks[0],
+            start_time=first_split.blocks[0].start_time.with_value(0.0),
+            speed_or_freeze=first_split.blocks[0].speed_or_freeze.with_value(-3.0),
+            smooth_speed=first_split.blocks[0].smooth_speed.with_value(0),
+        )
+        first_split = replace(
+            first_split,
+            raw_select=first_split.raw_select.with_value(0),
+            blocks=(first,),
+        )
+        document = replace(document, splits=(first_split,))
+        document = InsertSplit(first_split).apply(document)
+        document = InsertSplit(document.splits[-1]).apply(document)
+
+        first_split, second_split, third_split = document.splits
+        second = replace(
+            second_split.blocks[0],
+            start_time=second_split.blocks[0].start_time.with_value(250.0),
+            speed_or_freeze=second_split.blocks[0].speed_or_freeze.with_value(5.0),
+            smooth_speed=second_split.blocks[0].smooth_speed.with_value(1),
+        )
+        third = replace(
+            third_split.blocks[0],
+            start_time=third_split.blocks[0].start_time.with_value(1000.0),
+            speed_or_freeze=third_split.blocks[0].speed_or_freeze.with_value(1.0),
+            smooth_speed=third_split.blocks[0].smooth_speed.with_value(0),
+        )
+        document = replace(
+            document,
+            splits=(
+                first_split,
+                replace(
+                    second_split,
+                    raw_select=second_split.raw_select.with_value(0),
+                    blocks=(second,),
+                ),
+                replace(
+                    third_split,
+                    raw_select=third_split.raw_select.with_value(0),
+                    blocks=(third,),
+                ),
+            ),
+        )
+        snapshot = create_preview_snapshot(document)
+        stream = build_event_stream(
+            snapshot, resolve_route(snapshot, RoutePolicy.MANUAL)
+        )
+
+        self.assertEqual(stream.native_timing.blocks[0].speed, 3.0)
+        self.assertEqual(stream.speed_factor_at(250.0), 3.0)
+        self.assertAlmostEqual(stream.speed_factor_at(375.0), 4.0)
+        self.assertAlmostEqual(stream.speed_factor_at(499.0), 4.992, places=3)
 
     def test_zero_scroll_is_a_real_stationary_segment(self) -> None:
         document = parse_bytes(make_normal_nx20(), source="NM.NX")
