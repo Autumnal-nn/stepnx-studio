@@ -140,6 +140,22 @@ class GameplayPreviewWidget(QWidget):
             visibility: tuple(pairs)
             for visibility, pairs in hold_pairs_by_visibility.items()
         }
+        # Shaft rendering is an interval query, not a chart-tail scan. Keep both
+        # endpoint orders so each frame can approach the visible window from the
+        # cheaper side while preserving arbitrarily long holds that span it.
+        self._hold_head_times_by_visibility = {
+            visibility: tuple(head.time_ms for head, _ in pairs)
+            for visibility, pairs in self._hold_pairs_by_visibility.items()
+        }
+        self._hold_pairs_by_tail_visibility = {
+            visibility: tuple(sorted(pairs, key=lambda pair: pair[1].time_ms))
+            for visibility, pairs in self._hold_pairs_by_visibility.items()
+        }
+        self._hold_tail_times_by_visibility = {
+            visibility: tuple(tail.time_ms for _, tail in pairs)
+            for visibility, pairs in self._hold_pairs_by_tail_visibility.items()
+        }
+        self._render_time_window: tuple[float, float] | None = None
 
         self._lane_map_cache = resolved_command.lane_map(
             self.columns, seed=stream.route.seed or 0
@@ -537,6 +553,10 @@ class GameplayPreviewWidget(QWidget):
         events: tuple[PreviewEvent, ...],
         event_times: tuple[float, ...],
     ) -> tuple[PreviewEvent, ...]:
+        # paintEvent calls this once before drawing notes and shafts. Store the
+        # exact time-domain projection of its screen-space culling window so
+        # long shafts can share it instead of examining the rest of the chart.
+        self._render_time_window = None
         geometry = self._geometry()
         # Accel/Decel can add up to 200 native Y units outside the linear
         # projection. Include that exact bound in culling so transformed notes
@@ -597,8 +617,12 @@ class GameplayPreviewWidget(QWidget):
                 )
         if not time_bounds:
             return ()
-        first = bisect_left(event_times, min(time_bounds) - 250.0)
-        last = bisect_right(event_times, max(time_bounds) + 250.0)
+        self._render_time_window = (
+            min(time_bounds) - 250.0,
+            max(time_bounds) + 250.0,
+        )
+        first = bisect_left(event_times, self._render_time_window[0])
+        last = bisect_right(event_times, self._render_time_window[1])
         return tuple(
             event
             for event in events[first:last]
@@ -762,15 +786,52 @@ class GameplayPreviewWidget(QWidget):
         else:
             painter.drawRoundedRect(rect, 5, 5)
 
+    def _visible_hold_pairs(
+        self, visibility_filter: int
+    ) -> tuple[tuple[PreviewEvent, PreviewEvent], ...]:
+        """Return holds whose [head, tail] interval overlaps the draw window.
+
+        The old renderer walked every hold whose tail had not passed yet. On
+        dense charts that made frame cost proportional to the *remaining song*:
+        expensive at the start and progressively cheaper toward the end.
+        """
+
+        window = self._render_time_window
+        if window is None:
+            return ()
+        visibility = int(visibility_filter)
+        pairs_by_head = self._hold_pairs_by_visibility.get(visibility, ())
+        if not pairs_by_head:
+            return ()
+        head_times = self._hold_head_times_by_visibility.get(visibility, ())
+        pairs_by_tail = self._hold_pairs_by_tail_visibility.get(visibility, ())
+        tail_times = self._hold_tail_times_by_visibility.get(visibility, ())
+        window_start, window_end = window
+
+        head_last = bisect_right(head_times, window_end)
+        tail_first = bisect_left(tail_times, window_start)
+
+        # Query from whichever endpoint leaves fewer candidates. Filtering the
+        # opposite endpoint keeps long holds spanning the complete window. This
+        # avoids the previous O(all future holds) behaviour without imposing a
+        # maximum hold duration or assuming monotonic scrolling.
+        if head_last <= len(pairs_by_tail) - tail_first:
+            candidates = pairs_by_head[:head_last]
+        else:
+            candidates = pairs_by_tail[tail_first:]
+        return tuple(
+            (head, tail)
+            for head, tail in candidates
+            if head.time_ms <= window_end and tail.time_ms >= window_start
+        )
+
     def _draw_hold_shafts(
         self,
         painter: QPainter,
         note_size: float,
         visibility_filter: int,
     ) -> None:
-        for head, tail in self._hold_pairs_by_visibility.get(
-            int(visibility_filter), ()
-        ):
+        for head, tail in self._visible_hold_pairs(visibility_filter):
             if tail.time_ms < self._chart_time_ms - 80.0:
                 continue
 
@@ -923,10 +984,11 @@ class GameplayPreviewWidget(QWidget):
     def _active_hold_visibilities(self) -> frozenset[int]:
         time_ms = self._chart_time_ms
         active: set[int] = set()
-        for visibility, pairs in self._hold_pairs_by_visibility.items():
-            if visibility not in (1, 2):
-                continue
-            if any(head.time_ms <= time_ms <= tail.time_ms for head, tail in pairs):
+        for visibility in (1, 2):
+            if any(
+                head.time_ms <= time_ms <= tail.time_ms
+                for head, tail in self._visible_hold_pairs(visibility)
+            ):
                 active.add(visibility)
         return frozenset(active)
 

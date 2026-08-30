@@ -199,6 +199,71 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
 
+    def test_hold_shaft_candidates_are_windowed_instead_of_chart_tail_scanned(self) -> None:
+        widget = self._widget()
+        try:
+            source = widget.stream.events[0]
+            pairs = []
+            for index in range(1000):
+                head_time = float(index * 1000)
+                head = replace(
+                    source,
+                    time_ms=head_time,
+                    row_index=2000 + index * 2,
+                    raw=bytes((0x07, 0x03, source.raw[2], source.raw[3])),
+                )
+                tail = replace(
+                    source,
+                    time_ms=head_time + 100.0,
+                    row_index=2001 + index * 2,
+                    raw=bytes((0x0F, 0x03, source.raw[2], source.raw[3])),
+                )
+                pairs.append((head, tail))
+            pairs = tuple(pairs)
+            widget._hold_pairs_by_visibility[3] = pairs
+            widget._hold_head_times_by_visibility[3] = tuple(
+                head.time_ms for head, _ in pairs
+            )
+            by_tail = tuple(sorted(pairs, key=lambda pair: pair[1].time_ms))
+            widget._hold_pairs_by_tail_visibility[3] = by_tail
+            widget._hold_tail_times_by_visibility[3] = tuple(
+                tail.time_ms for _, tail in by_tail
+            )
+            widget._render_time_window = (0.0, 1250.0)
+
+            candidates = widget._visible_hold_pairs(3)
+            self.assertEqual(len(candidates), 2)
+            self.assertTrue(all(head.time_ms <= 1250.0 for head, _ in candidates))
+        finally:
+            widget.close()
+
+    def test_hold_shaft_window_keeps_a_long_that_spans_both_screen_edges(self) -> None:
+        widget = self._widget()
+        try:
+            source = widget.stream.events[0]
+            head = replace(
+                source,
+                time_ms=1000.0,
+                row_index=5000,
+                raw=bytes((0x07, 0x03, source.raw[2], source.raw[3])),
+            )
+            tail = replace(
+                source,
+                time_ms=9000.0,
+                row_index=5001,
+                raw=bytes((0x0F, 0x03, source.raw[2], source.raw[3])),
+            )
+            pair = ((head, tail),)
+            widget._hold_pairs_by_visibility[3] = pair
+            widget._hold_head_times_by_visibility[3] = (head.time_ms,)
+            widget._hold_pairs_by_tail_visibility[3] = pair
+            widget._hold_tail_times_by_visibility[3] = (tail.time_ms,)
+            widget._render_time_window = (4000.0, 5000.0)
+
+            self.assertEqual(widget._visible_hold_pairs(3), pair)
+        finally:
+            widget.close()
+
     def test_event_beat_distance_reuses_one_native_state_per_frame(self) -> None:
         widget = self._widget()
         try:
