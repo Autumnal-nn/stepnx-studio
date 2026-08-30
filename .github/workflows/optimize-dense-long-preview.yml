@@ -22,7 +22,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply dense-long optimization
-        run: python .github/scripts/optimize-dense-long-preview.py
+        run: |
+          python .github/scripts/optimize-dense-long-preview.py
+          python .github/scripts/fix-dense-long-test-expectations.py
       - name: Install Linux Qt runtime libraries
         run: |
           sudo apt-get update
@@ -38,6 +40,7 @@ jobs:
           git config user.name 'OpenAI'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/scripts/optimize-dense-long-preview.py
+          git rm .github/scripts/fix-dense-long-test-expectations.py
           git rm .github/workflows/optimize-dense-long-preview.yml
           git add src tests docs
           git commit -m 'Optimize dense long-note preview rendering'
