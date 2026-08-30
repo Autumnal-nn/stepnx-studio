@@ -31,7 +31,12 @@ _FIESTA2_FIELDS = (
         "Resource/reference string",
         TrailerEvidence.RUNTIME_CONFIRMED,
     ),
-    TrailerFieldDefinition(1100, "Trailer string field 1100", TrailerEvidence.OFFICIAL_CORPUS),
+    TrailerFieldDefinition(
+        1100,
+        "Trailer string field 1100",
+        TrailerEvidence.OFFICIAL_CORPUS,
+        localized=True,
+    ),
     TrailerFieldDefinition(1102, "Trailer string field 1102", TrailerEvidence.OFFICIAL_CORPUS),
     TrailerFieldDefinition(
         1103,

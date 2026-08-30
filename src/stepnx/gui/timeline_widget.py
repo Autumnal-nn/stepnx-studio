@@ -417,39 +417,6 @@ class TimelineWidget(QAbstractScrollArea):
             )
         self._paint_cost_ms = (perf_counter() - paint_started) * 1000.0
 
-    def _collapsed_hold_cells(self) -> frozenset[tuple[int, int]]:
-        cached = self._collapsed_hold_cells_cache
-        if cached is not None:
-            return cached
-
-        note_size = max(1.0, self._geometry.lane_width - 4.0)
-        hidden: set[tuple[int, int]] = set()
-        open_holds: dict[int, tuple[float, list[tuple[int, int]]]] = {}
-
-        for segment in self._layout.segments:
-            for row_index, row in enumerate(segment.block.rows):
-                if not isinstance(row, (NoteRow, PackedNoteRow)):
-                    continue
-                centre_y = segment.y_for_row(row_index) + segment.row_height / 2.0
-                for lane in range(row.cell_count):
-                    cell = row.cell(lane) if isinstance(row, PackedNoteRow) else row.cells[lane]
-                    note_type = cell.note_type
-                    key = (row.stable_id, lane)
-                    if note_type == 0x7:
-                        open_holds[lane] = (centre_y, [])
-                    elif note_type == 0xB:
-                        if lane in open_holds:
-                            open_holds[lane][1].append(key)
-                    elif note_type == 0xF and lane in open_holds:
-                        head_y, interior = open_holds.pop(lane)
-                        if abs(centre_y - head_y) <= note_size + 1e-6:
-                            hidden.update(interior)
-                            hidden.add(key)
-
-        result = frozenset(hidden)
-        self._collapsed_hold_cells_cache = result
-        return result
-
     def _draw_segment(self, painter: QPainter, visible) -> None:
         segment = visible.segment
         geometry = self._geometry
@@ -479,7 +446,6 @@ class TimelineWidget(QAbstractScrollArea):
         beat_markers = {marker.row_index: marker for marker in self._layout.beat_markers(visible)}
         deferred_hold_heads: list[tuple[int, float, float, bytes]] = []
         body_runs: dict[int, tuple[bytes, float, float]] = {}
-        collapsed_hold_cells = self._collapsed_hold_cells()
 
         def flush_body(lane: int) -> None:
             run = body_runs.pop(lane, None)
@@ -554,10 +520,6 @@ class TimelineWidget(QAbstractScrollArea):
             if isinstance(row, (NoteRow, PackedNoteRow)):
                 for lane in range(row.cell_count):
                     cell = row.cell(lane) if isinstance(row, PackedNoteRow) else row.cells[lane]
-                    if (row.stable_id, lane) in collapsed_hold_cells:
-                        if self._playback_active:
-                            flush_body(lane)
-                        continue
                     if self._playback_active and cell.note_type == 0xB:
                         run = body_runs.get(lane)
                         end_y = y + segment.row_height

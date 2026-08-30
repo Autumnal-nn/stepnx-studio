@@ -166,7 +166,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_collapsed_long_draws_head_after_tail_in_gameplay_preview(self) -> None:
+    def test_overlapping_long_keeps_tail_then_head_order_in_gameplay_preview(self) -> None:
         widget = self._widget()
         try:
             widget.resize(640, 480)
@@ -197,13 +197,6 @@ class QtGameplayPreviewTests(unittest.TestCase):
                         note.note_type
                     )
                     or True,
-                ), patch.object(
-                    widget,
-                    "_projected_note_centre_and_extent",
-                    side_effect=lambda note: (
-                        QPointF(100.0, 100.0 if note.note_type == 0x07 else 110.0),
-                        64.0,
-                    ),
                 ):
                     widget._draw_note_group(
                         painter,
@@ -213,7 +206,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
                     )
             finally:
                 painter.end()
-            self.assertEqual(draw_order, [0x07])
+            self.assertEqual(draw_order, [0x0F, 0x07])
         finally:
             widget.close()
 
@@ -244,13 +237,6 @@ class QtGameplayPreviewTests(unittest.TestCase):
                     widget,
                     "_draw_asset",
                     side_effect=lambda _painter, note, _rect: draw_order.append(note.note_type) or True,
-                ), patch.object(
-                    widget,
-                    "_projected_note_centre_and_extent",
-                    side_effect=lambda note: (
-                        QPointF(100.0, 100.0 if note.note_type == 0x07 else 220.0),
-                        64.0,
-                    ),
                 ):
                     widget._draw_note_group(
                         painter, widget._geometry(), 3, visible_notes=(head, tail)
