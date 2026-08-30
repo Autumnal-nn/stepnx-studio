@@ -1,0 +1,44 @@
+name: Optimize dense long-note preview
+
+on:
+  push:
+    branches:
+      - audit/rise-visual-command-re
+
+permissions:
+  contents: write
+
+jobs:
+  optimize:
+    if: github.event.head_commit.message == 'Run dense-long preview optimization'
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/rise-visual-command-re
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply dense-long optimization
+        run: python .github/scripts/optimize-dense-long-preview.py
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libpulse0 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+      - name: Install StepNX Studio with GUI dependencies
+        run: python -m pip install -e '.[gui]'
+      - name: Run complete repository suite
+        run: python -m unittest discover -s tests -v
+      - name: Commit verified optimization
+        run: |
+          git config user.name 'OpenAI'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/scripts/optimize-dense-long-preview.py
+          git rm .github/workflows/optimize-dense-long-preview.yml
+          git add src tests docs
+          git commit -m 'Optimize dense long-note preview rendering'
+          git push origin HEAD:audit/rise-visual-command-re
