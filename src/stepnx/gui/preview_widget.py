@@ -26,7 +26,11 @@ from stepnx.preview.events import (
     PreviewEvent,
     RuntimeEventStream,
 )
-from stepnx.preview.geometry import PlayfieldGeometry
+from stepnx.preview.geometry import (
+    PlayfieldGeometry,
+    PlayfieldStyle,
+    default_playfield_style,
+)
 from stepnx.preview.legacy_render import (
     legacy_nx_homography,
     legacy_visibility_gradient_stops,
@@ -170,8 +174,43 @@ class GameplayPreviewWidget(QWidget):
                         self._pixmaps[str(path)] = pixmap
         self.update()
 
+    def _default_playfield_style(self) -> PlayfieldStyle:
+        return default_playfield_style(self.columns)
+
+    def _active_playfield_style(self) -> PlayfieldStyle:
+        """Resolve the active Prime-style judge-line layout.
+
+        Division Metadata 200 is block-local and must be re-evaluated whenever
+        native timing selects a different block. Missing/unknown values fall
+        back to StepNX's launch default without mutating chart structure.
+        """
+
+        default = self._default_playfield_style()
+        timing = self.stream.native_timing
+        if timing is None or not timing.blocks:
+            return default
+        state = timing.state_at(self._chart_time_ms)
+        block_id = timing.blocks[state.block_index].block_id
+        for current_block_id, params in self.stream.block_step_params:
+            if current_block_id != block_id:
+                continue
+            for param in params:
+                if param.metadata_id != 200:
+                    continue
+                try:
+                    return PlayfieldStyle(param.raw_value)
+                except ValueError:
+                    return default
+            break
+        return default
+
     def _geometry(self) -> PlayfieldGeometry:
-        return PlayfieldGeometry(max(1.0, float(self.width())), self.columns)
+        return PlayfieldGeometry(
+            max(1.0, float(self.width())),
+            self.columns,
+            self._active_playfield_style(),
+            self.start_column,
+        )
 
     def _sequence_transform(self) -> SequenceZoneTransform:
         transform = self.session.runtime_modifier.sequence_transform
@@ -234,14 +273,9 @@ class GameplayPreviewWidget(QWidget):
         return self._geometry().lane_center(self._visual_lane(source_lane))
 
     def _lane_position_x(self, visual_lane_position: float) -> float:
-        """Project a fractional visual-lane coordinate into the playfield."""
+        """Project a fractional visual-lane coordinate into the active layout."""
 
-        if self.columns <= 1:
-            return self.lane_center(0)
-        lane_map = self._lane_map()
-        first = self.lane_center(lane_map[0])
-        second = self.lane_center(lane_map[1])
-        return first + float(visual_lane_position) * (second - first)
+        return self._geometry().lane_position(float(visual_lane_position))
 
     def _legacy_command_acc_dec(self) -> AccDecMode:
         """Resolve PIUTESTER/NX2 A/D without conflating it with R!SE Header 2."""
@@ -347,7 +381,7 @@ class GameplayPreviewWidget(QWidget):
             return self._receptor_y() + legacy_acc_dec_distance(
                 beat_distance,
                 self.session.high_speed,
-                geometry.note_size,
+                geometry.path_unit,
                 legacy_mode,
             )
         if self.command.exceed_mode or self.session.runtime_modifier.exceed:
@@ -357,7 +391,7 @@ class GameplayPreviewWidget(QWidget):
             return self._receptor_y() + legacy_acc_dec_distance(
                 beat_distance,
                 self.session.high_speed,
-                geometry.note_size,
+                geometry.path_unit,
                 AccDecMode.LINEAR,
             )
         native_y = native_line_y(
@@ -397,7 +431,7 @@ class GameplayPreviewWidget(QWidget):
         # Header 35 ZigZag remains effective state only until its distinct
         # rendering equation is recovered. Do not alias it to Snake Path.
         if self.command.snake or self.session.runtime_modifier.snake:
-            offset += prime2_snake_x_offset(beat_distance, geometry.note_size)
+            offset += prime2_snake_x_offset(beat_distance, geometry.path_unit)
 
         if self.command.exceed_mode or self.session.runtime_modifier.exceed:
             if self.columns <= 5:
@@ -407,11 +441,11 @@ class GameplayPreviewWidget(QWidget):
             else:
                 # Double keeps the two native five-lane bank origins: bank 0 gets
                 # +d and bank 1 gets -d. Do not normalize against field width.
-                from_right = event.lane < 5
+                from_right = (self.start_column + self._visual_lane(event.lane)) < 5
             offset += legacy_exceed_x_offset(
                 beat_distance,
                 self.session.high_speed,
-                geometry.note_size,
+                geometry.path_unit,
                 from_right=from_right,
             )
         return offset
@@ -451,7 +485,7 @@ class GameplayPreviewWidget(QWidget):
         )
         if self._legacy_command_acc_dec() is not AccDecMode.LINEAR:
             margin += LEGACY_ACCEL_LIMIT * (
-                geometry.note_size / LEGACY_ACCDEC_PATH_UNIT
+                geometry.path_unit / LEGACY_ACCDEC_PATH_UNIT
             )
         if self._effective_throw() is not ThrowMode.FLAT:
             margin += 100.0 * (geometry.note_size / 72.0)

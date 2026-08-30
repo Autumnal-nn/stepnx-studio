@@ -17,6 +17,7 @@ from stepnx.preview import (
     GameplaySession,
     Judgment,
     PlayfieldGeometry,
+    PlayfieldStyle,
     PreviewNoteFunction,
     PreviewNoteVisibility,
     RoutePolicy,
@@ -108,40 +109,72 @@ class GameplayCommandTests(unittest.TestCase):
 
 
 class PreviewGeometryTests(unittest.TestCase):
-    def test_double_uses_one_continuous_ten_lane_playfield(self) -> None:
-        geometry = PlayfieldGeometry(960, 10)
-        centres = tuple(geometry.lane_center(lane) for lane in range(10))
+    def test_prime_sd_geometry_keeps_lane_path_and_quad_units_separate(self) -> None:
+        geometry = PlayfieldGeometry(640, 10, PlayfieldStyle.DOUBLE, 0)
 
-        self.assertEqual(centres, tuple(range(120, 841, 80)))
-        self.assertEqual(centres[5] - centres[4], geometry.lane_spacing)
+        self.assertEqual(geometry.lane_spacing, 50.0)
+        self.assertEqual(geometry.path_unit, 60.0)
+        self.assertEqual(geometry.note_size, 64.0)
         self.assertEqual(
-            geometry.panel_left(1) - geometry.panel_left(0),
-            5 * geometry.lane_spacing,
+            tuple(geometry.lane_center(lane) for lane in range(10)),
+            (94.0, 144.0, 194.0, 244.0, 294.0, 346.0, 396.0, 446.0, 496.0, 546.0),
         )
-        self.assertEqual(geometry.panel_width, 5 * geometry.lane_spacing)
+        self.assertEqual(geometry.panel_count, 2)
+        self.assertEqual(geometry.panel_left(0) + geometry.panel_width / 2.0, 194.0)
+        self.assertEqual(geometry.panel_left(1) + geometry.panel_width / 2.0, 446.0)
+        self.assertEqual(geometry.lane_position(4.5), 320.0)
+
+    def test_prime_styles_preserve_distinct_judge_line_origins(self) -> None:
+        versus = PlayfieldGeometry(640, 10, PlayfieldStyle.VERSUS, 0)
+        double = PlayfieldGeometry(640, 10, PlayfieldStyle.DOUBLE, 0)
+        single = PlayfieldGeometry(640, 10, PlayfieldStyle.SINGLE, 0)
+        centered = PlayfieldGeometry(640, 10, PlayfieldStyle.CENTERED, 0)
+
+        self.assertEqual(versus.lane_center(2), 160.0)
+        self.assertEqual(versus.lane_center(7), 480.0)
+        self.assertEqual(double.lane_center(2), 194.0)
+        self.assertEqual(double.lane_center(7), 446.0)
+        self.assertEqual(single.lane_center(2), 160.0)
+        self.assertEqual(single.lane_center(7), 160.0)
+        self.assertEqual(centered.lane_center(2), 320.0)
+        self.assertEqual(centered.lane_center(7), 320.0)
+        self.assertEqual(single.panel_count, 1)
+        self.assertEqual(centered.panel_count, 1)
+
+    def test_p2_single_uses_right_native_bank(self) -> None:
+        geometry = PlayfieldGeometry(640, 5, PlayfieldStyle.SINGLE, 5)
         self.assertEqual(
-            geometry.panel_left(0) + geometry.panel_width,
-            geometry.panel_left(1),
+            tuple(geometry.lane_center(lane) for lane in range(5)),
+            (380.0, 430.0, 480.0, 530.0, 580.0),
         )
-        for panel in range(2):
-            for local_lane in range(5):
-                self.assertEqual(
-                    geometry.panel_left(panel)
-                    + (local_lane + 0.5) * geometry.lane_spacing,
-                    geometry.lane_center(panel * 5 + local_lane),
-                )
 
-    def test_single_centres_one_native_sequence_zone_strip(self) -> None:
-        single = PlayfieldGeometry(640, 5)
-        double = PlayfieldGeometry(640, 10)
+    def test_launch_defaults_are_centered_for_five_and_double_for_six_or_ten(self) -> None:
+        five = PlayfieldGeometry(640, 5, start_column=0)
+        six = PlayfieldGeometry(640, 6, start_column=2)
+        ten = PlayfieldGeometry(640, 10, start_column=0)
 
-        self.assertAlmostEqual(single.lane_spacing, double.lane_spacing)
-        self.assertAlmostEqual(single.lane_center(2), 320.0)
-        self.assertAlmostEqual(
-            single.panel_left(0) + single.panel_width / 2.0,
-            320.0,
+        self.assertIs(five.style, PlayfieldStyle.CENTERED)
+        self.assertIs(six.style, PlayfieldStyle.DOUBLE)
+        self.assertIs(ten.style, PlayfieldStyle.DOUBLE)
+        self.assertEqual(five.lane_center(2), 320.0)
+        self.assertEqual(
+            tuple(six.lane_center(lane) for lane in range(6)),
+            (194.0, 244.0, 294.0, 346.0, 396.0, 446.0),
         )
-        self.assertAlmostEqual(single.panel_width, 5 * double.lane_spacing)
+
+    def test_wide_viewports_center_native_geometry_without_stretching_it(self) -> None:
+        geometry = PlayfieldGeometry(960, 10, PlayfieldStyle.DOUBLE, 0)
+        self.assertEqual(geometry.lane_spacing, 50.0)
+        self.assertEqual(geometry.path_unit, 60.0)
+        self.assertEqual(geometry.note_size, 64.0)
+        self.assertEqual(geometry.lane_center(0), 254.0)
+        self.assertEqual(geometry.lane_center(9), 706.0)
+
+    def test_narrow_viewports_scale_all_three_native_units_together(self) -> None:
+        geometry = PlayfieldGeometry(320, 10, PlayfieldStyle.DOUBLE, 0)
+        self.assertEqual(geometry.lane_spacing, 25.0)
+        self.assertEqual(geometry.path_unit, 30.0)
+        self.assertEqual(geometry.note_size, 32.0)
 
 
 class PreviewNoteSemanticsTests(unittest.TestCase):

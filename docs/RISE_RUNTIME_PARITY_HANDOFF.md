@@ -445,3 +445,5 @@ The dormant R!SE Snake 20-unit helper is deliberately **not** accepted as behavi
 - any Split-level modifier dispatcher if one is eventually recovered.
 
 - Exceed correction: the recovered linear `d` is now shared by X and Y, removing the residual R!SE vertical-scale mismatch seen in EF029.
+
+- Prime/NXA playfield geometry is now explicit: 50-unit lane pitch, 60-unit legacy path measure and 64-unit note quad, with Single/Double/Versus/Centered layouts and active-block Division 200 projection. Five-column launch defaults to Centered; six/ten-column launch defaults to Double.

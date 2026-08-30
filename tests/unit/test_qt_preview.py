@@ -20,6 +20,7 @@ try:
     from stepnx.preview import (
         COMMAND_FLAGS,
         AccDecMode,
+        PlayfieldStyle,
         RoutePolicy,
         SequenceZoneTransform,
         StepParam,
@@ -312,7 +313,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 expected = widget._receptor_y() + legacy_acc_dec_distance(
                     distance,
                     widget.session.high_speed,
-                    widget._geometry().note_size,
+                    widget._geometry().path_unit,
                     mode,
                 )
                 self.assertAlmostEqual(
@@ -338,7 +339,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 # A centred lane is still diagonal: P1 approaches from the
                 # right, P2 from the left.
                 distance = widget._event_beat_distance(event)
-                expected = abs(distance) * widget.session.high_speed * widget._geometry().note_size
+                expected = abs(distance) * widget.session.high_speed * widget._geometry().path_unit
                 vertical = widget._event_y(event) - widget._receptor_y()
                 self.assertAlmostEqual(vertical, expected)
                 if widget is p1:
@@ -369,7 +370,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
             widget.session.select_speed(2)
             p1 = replace(source, lane=2, native_block_index=-1, position=current_position + 4.0)
             p2 = replace(source, lane=7, native_block_index=-1, position=current_position + 4.0)
-            expected = 4.0 * widget.session.high_speed * widget._geometry().note_size
+            expected = 4.0 * widget.session.high_speed * widget._geometry().path_unit
             self.assertGreater(expected, widget._geometry().field_width * 0.5)
             self.assertAlmostEqual(widget._event_x_offset(p1), expected)
             self.assertAlmostEqual(widget._event_x_offset(p2), -expected)
@@ -386,6 +387,58 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
             base.close()
+
+    def test_division_200_selects_all_four_prime_render_styles(self) -> None:
+        base = self._widget()
+        try:
+            timing = base.stream.native_timing
+            self.assertIsNotNone(timing)
+            block_id = timing.blocks[0].block_id
+            expected = {
+                0: (PlayfieldStyle.SINGLE, 160.0, 160.0),
+                1: (PlayfieldStyle.DOUBLE, 194.0, 446.0),
+                2: (PlayfieldStyle.VERSUS, 160.0, 480.0),
+                3: (PlayfieldStyle.CENTERED, 320.0, 320.0),
+            }
+            for raw_value, (style, p1, p2) in expected.items():
+                stream = replace(
+                    base.stream,
+                    block_step_params=((block_id, (StepParam(200, raw_value),)),),
+                )
+                widget = GameplayPreviewWidget(
+                    stream,
+                    columns=10,
+                    start_column=0,
+                    command=parse_gameplay_command(""),
+                )
+                try:
+                    widget.resize(640, 480)
+                    self.assertIs(widget._active_playfield_style(), style)
+                    self.assertEqual(widget._geometry().lane_center(2), p1)
+                    self.assertEqual(widget._geometry().lane_center(7), p2)
+                finally:
+                    widget.close()
+        finally:
+            base.close()
+
+    def test_missing_division_200_uses_chart_width_defaults(self) -> None:
+        five = self._widget()
+        ten_base = self._widget()
+        ten = GameplayPreviewWidget(
+            ten_base.stream,
+            columns=10,
+            start_column=0,
+            command=parse_gameplay_command(""),
+        )
+        try:
+            five.resize(640, 480)
+            ten.resize(640, 480)
+            self.assertIs(five._active_playfield_style(), PlayfieldStyle.CENTERED)
+            self.assertIs(ten._active_playfield_style(), PlayfieldStyle.DOUBLE)
+        finally:
+            five.close()
+            ten.close()
+            ten_base.close()
 
     def test_throw_projects_depth_instead_of_adding_y_offset(self) -> None:
         sink = self._widget("(")

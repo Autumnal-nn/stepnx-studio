@@ -358,11 +358,11 @@ def _style_override_metadata(
         _DIVISION,
         ValueKind.ENUM,
         evidence,
-        choices=tuple(
-            ValueChoice(value, label)
-            for value, label in enumerate(
-                ("Default", "Versus", "Double", "Single (collapsed)")
-            )
+        choices=(
+            ValueChoice(0, "Single"),
+            ValueChoice(1, "Double"),
+            ValueChoice(2, "Versus"),
+            ValueChoice(3, "Centered"),
         ),
         description=description,
     )

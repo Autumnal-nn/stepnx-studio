@@ -20,7 +20,11 @@ from stepnx.preview.gauge import (
     HPBarType,
     RuntimeGauge,
 )
-from stepnx.preview.geometry import PlayfieldGeometry
+from stepnx.preview.geometry import (
+    PlayfieldGeometry,
+    PlayfieldStyle,
+    default_playfield_style,
+)
 from stepnx.preview.judge_timing import (
     DEFAULT_JUDGE_DELAY_FRAMES,
     JUDGE_FRAME_MS,
@@ -170,6 +174,7 @@ __all__ = [
     "PRIME2_ZIGZAG_KEYFRAME_COUNT",
     "PRIME2_ZIGZAG_PHASE_LIMIT",
     "PlayfieldGeometry",
+    "PlayfieldStyle",
     "PreviewBlock",
     "PreviewEvent",
     "PreviewMetrics",
@@ -198,6 +203,7 @@ __all__ = [
     "apply_step_params",
     "build_event_stream",
     "create_preview_snapshot",
+    "default_playfield_style",
     "earthworm_user_speed",
     "judge_note_decision",
     "legacy_acc_dec_distance",
