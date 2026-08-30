@@ -184,6 +184,7 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 raw=bytes((0x0F, 0x03, source.raw[2], source.raw[3])),
             )
             widget._chart_time_ms = 0.0
+            widget._hold_pair_by_event = {head: (head, tail), tail: (head, tail)}
             image = QImage(widget.size(), QImage.Format.Format_ARGB32)
             image.fill(0)
             painter = QPainter(image)
@@ -196,6 +197,13 @@ class QtGameplayPreviewTests(unittest.TestCase):
                         note.note_type
                     )
                     or True,
+                ), patch.object(
+                    widget,
+                    "_projected_note_centre_and_extent",
+                    side_effect=lambda note: (
+                        QPointF(100.0, 100.0 if note.note_type == 0x07 else 110.0),
+                        64.0,
+                    ),
                 ):
                     widget._draw_note_group(
                         painter,
@@ -205,10 +213,53 @@ class QtGameplayPreviewTests(unittest.TestCase):
                     )
             finally:
                 painter.end()
-            self.assertEqual(draw_order, [0x0F, 0x07])
+            self.assertEqual(draw_order, [0x07])
         finally:
             widget.close()
 
+
+    def test_separated_long_keeps_tail_then_head_order_in_gameplay_preview(self) -> None:
+        widget = self._widget()
+        try:
+            source = widget.stream.events[0]
+            head = replace(
+                source,
+                time_ms=1000.0,
+                row_index=100,
+                raw=bytes((0x07, 0x03, source.raw[2], source.raw[3])),
+            )
+            tail = replace(
+                source,
+                time_ms=1200.0,
+                row_index=200,
+                raw=bytes((0x0F, 0x03, source.raw[2], source.raw[3])),
+            )
+            widget._hold_pair_by_event = {head: (head, tail), tail: (head, tail)}
+            image = QImage(640, 480, QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            draw_order = []
+            try:
+                with patch.object(
+                    widget,
+                    "_draw_asset",
+                    side_effect=lambda _painter, note, _rect: draw_order.append(note.note_type) or True,
+                ), patch.object(
+                    widget,
+                    "_projected_note_centre_and_extent",
+                    side_effect=lambda note: (
+                        QPointF(100.0, 100.0 if note.note_type == 0x07 else 220.0),
+                        64.0,
+                    ),
+                ):
+                    widget._draw_note_group(
+                        painter, widget._geometry(), 3, visible_notes=(head, tail)
+                    )
+            finally:
+                painter.end()
+            self.assertEqual(draw_order, [0x0F, 0x07])
+        finally:
+            widget.close()
 
     def test_dense_long_bodies_stay_in_runtime_but_out_of_render_index(self) -> None:
         base = self._widget()

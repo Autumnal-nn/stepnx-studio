@@ -952,6 +952,38 @@ class GameplayPreviewWidget(QWidget):
             finally:
                 painter.restore()
 
+    def _projected_note_centre_and_extent(
+        self, event: PreviewEvent
+    ) -> tuple[QPointF, float]:
+        centre_x, centre_y, rendered_note_size = self._event_render_geometry(event)
+        transform = self._playfield_transform(
+            self._event_throw_z(event) if self._effective_nx_mode() else 0.0
+        )
+        centre = transform.map(QPointF(centre_x, centre_y))
+        top = transform.map(
+            QPointF(centre_x, centre_y - rendered_note_size / 2.0)
+        )
+        bottom = transform.map(
+            QPointF(centre_x, centre_y + rendered_note_size / 2.0)
+        )
+        extent = math.hypot(bottom.x() - top.x(), bottom.y() - top.y())
+        return centre, max(1.0, extent)
+
+    def _collapsed_hold_tail(self, event: PreviewEvent) -> bool:
+        if event.note_type != 0xF:
+            return False
+        pair = self._hold_pair_by_event.get(event)
+        if pair is None:
+            return False
+        head, tail = pair
+        head_centre, head_extent = self._projected_note_centre_and_extent(head)
+        tail_centre, tail_extent = self._projected_note_centre_and_extent(tail)
+        distance = math.hypot(
+            tail_centre.x() - head_centre.x(),
+            tail_centre.y() - head_centre.y(),
+        )
+        return distance <= max(head_extent, tail_extent) + 1e-6
+
     def _draw_note_group(
         self,
         painter: QPainter,
@@ -961,12 +993,15 @@ class GameplayPreviewWidget(QWidget):
     ) -> None:
         self._draw_hold_shafts(painter, geometry.note_size, visibility_filter)
         notes = self._visible_render_events() if visible_notes is None else visible_notes
-        # Prime-era charts deliberately use very short high-tick holds as
-        # tap-like ornaments. Preserve chronological order inside each layer,
-        # but draw every head last so a collapsed head/tail pair reads as head.
-        ordered_notes = tuple(note for note in notes if note.note_type != 0x7) + tuple(
-            note for note in notes if note.note_type == 0x7
+        # The native game collapses a hold whose complete projected length fits
+        # underneath one terminal into the head silhouette. Shaft is already
+        # suppressed by _hold_shaft_height; suppress the covered tail too.
+        drawable_notes = tuple(
+            note for note in notes if not self._collapsed_hold_tail(note)
         )
+        ordered_notes = tuple(
+            note for note in drawable_notes if note.note_type != 0x7
+        ) + tuple(note for note in drawable_notes if note.note_type == 0x7)
         for note in ordered_notes:
             if self._effective_visibility(note) != int(visibility_filter):
                 continue
