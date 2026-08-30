@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import radians, tan
+from math import cos, radians, sin, tan
 
 LEGACY_LOGICAL_WIDTH = 640.0
 LEGACY_LOGICAL_HEIGHT = 480.0
@@ -18,10 +18,8 @@ LEGACY_VISIBILITY_SCREEN_CENTER = (
 
 LEGACY_NX_FOV_DEGREES = 75.0
 LEGACY_NX_SCALE = 1.5
-LEGACY_NX_ROTATE_DEGREES = -120.0
-LEGACY_NX_DROP_ROTATE_DEGREES = -60.0
-LEGACY_NX_YZ_COUPLING = 1.299038105676658
-LEGACY_NX_Z_OFFSET = -519.6152422706632
+LEGACY_NX_SHALLOW_ROTATE_DEGREES = -60.0
+LEGACY_NX_STEEP_ROTATE_DEGREES = -120.0
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -96,16 +94,62 @@ def legacy_visibility_gradient_stops(
     return tuple((_clamp(position, 0.0, 1.0), alpha) for position, alpha in stops)
 
 
-def _matmul3(
-    left: tuple[tuple[float, float, float], ...],
-    right: tuple[tuple[float, float, float], ...],
-) -> tuple[tuple[float, float, float], ...]:
+def _matmul4(
+    left: tuple[tuple[float, float, float, float], ...],
+    right: tuple[tuple[float, float, float, float], ...],
+) -> tuple[tuple[float, float, float, float], ...]:
     return tuple(
         tuple(
-            sum(left[row][k] * right[k][column] for k in range(3))
-            for column in range(3)
+            sum(left[row][k] * right[k][column] for k in range(4))
+            for column in range(4)
         )
-        for row in range(3)
+        for row in range(4)
+    )
+
+
+def _translate4(
+    x: float, y: float, z: float = 0.0
+) -> tuple[tuple[float, float, float, float], ...]:
+    return (
+        (1.0, 0.0, 0.0, float(x)),
+        (0.0, 1.0, 0.0, float(y)),
+        (0.0, 0.0, 1.0, float(z)),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+
+
+def _scale4(
+    x: float, y: float, z: float
+) -> tuple[tuple[float, float, float, float], ...]:
+    return (
+        (float(x), 0.0, 0.0, 0.0),
+        (0.0, float(y), 0.0, 0.0),
+        (0.0, 0.0, float(z), 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+
+
+def _rotate_x4(degrees: float) -> tuple[tuple[float, float, float, float], ...]:
+    angle = radians(float(degrees))
+    cosine = cos(angle)
+    sine = sin(angle)
+    return (
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, cosine, -sine, 0.0),
+        (0.0, sine, cosine, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+
+
+def _rotate_z4(degrees: float) -> tuple[tuple[float, float, float, float], ...]:
+    angle = radians(float(degrees))
+    cosine = cos(angle)
+    sine = sin(angle)
+    return (
+        (cosine, -sine, 0.0, 0.0),
+        (sine, cosine, 0.0, 0.0),
+        (0.0, 0.0, 1.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
     )
 
 
@@ -117,83 +161,94 @@ def legacy_nx_homography(
     drop: bool = False,
     under_attack: bool = False,
 ) -> tuple[float, float, float, float, float, float, float, float, float]:
-    """Return the NXA/Prime NX Mode projective transform as Qt coefficients.
+    """Collapse the exact Prime/NXA NX fixed-Z OpenGL pipeline to QTransform.
 
-    The source pipeline is a 640x480 logical field with Perspective(75), a
-    -120 degree X tilt (-60 in the Drop branch), centre translation and 1.5
-    scale. For a fixed Z plane this collapses exactly to a 2-D homography. The
-    tuple order matches QTransform's nine-argument constructor.
+    The native perspective helper derives camera distance from viewport HEIGHT,
+    applies Perspective(75, W/H, .1, 5000), translates projection by (-W/2,-H/2),
+    then uses LookAt(0,0,d -> 0,0,0, up +Y). NX has four dedicated branches:
+
+    * NX:              Rx(-60),  centered Scale(1.5,+1.5,1.5)
+    * NX + Drop: T(0,H), Rx(-120), centered Scale(1.5,+1.5,1.5)
+    * NX + UA:   T(0,H), Rx(-120), centered Scale(1.5,-1.5,1.5),
+                 then native UA T(W,H) / Rz(180)
+    * NX + UA + Drop:  Rx(-60), centered Scale(1.5,-1.5,1.5),
+                 then native UA T(W,H) / Rz(180)
+
+    Input/output conversion bridges Qt top-left coordinates and native OpenGL
+    bottom-left coordinates. For a fixed Throw Z, the complete 3-D pipeline is
+    exactly representable as one 2-D projective transform.
     """
 
     width = max(1.0, float(viewport_width))
     height = max(1.0, float(viewport_height))
-    fixed_z = float(z)
+    centre_x = width / 2.0
+    centre_y = height / 2.0
 
-    focal = 1.0 / tan(radians(LEGACY_NX_FOV_DEGREES / 2.0))
-    eye_distance = focal * LEGACY_LOGICAL_WIDTH / 2.0
-    projection_scale = focal * LEGACY_LOGICAL_HEIGHT / 2.0
-
-    x_in = LEGACY_LOGICAL_WIDTH / width
-    y_in = LEGACY_LOGICAL_HEIGHT / height
-    x_out = width / LEGACY_LOGICAL_WIDTH
-    y_out = height / LEGACY_LOGICAL_HEIGHT
-
-    y_z = -LEGACY_NX_YZ_COUPLING if drop else LEGACY_NX_YZ_COUPLING
-    z_z = 0.75 if drop else -0.75
-    denominator_constant = eye_distance - LEGACY_NX_Z_OFFSET - z_z * fixed_z
-    if abs(denominator_constant) < 1e-9:
-        denominator_constant = 1e-9
-
-    c = LEGACY_NX_YZ_COUPLING
-    matrix = (
-        (
-            x_out * (1.5 * projection_scale) * x_in / denominator_constant,
-            x_out * (-320.0 * c) * y_in / denominator_constant,
-            x_out
-            * (320.0 * denominator_constant - 480.0 * projection_scale)
-            / denominator_constant,
-        ),
-        (
-            0.0,
-            y_out
-            * (-240.0 * c - 0.75 * projection_scale)
-            * y_in
-            / denominator_constant,
-            y_out
-            * (
-                240.0 * denominator_constant
-                + 60.0 * projection_scale
-                - projection_scale * y_z * fixed_z
-            )
-            / denominator_constant,
-        ),
-        (
-            0.0,
-            -c * y_in / denominator_constant,
-            1.0,
-        ),
+    input_qt_to_gl = (
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, -1.0, 0.0, height),
+        (0.0, 0.0, 1.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
     )
 
-    if under_attack:
-        matrix = _matmul3(
-            matrix,
-            (
-                (-1.0, 0.0, width),
-                (0.0, -1.0, height),
-                (0.0, 0.0, 1.0),
-            ),
+    y_scale = -LEGACY_NX_SCALE if under_attack else LEGACY_NX_SCALE
+    centred_scale = _matmul4(
+        _matmul4(
+            _translate4(centre_x, centre_y),
+            _scale4(LEGACY_NX_SCALE, y_scale, LEGACY_NX_SCALE),
+        ),
+        _translate4(-centre_x, -centre_y),
+    )
+
+    # Native branch table: Drop and UA choose opposite X-tilt branches. The
+    # steep branch is selected iff exactly one is active.
+    steep = bool(drop) ^ bool(under_attack)
+    if steep:
+        model = _matmul4(
+            _matmul4(_translate4(0.0, height), _rotate_x4(LEGACY_NX_STEEP_ROTATE_DEGREES)),
+            centred_scale,
+        )
+    else:
+        model = _matmul4(
+            _rotate_x4(LEGACY_NX_SHALLOW_ROTATE_DEGREES),
+            centred_scale,
         )
 
+    if under_attack:
+        model = _matmul4(
+            _matmul4(model, _translate4(width, height)),
+            _rotate_z4(180.0),
+        )
+
+    focal = 1.0 / tan(radians(LEGACY_NX_FOV_DEGREES / 2.0))
+    eye_distance = focal * height / 2.0
+
+    # Combined Perspective + projection Translate(-W/2,-H/2) + LookAt,
+    # expressed directly in Qt top-left output coordinates.
+    projection_to_qt = (
+        (eye_distance, 0.0, -centre_x, 0.0),
+        (0.0, -eye_distance, -centre_y, height * eye_distance),
+        (0.0, 0.0, 1.0, 0.0),
+        (0.0, 0.0, -1.0, eye_distance),
+    )
+    final = _matmul4(
+        _matmul4(projection_to_qt, model),
+        input_qt_to_gl,
+    )
+
+    fixed_z = float(z)
+    # QTransform maps x'=(m11*x+m21*y+m31)/(m13*x+m23*y+m33)
+    # and y'=(m12*x+m22*y+m32)/(same denominator).
     return (
-        matrix[0][0],
-        matrix[1][0],
-        matrix[2][0],
-        matrix[0][1],
-        matrix[1][1],
-        matrix[2][1],
-        matrix[0][2],
-        matrix[1][2],
-        matrix[2][2],
+        final[0][0],
+        final[1][0],
+        final[3][0],
+        final[0][1],
+        final[1][1],
+        final[3][1],
+        final[0][2] * fixed_z + final[0][3],
+        final[1][2] * fixed_z + final[1][3],
+        final[3][2] * fixed_z + final[3][3],
     )
 
 

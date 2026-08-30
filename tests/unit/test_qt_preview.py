@@ -103,19 +103,37 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_nx_mode_qtransform_matches_recovered_projection(self) -> None:
-        widget = self._widget("^")
-        try:
-            widget.resize(640, 480)
-            self.assertTrue(widget._effective_nx_mode())
-            mapped = widget._playfield_transform().map(QPointF(320.0, 82.0))
-            expected_x, expected_y = legacy_nx_project_point(
-                320.0, 82.0, 640.0, 480.0
-            )
-            self.assertAlmostEqual(mapped.x(), expected_x, places=5)
-            self.assertAlmostEqual(mapped.y(), expected_y, places=5)
-        finally:
-            widget.close()
+    def test_nx_mode_qtransform_matches_all_recovered_native_branches(self) -> None:
+        cases = (
+            ("^", False, False),
+            ("^!", True, False),
+            ("^u", False, True),
+            ("^u!", True, True),
+        )
+        for command, drop, under_attack in cases:
+            widget = self._widget(command)
+            try:
+                widget.resize(640, 480)
+                self.assertTrue(widget._effective_nx_mode())
+                transform = widget._playfield_transform()
+                for point in (QPointF(320.0, 82.0), QPointF(200.0, 300.0)):
+                    mapped = transform.map(point)
+                    expected_x, expected_y = legacy_nx_project_point(
+                        point.x(),
+                        point.y(),
+                        640.0,
+                        480.0,
+                        drop=drop,
+                        under_attack=under_attack,
+                    )
+                    self.assertAlmostEqual(mapped.x(), expected_x, places=5)
+                    self.assertAlmostEqual(mapped.y(), expected_y, places=5)
+                # Every native NX branch keeps the receptor on the central horizon.
+                receptor = transform.map(QPointF(320.0, 82.0))
+                self.assertLess(abs(receptor.y() - 240.0), 1.0)
+            finally:
+                widget.close()
+
 
     def test_event_culling_uses_chart_time_without_mutating_stream(self) -> None:
         widget = self._widget()

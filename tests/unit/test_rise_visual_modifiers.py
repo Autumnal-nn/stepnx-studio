@@ -250,26 +250,33 @@ class RiseLineBaseVisualTests(unittest.TestCase):
             legacy_visibility_alpha(481.0, 960.0, 1), 128.0 / 255.0
         )
 
-    def test_nx_mode_projection_matches_nxa_prime_pipeline(self) -> None:
+    def test_nx_mode_projection_matches_all_native_prime_nxa_branches(self) -> None:
         self.assertEqual(LEGACY_NX_FOV_DEGREES, 75.0)
-        centre_receptor = legacy_nx_project_point(320.0, 82.0, 640.0, 480.0)
-        self.assertAlmostEqual(centre_receptor[0], 320.0, places=5)
-        self.assertAlmostEqual(centre_receptor[1], 239.4348315793912, places=5)
-        lower = legacy_nx_project_point(320.0, 400.0, 640.0, 480.0)
-        self.assertAlmostEqual(lower[1], 60.0, places=5)
+        receptor = (320.0, 82.0)
+        future = (200.0, 300.0)
+        expected = {
+            (False, False): ((320.0, 240.64634479047592), (192.82099219220635, 356.5807571571442)),
+            (True, False): ((320.0, 239.35365520952405), (192.82099219220632, 123.4192428428558)),
+            (False, True): ((320.0, 239.353655209524), (447.17900780779365, 123.41924284285578)),
+            (True, True): ((320.0, 240.64634479047598), (447.17900780779365, 356.5807571571443)),
+        }
+        for (drop, under_attack), (expected_receptor, expected_future) in expected.items():
+            with self.subTest(drop=drop, under_attack=under_attack):
+                projected_receptor = legacy_nx_project_point(
+                    *receptor, 640.0, 480.0, drop=drop, under_attack=under_attack
+                )
+                projected_future = legacy_nx_project_point(
+                    *future, 640.0, 480.0, drop=drop, under_attack=under_attack
+                )
+                self.assertAlmostEqual(projected_receptor[0], expected_receptor[0], places=5)
+                self.assertAlmostEqual(projected_receptor[1], expected_receptor[1], places=5)
+                self.assertAlmostEqual(projected_future[0], expected_future[0], places=5)
+                self.assertAlmostEqual(projected_future[1], expected_future[1], places=5)
+
         doubled = legacy_nx_project_point(640.0, 164.0, 1280.0, 960.0)
-        self.assertAlmostEqual(doubled[0], centre_receptor[0] * 2.0, places=5)
-        self.assertAlmostEqual(doubled[1], centre_receptor[1] * 2.0, places=5)
-        flat_drop = legacy_nx_project_point(320.0, 240.0, 640.0, 480.0, drop=True)
-        flat_normal = legacy_nx_project_point(320.0, 240.0, 640.0, 480.0)
-        self.assertAlmostEqual(flat_drop[1], flat_normal[1], places=5)
-        depth_normal = legacy_nx_project_point(
-            320.0, 240.0, 640.0, 480.0, z=100.0
-        )
-        depth_drop = legacy_nx_project_point(
-            320.0, 240.0, 640.0, 480.0, z=100.0, drop=True
-        )
-        self.assertNotAlmostEqual(depth_normal[1], depth_drop[1])
+        self.assertAlmostEqual(doubled[0], 640.0, places=5)
+        self.assertAlmostEqual(doubled[1], 481.29268958095184, places=5)
+
 
 
 class SequenceZoneTransformTests(unittest.TestCase):
