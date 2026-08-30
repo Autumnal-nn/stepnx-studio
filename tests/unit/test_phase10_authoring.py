@@ -249,9 +249,10 @@ class Phase10AdapterTests(unittest.TestCase):
         )
         text = source.read_text(encoding="utf-8")
         self.assertIn(
-            "self._chart_time_ms > self.stream.duration_ms + 250.0",
+            "self._chart_time_ms > self._duration_ms + 250.0",
             text,
         )
+        self.assertIn("self._duration_ms = stream.duration_ms", text)
 
     def test_audio_autoload_requires_exact_sibling_folder_mp3(self):
         from pathlib import Path

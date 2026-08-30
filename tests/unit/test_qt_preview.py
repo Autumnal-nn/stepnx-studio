@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 from dataclasses import replace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offscreen")
@@ -135,6 +136,85 @@ class QtGameplayPreviewTests(unittest.TestCase):
             finally:
                 widget.close()
 
+
+    def test_dense_long_bodies_stay_in_runtime_but_out_of_render_index(self) -> None:
+        base = self._widget()
+        try:
+            source = base.stream.events[0]
+            bodies = tuple(
+                replace(
+                    source,
+                    time_ms=source.time_ms + index * 3.125,
+                    row_index=1000 + index,
+                    raw=bytes((0x0B, 0x03, source.raw[2], source.raw[3])),
+                )
+                for index in range(1024)
+            )
+            stream = replace(
+                base.stream,
+                events=tuple(sorted(base.stream.events + bodies, key=lambda event: event.time_ms)),
+            )
+            widget = GameplayPreviewWidget(
+                stream,
+                columns=base.columns,
+                start_column=base.start_column,
+                command=parse_gameplay_command(""),
+            )
+            try:
+                self.assertEqual(
+                    sum(event.note_type == 0xB for event in widget.stream.events),
+                    1024,
+                )
+                self.assertFalse(any(event.note_type == 0xB for event in widget._render_events))
+                self.assertLess(len(widget._render_events), len(widget.stream.events))
+            finally:
+                widget.close()
+        finally:
+            base.close()
+
+    def test_paint_culls_render_events_once_and_skips_empty_visibility_layers(self) -> None:
+        widget = self._widget("n")
+        try:
+            widget.resize(640, 480)
+            widget.show()
+            widget.set_playback_time(widget.stream.events[0].time_ms)
+            image = QImage(widget.size(), QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            try:
+                with patch.object(
+                    widget,
+                    "_visible_render_events",
+                    wraps=widget._visible_render_events,
+                ) as visible, patch.object(
+                    widget,
+                    "_render_visibility_layer",
+                    wraps=widget._render_visibility_layer,
+                ) as layer:
+                    widget.render(painter, QPoint())
+                    self.assertEqual(visible.call_count, 1)
+                    self.assertEqual(layer.call_count, 0)
+            finally:
+                painter.end()
+        finally:
+            widget.close()
+
+    def test_event_beat_distance_reuses_one_native_state_per_frame(self) -> None:
+        widget = self._widget()
+        try:
+            widget.set_playback_time(widget.stream.events[0].time_ms)
+            timing_type = type(widget.stream.native_timing)
+            with patch.object(
+                timing_type,
+                "state_at",
+                wraps=timing_type.state_at,
+                autospec=True,
+            ) as state_at:
+                for event in widget.stream.events[:8]:
+                    widget._event_beat_distance(event)
+                self.assertEqual(state_at.call_count, 0)
+        finally:
+            widget.close()
 
     def test_event_culling_uses_chart_time_without_mutating_stream(self) -> None:
         widget = self._widget()

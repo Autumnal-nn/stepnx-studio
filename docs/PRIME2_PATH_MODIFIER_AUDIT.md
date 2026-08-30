@@ -87,3 +87,9 @@ The Prime/NXA renderer keeps three independent SD measures instead of deriving e
 The four render states are explicit and do not rewrite authored columns or judgment lanes: `0=Single`, `1=Double`, `2=Versus`, `3=Centered`. Division Metadata `200` is resolved from the active block and therefore may switch presentation as native timing advances. When no `200` is present, StepNX intentionally keeps its authoring defaults: five-column charts launch Centered; six- and ten-column charts launch Double.
 
 This separation also fixes legacy path composition: Exceed, historical Acceleration/Deceleration, and the Prime Snake path scale through the native 60-unit path measure, while note/item artwork continues to use the independent 64-unit quad. Half-Double bank selection uses `start_column + lane`, so its native 2..7 span crosses banks at the correct boundary.
+
+## Dense long-note preview performance
+
+Fiesta 2 `/D/EF1299` is the stress reference for runtime preview density. Its NX contains 12,817 long-body cells and several BeatSplit=128 sections, including a block with 2,890 body ticks over 320 rows. A 60 fps screen capture exposed 7-10 repeated display frames (roughly 120-170 ms) while those walls were active.
+
+Long-body `0x0B` events remain fully present in `RuntimeEventStream` and `GameplaySession` for judgment, combo, score and gauge semantics, but they are now excluded from the standalone render-event index because the renderer already represents them through paired hold shafts. The preview also caches one native timing state, playfield geometry and lane map per frame/state, culls render events once per paint, groups them by visibility once, and avoids allocating full-screen Appear/Vanish intermediate images when that family cannot contribute pixels. These are projection-only optimizations; authored NX and runtime judgment semantics are unchanged.
