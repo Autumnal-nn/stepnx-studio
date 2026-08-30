@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Fix migration anchors and apply hold-collapse patch
+      - name: Apply game-matched hold-collapse patch
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -31,14 +31,35 @@ jobs:
               'end = text.index("    def _sync_scrollbars(\\n", start)',
               'end = text.index("    def _sync_scrollbars(self) -> None:\\n", start)',
           )
-          old = '''        rows = list(block.rows)\n        next_id = document.next_stable_id\n        for index, note_type in enumerate((0x07, 0x0B, 0x0F)):\n'''
-          new = '''        rows = list(block.rows)\n        next_id = document.next_stable_id\n        while len(rows) < 3:\n            row_id = next_id\n            next_id += 1\n            cells = []\n            for lane in range(int(document.columns.value)):\n                cells.append(NoteCell(next_id, bytes(4), None))\n                next_id += 1\n            rows.append(NoteRow(row_id, tuple(cells), None))\n        for index, note_type in enumerate((0x07, 0x0B, 0x0F)):\n'''
-          if old not in text:
-              raise SystemExit('new collapsed-hold fixture anchor not found')
-          text = text.replace(old, new, 1)
           path.write_text(text, encoding='utf-8')
           PY
           python .github/scripts/fix-gameplay-hold-terminals.py
+      - name: Make collapsed-hold regression fixture explicit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/unit/test_qt_viewport.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        rows = list(block.rows)
+        next_id = document.next_stable_id
+        for index, note_type in enumerate((0x07, 0x0B, 0x0F)):
+'''
+          new = '''        rows = list(block.rows)
+        next_id = document.next_stable_id
+        while len(rows) < 3:
+            row_id = next_id
+            next_id += 1
+            cells = []
+            for lane in range(int(document.columns.value)):
+                cells.append(NoteCell(next_id, bytes(4), None))
+                next_id += 1
+            rows.append(NoteRow(row_id, tuple(cells), None))
+        for index, note_type in enumerate((0x07, 0x0B, 0x0F)):
+'''
+          if old not in text:
+              raise SystemExit('generated collapsed-hold fixture anchor not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Install Linux Qt runtime libraries
         run: |
           sudo apt-get update
