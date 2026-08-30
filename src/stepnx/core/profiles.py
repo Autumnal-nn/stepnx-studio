@@ -242,7 +242,7 @@ def _later_trailer_metadata() -> tuple[MetadataDefinition, ...]:
     fields = (
         (20, "BGA video resource (.V)", Evidence.RUNTIME_CONFIRMED),
         (1003, "Resource/reference string", Evidence.RUNTIME_CONFIRMED),
-        (1100, "Trailer string field 1100", Evidence.OFFICIAL_CORPUS),
+        (1100, "Localized mission text", Evidence.OFFICIAL_CORPUS),
         (1102, "Trailer string field 1102", Evidence.OFFICIAL_CORPUS),
         (1103, "Localized mission text", Evidence.RUNTIME_CONFIRMED),
         (1150, "Mission condition string", Evidence.OFFICIAL_CORPUS),
@@ -951,6 +951,19 @@ FIESTA2_METADATA = (
 
 PRIME2_METADATA = (
     *_direct_noteskin_metadata(32, "Prime 2"),
+    MetadataDefinition(
+        20,
+        "BGA video resource (.V)",
+        _HEADER,
+        ValueKind.TRAILER_OFFSET,
+        Evidence.RUNTIME_CONFIRMED,
+        description=(
+            "Prime uses the same later-generation trailer-relative .V resource "
+            "reference as Fiesta. This explicit override prevents fallback to "
+            "NXA Header 20 (BGA OFF / COSMOS), which is a different semantic."
+        ),
+        authorable=False,
+    ),
     *_unidentified_metadata((0, 1, 2, 3, 4), _SPLIT, "Prime 2 discarded-mission"),
     *_prime_mission_difficulty_metadata(),
     MetadataDefinition(
@@ -1329,7 +1342,7 @@ def metadata_display_id(
         scope is MetadataScope.HEADER
         and definition is not None
         and definition.kind is ValueKind.TRAILER_OFFSET
-        and base_id in (1103, 1203, 1303, 1403)
+        and base_id in (1100, 1103, 1203, 1303, 1403)
     ):
         return f"{raw_id >> 16}/{base_id}"
     return str(raw_id)

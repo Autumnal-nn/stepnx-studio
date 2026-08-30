@@ -334,7 +334,7 @@ class QtViewportSmokeTests(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_low_projection_collapses_body_and_tail_to_head_in_editor(self) -> None:
+    def test_low_projection_keeps_tail_and_uses_head_last_order_in_editor(self) -> None:
         document = parse_bytes(
             make_normal_nx20(), source="collapsed.NX", row_storage="rich"
         )
@@ -372,10 +372,6 @@ class QtViewportSmokeTests(unittest.TestCase):
         try:
             widget.resize(640, 900)
             widget.set_playback_active(True)
-            collapsed = widget._collapsed_hold_cells()
-            self.assertIn((rows[1].stable_id, 0), collapsed)
-            self.assertIn((rows[2].stable_id, 0), collapsed)
-            self.assertNotIn((rows[0].stable_id, 0), collapsed)
             visible = widget._layout.visible_segments(
                 0.0, float(widget.viewport().height()), overscan_rows=2
             )[0]
@@ -402,8 +398,9 @@ class QtViewportSmokeTests(unittest.TestCase):
             finally:
                 painter.end()
             self.assertIn(0x07, notes)
-            self.assertNotIn(0x0F, notes)
-            self.assertEqual(spans, [])
+            self.assertIn(0x0F, notes)
+            self.assertEqual(notes[-1], 0x07)
+            self.assertLess(notes.index(0x0F), notes.index(0x07))
         finally:
             widget.close()
 

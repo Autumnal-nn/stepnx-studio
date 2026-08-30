@@ -23,6 +23,18 @@ class ModernProfileExtensionTests(unittest.TestCase):
         self.assertEqual(get_profile("fiesta2").label, "Fiesta")
         self.assertEqual(get_profile("prime2").label, "Prime+")
 
+    def test_prime_trailer_registry_marks_1100_localized_and_keeps_header20(self) -> None:
+        field_1100 = trailer_field_definition("prime2", 1100)
+        field_1103 = trailer_field_definition("prime2", 1103)
+        field_20 = trailer_field_definition("prime2", 20)
+        self.assertIsNotNone(field_1100)
+        self.assertIsNotNone(field_1103)
+        self.assertIsNotNone(field_20)
+        self.assertTrue(field_1100.localized)
+        self.assertTrue(field_1103.localized)
+        self.assertEqual(field_20.label, "V resource override")
+        self.assertIsNone(trailer_field_definition("nxa-native", 20))
+
     def test_step_artist_is_modern_only_trailer_metadata(self) -> None:
         definition = metadata_definition("prime2", MetadataScope.HEADER, 1008)
         self.assertIsNotNone(definition)
