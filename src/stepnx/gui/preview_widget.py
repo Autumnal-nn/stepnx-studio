@@ -350,6 +350,16 @@ class GameplayPreviewWidget(QWidget):
                 geometry.note_size,
                 legacy_mode,
             )
+        if self.command.exceed_mode or self.session.runtime_modifier.exceed:
+            # Prime/NXA path_exeed shares its unbounded linear distance with
+            # both axes. Keeping R!SE's 65.647/72 Y projection here made the
+            # diagonal about ten percent too shallow even after X was fixed.
+            return self._receptor_y() + legacy_acc_dec_distance(
+                beat_distance,
+                self.session.high_speed,
+                geometry.note_size,
+                AccDecMode.LINEAR,
+            )
         native_y = native_line_y(
             beat_distance,
             self.session.high_speed,

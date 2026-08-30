@@ -443,3 +443,5 @@ The dormant R!SE Snake 20-unit helper is deliberately **not** accepted as behavi
 - challenge-mode HPBar.Add branch;
 - forced-judgment Div 999 consumer;
 - any Split-level modifier dispatcher if one is eventually recovered.
+
+- Exceed correction: the recovered linear `d` is now shared by X and Y, removing the residual R!SE vertical-scale mismatch seen in EF029.

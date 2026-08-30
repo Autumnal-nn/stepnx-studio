@@ -339,10 +339,14 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 # right, P2 from the left.
                 distance = widget._event_beat_distance(event)
                 expected = abs(distance) * widget.session.high_speed * widget._geometry().note_size
+                vertical = widget._event_y(event) - widget._receptor_y()
+                self.assertAlmostEqual(vertical, expected)
                 if widget is p1:
                     self.assertAlmostEqual(widget._event_x_offset(event), expected)
+                    self.assertAlmostEqual(widget._event_x_offset(event), vertical)
                 else:
                     self.assertAlmostEqual(widget._event_x_offset(event), -expected)
+                    self.assertAlmostEqual(widget._event_x_offset(event), -vertical)
         finally:
             p1.close()
             p2.close()
@@ -369,6 +373,16 @@ class QtGameplayPreviewTests(unittest.TestCase):
             self.assertGreater(expected, widget._geometry().field_width * 0.5)
             self.assertAlmostEqual(widget._event_x_offset(p1), expected)
             self.assertAlmostEqual(widget._event_x_offset(p2), -expected)
+            # path_exeed uses that same d for its vertical travel. The native
+            # trajectory is therefore 1:1 in rendered X/Y path units.
+            self.assertAlmostEqual(
+                widget._screen_y_for_beat_distance(4.0) - widget._receptor_y(),
+                expected,
+            )
+            self.assertAlmostEqual(
+                widget._event_x_offset(p1),
+                widget._screen_y_for_beat_distance(4.0) - widget._receptor_y(),
+            )
         finally:
             widget.close()
             base.close()
