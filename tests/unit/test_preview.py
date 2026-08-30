@@ -523,6 +523,47 @@ class RuntimeEventTests(unittest.TestCase):
         self.assertEqual(len(session.judgments), 3)
         self.assertEqual(len(session.step_effect_history), 1)
 
+    def test_dense_autoplay_batches_groups_without_running_manual_miss_cursor(self) -> None:
+        stream = self._hold_stream()
+        template = stream.events[1]
+        dense_events = tuple(
+            replace(
+                template,
+                time_ms=float(index) / 3.0,
+                beat=float(index) / 384.0,
+                row_index=index,
+                lane=index % 5,
+            )
+            for index in range(3000)
+        )
+        stream = replace(stream, events=dense_events)
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+        stats_identity = id(session.stats)
+
+        session.advance(1001.0)
+
+        self.assertEqual(len(session.judgments), 3000)
+        self.assertEqual(session.stats.perfect, 3000)
+        self.assertEqual(session.stats.combo, 3000)
+        self.assertEqual(id(session.stats), stats_identity)
+        self.assertEqual(session.last_advance_event_count, 3000)
+        self.assertEqual(session.last_advance_group_count, 3000)
+        self.assertEqual(session._miss_cursor, 0)
+
+    def test_autoplay_toggle_keeps_manual_past_and_future_cursor_boundaries(self) -> None:
+        stream = self._hold_stream()
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=False)
+        head, body, tail = stream.events
+        session.advance(body.time_ms + 0.1)
+        self.assertGreaterEqual(session._event_cursor, 2)
+
+        self.assertTrue(session.toggle_autoplay())
+        session.advance(tail.time_ms + 0.1)
+        self.assertIn(session.event_key(tail), session.judgments)
+
+        self.assertFalse(session.toggle_autoplay())
+        self.assertGreaterEqual(session._event_cursor, len(stream.events))
+
     def test_chord_produces_one_normal_judgment_not_jn_per_cell(self) -> None:
         stream = self._hold_stream()
         head = stream.events[0]

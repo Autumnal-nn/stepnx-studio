@@ -184,6 +184,7 @@ class GameplayPreviewWidget(QWidget):
 
         self._paint_timestamps: deque[float] = deque(maxlen=120)
         self._paint_cost_ms = 0.0
+        self._advance_cost_ms = 0.0
         self.setMinimumSize(420, 360)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -223,7 +224,9 @@ class GameplayPreviewWidget(QWidget):
         self._chart_time_ms = float(chart_time_ms)
         self._native_state_time = self._chart_time_ms
         self._native_state = self.stream.native_state_at(self._chart_time_ms)
+        advance_started = perf_counter()
         self.session.advance(self._chart_time_ms)
+        self._advance_cost_ms = (perf_counter() - advance_started) * 1000.0
         self.update()
 
     def set_noteskin_pack(self, pack: LocalNoteskinPack | None) -> None:
@@ -1162,7 +1165,12 @@ class GameplayPreviewWidget(QWidget):
                 f"ACCDEC {self._effective_acc_dec().name}  "
                 f"THROW {self._effective_throw().name}"
             ),
-            f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms",
+            (
+                f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms  "
+                f"ADV {self._advance_cost_ms:6.2f} ms  "
+                f"E/G {self.session.last_advance_event_count}/"
+                f"{self.session.last_advance_group_count}"
+            ),
             (
                 "LOCAL P/G/GD/B/M "
                 f"{stats.perfect}/{stats.great}/{stats.good}/{stats.bad}/{stats.miss}"

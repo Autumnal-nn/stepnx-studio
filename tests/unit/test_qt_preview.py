@@ -325,6 +325,16 @@ class QtGameplayPreviewTests(unittest.TestCase):
         finally:
             widget.close()
 
+    def test_runtime_advance_cost_is_measured_separately_from_paint(self) -> None:
+        widget = self._widget()
+        try:
+            widget.set_playback_time(100.0)
+            self.assertGreaterEqual(widget._advance_cost_ms, 0.0)
+            self.assertIsInstance(widget.session.last_advance_event_count, int)
+            self.assertIsInstance(widget.session.last_advance_group_count, int)
+        finally:
+            widget.close()
+
     def test_event_culling_uses_chart_time_without_mutating_stream(self) -> None:
         widget = self._widget()
         try:

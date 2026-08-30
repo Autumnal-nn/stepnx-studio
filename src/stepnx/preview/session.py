@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -39,7 +40,7 @@ class Judgment(str, Enum):
 JudgmentWindows = NativeJudgeTiming
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class GameplayStats:
     perfect: int = 0
     great: int = 0
@@ -70,6 +71,16 @@ _GRADE_JUDGMENT = {value: key for key, value in _JUDGMENT_RANK.items()}
 
 EventKey = tuple[int, int, int, int]
 GroupKey = tuple[int, int, int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class _AutoplayGroup:
+    time_ms: float
+    group_key: GroupKey
+    events: tuple[PreviewEvent, ...]
+    event_keys: tuple[EventKey, ...]
+    projection: JudgeUnitProjection | None
+    step_effect_events: tuple[PreviewEvent, ...]
 
 
 class GameplaySession:
@@ -118,13 +129,48 @@ class GameplaySession:
         self._pressed_since: dict[int, float] = {}
         self._errors: dict[EventKey, float | None] = {}
         groups: dict[GroupKey, list[PreviewEvent]] = defaultdict(list)
+        event_group_keys: dict[EventKey, GroupKey] = {}
         for event in stream.events:
-            if self.is_judged_note(event):
-                groups[self.group_key(event)].append(event)
+            if not self.is_judged_note(event):
+                continue
+            event_key = self.event_key(event)
+            group_key = self.group_key(event)
+            groups[group_key].append(event)
+            event_group_keys[event_key] = group_key
         self._groups = {key: tuple(events) for key, events in groups.items()}
+        self._group_event_keys = {
+            group_key: tuple(self.event_key(event) for event in events)
+            for group_key, events in self._groups.items()
+        }
+        self._event_group_keys = event_group_keys
+
+        # Everything needed to project an autoplay Perfect is static for the
+        # lifetime of this session. Precompute it once while loading the chart
+        # instead of repeatedly decoding long-note attributes in the 60-Hz hot
+        # path. This is particularly important for BeatSplit/TickCount 128.
+        self._autoplay_groups = tuple(
+            _AutoplayGroup(
+                time_ms=float(events[0].time_ms),
+                group_key=group_key,
+                events=events,
+                event_keys=self._group_event_keys[group_key],
+                projection=self._project_group(events, Judgment.PERFECT),
+                step_effect_events=tuple(
+                    event for event in events if self.starts_pad_press(event)
+                ),
+            )
+            for group_key, events in self._groups.items()
+        )
+        self._autoplay_group_times = tuple(
+            group.time_ms for group in self._autoplay_groups
+        )
+        self._event_times = tuple(event.time_ms for event in stream.events)
         self._resolved_groups: set[GroupKey] = set()
+        self._autoplay_cursor = 0
         self._event_cursor = 0
         self._miss_cursor = 0
+        self.last_advance_event_count = 0
+        self.last_advance_group_count = 0
 
     @property
     def selected_speed(self) -> float:
@@ -313,8 +359,11 @@ class GameplaySession:
         self._pressed_since.clear()
         self._errors.clear()
         self._resolved_groups.clear()
+        self._autoplay_cursor = 0
         self._event_cursor = 0
         self._miss_cursor = 0
+        self.last_advance_event_count = 0
+        self.last_advance_group_count = 0
 
     def _emit_step_effect(self, event: PreviewEvent, time_ms: float) -> None:
         self.step_effect_history.append(
@@ -424,38 +473,38 @@ class GameplaySession:
         score = add_score_floor_zero(self.stats.score, score_delta)
         self._gauge.apply_grade(grade)
 
+        # This object is read continuously by the renderer. Mutating its slot
+        # fields avoids allocating and garbage-collecting a new dataclass for
+        # every long-body tick while preserving the same public values.
         current = self.stats
-        self.stats = GameplayStats(
-            perfect=current.perfect + (grade == 0),
-            great=current.great + (grade == 1),
-            good=current.good + (grade == 2),
-            bad=current.bad + (grade == 3),
-            miss=current.miss + (grade == 4),
-            combo=self._bank_combos[3],
-            max_combo=max(current.max_combo, self._bank_max_combos[3]),
-            score=score,
-            gauge=self._gauge.life,
-        )
+        current.perfect += grade == 0
+        current.great += grade == 1
+        current.good += grade == 2
+        current.bad += grade == 3
+        current.miss += grade == 4
+        current.combo = self._bank_combos[3]
+        current.max_combo = max(current.max_combo, self._bank_max_combos[3])
+        current.score = score
+        current.gauge = self._gauge.life
 
     def _finalize_group(self, group_key: GroupKey) -> None:
         if group_key in self._resolved_groups:
             return
         events = self._groups[group_key]
-        if any(self.event_key(event) not in self.judgments for event in events):
+        event_keys = self._group_event_keys[group_key]
+        if any(key not in self.judgments for key in event_keys):
             return
         judgment = max(
-            (self.judgments[self.event_key(event)] for event in events),
+            (self.judgments[key] for key in event_keys),
             key=_JUDGMENT_RANK.__getitem__,
         )
         representative = events[0]
-        judged_at = max(
-            self.judged_at_ms[self.event_key(event)] for event in events
-        )
+        judged_at = max(self.judged_at_ms[key] for key in event_keys)
         worst_errors = [
-            self._errors[self.event_key(event)]
-            for event in events
-            if self.judgments[self.event_key(event)] is judgment
-            and self._errors[self.event_key(event)] is not None
+            self._errors[key]
+            for key in event_keys
+            if self.judgments[key] is judgment
+            and self._errors.get(key) is not None
         ]
         self._resolved_groups.add(group_key)
         self.judgment_history.append((judged_at, representative))
@@ -480,7 +529,46 @@ class GameplaySession:
         judged_at = self.time_ms if judged_at_ms is None else float(judged_at_ms)
         self.judged_at_ms[key] = judged_at
         self._errors[key] = error_ms
-        self._finalize_group(self.group_key(event))
+        self._finalize_group(
+            self._event_group_keys.get(key, self.group_key(event))
+        )
+
+    def _record_autoplay_group(
+        self, group: _AutoplayGroup, judged_at_ms: float
+    ) -> None:
+        """Record one predecoded autoplay group without per-cell finalization.
+
+        Ordinary runtime still exposes one judgment entry per cell. The fast
+        path only removes redundant structural work: all members are known to
+        receive the same Perfect grade, so the group can be finalized exactly
+        once instead of once after every inserted body tick.
+        """
+
+        if group.group_key in self._resolved_groups:
+            return
+        if any(key in self.judgments for key in group.event_keys):
+            # Autoplay toggled on after partial manual interaction. Preserve the
+            # generic mixed-state behavior rather than overwriting prior grades.
+            for event, key in zip(group.events, group.event_keys):
+                if key not in self.judgments:
+                    self._record_event(
+                        event,
+                        Judgment.PERFECT,
+                        0.0,
+                        judged_at_ms=judged_at_ms,
+                    )
+            return
+
+        for key in group.event_keys:
+            self.judgments[key] = Judgment.PERFECT
+            self.judged_at_ms[key] = float(judged_at_ms)
+        self._resolved_groups.add(group.group_key)
+        representative = group.events[0]
+        self.judgment_history.append((float(judged_at_ms), representative))
+        self.last_judgment = Judgment.PERFECT
+        self.last_error_ms = 0.0
+        if group.projection is not None:
+            self._apply_native_postprocess(group.projection)
 
     def _held_at(self, event: PreviewEvent) -> bool:
         pressed_at = self._pressed_since.get(event.lane)
@@ -493,29 +581,41 @@ class GameplaySession:
         previous_time = self.time_ms
         self._advance_speed(previous_time, time_ms)
         self.time_ms = time_ms
-        events = self.stream.events
+        self.last_advance_event_count = 0
+        self.last_advance_group_count = 0
 
+        if self.autoplay:
+            groups = self._autoplay_groups
+            while self._autoplay_cursor < len(groups):
+                group = groups[self._autoplay_cursor]
+                if group.time_ms > time_ms:
+                    break
+                self._autoplay_cursor += 1
+                self.last_advance_group_count += 1
+                self.last_advance_event_count += len(group.events)
+                self._record_autoplay_group(group, group.time_ms)
+                if (
+                    group.time_ms > previous_time
+                    and group.time_ms >= time_ms - 250.0
+                ):
+                    for event in group.step_effect_events:
+                        self._emit_step_effect(event, group.time_ms)
+
+            # Every eligible past group is already Perfect. Running the manual
+            # miss cursor here used to traverse the same dense body stream a
+            # second time just to rediscover those dictionary entries.
+            return
+
+        events = self.stream.events
         while self._event_cursor < len(events):
             event = events[self._event_cursor]
             if event.time_ms > time_ms:
                 break
             self._event_cursor += 1
+            self.last_advance_event_count += 1
             if not self.is_judged_note(event):
                 continue
-            if self.autoplay:
-                self._record_event(
-                    event,
-                    Judgment.PERFECT,
-                    0.0,
-                    judged_at_ms=event.time_ms,
-                )
-                if (
-                    self.starts_pad_press(event)
-                    and event.time_ms > previous_time
-                    and event.time_ms >= time_ms - 250.0
-                ):
-                    self._emit_step_effect(event, event.time_ms)
-            elif event.note_type in (0xB, 0xF) and self._held_at(event):
+            if event.note_type in (0xB, 0xF) and self._held_at(event):
                 self._record_event(
                     event,
                     Judgment.PERFECT,
@@ -564,6 +664,18 @@ class GameplaySession:
 
     def toggle_autoplay(self) -> bool:
         self.autoplay = not self.autoplay
+        if self.autoplay:
+            # Do not retroactively Perfect notes from the manual past, but keep
+            # a group exactly at the toggle timestamp eligible for the next tick.
+            self._autoplay_cursor = bisect_left(
+                self._autoplay_group_times, self.time_ms
+            )
+        else:
+            # Autoplay already resolved everything through the current time.
+            # Start manual cursors at the first future / not-yet-expired event.
+            self._event_cursor = bisect_right(self._event_times, self.time_ms)
+            miss_cutoff = self.time_ms - self.windows.late_limit_ms
+            self._miss_cursor = bisect_left(self._event_times, miss_cutoff)
         return self.autoplay
 
     def select_speed(self, digit: int) -> None:
