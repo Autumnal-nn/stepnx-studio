@@ -508,6 +508,7 @@ class TimelineWidget(QAbstractScrollArea):
             )
 
         beat_markers = {marker.row_index: marker for marker in self._layout.beat_markers(visible)}
+        deferred_hold_heads: list[tuple[int, float, float, bytes]] = []
         for row_index in range(visible.first_row, visible.last_row):
             y = segment.y_for_row(row_index)
             if self._waveform is not None and segment.block.bpm > 0 and segment.block.beat_split > 0:
@@ -565,7 +566,20 @@ class TimelineWidget(QAbstractScrollArea):
                 for lane in range(row.cell_count):
                     cell = row.cell(lane) if isinstance(row, PackedNoteRow) else row.cells[lane]
                     if cell.note_type:
-                        self._draw_note(painter, lane, y, segment.row_height, cell.raw)
+                        if cell.note_type == 0x7:
+                            deferred_hold_heads.append(
+                                (lane, y, segment.row_height, cell.raw)
+                            )
+                        else:
+                            self._draw_note(
+                                painter, lane, y, segment.row_height, cell.raw
+                            )
+
+        # Hold heads are the top terminal layer. This matters when BeatSplit is
+        # high enough that head/body/tail artwork overlaps into one tap-sized
+        # silhouette, as in Fiesta 2 EF1299.
+        for lane, y, row_height, raw in deferred_hold_heads:
+            self._draw_note(painter, lane, y, row_height, raw)
 
         painter.setPen(QColor("#303641"))
         for lane in range(self._snapshot.columns + 1):

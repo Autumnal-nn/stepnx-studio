@@ -219,6 +219,11 @@ def _speed_parameter(value: float) -> float:
     return value
 
 
+LEGACY_DIRECT_HEADER_SPEED_PROFILES = frozenset(
+    {"nxa-native", "fiesta2", "prime2", "nxa-step5-patched"}
+)
+
+
 def _judge_parameter(value: int) -> tuple[float, float]:
     """Port the R!SE decimal ID-65 decoder without consuming it in judgments yet."""
 
@@ -404,3 +409,35 @@ def apply_step_params(
         result = replace(result, speed=result.speed * value_f)
 
     return result
+
+
+def apply_header_step_params(
+    params: tuple[StepParam, ...],
+    profile: str,
+    base: EffectiveModifier | None = None,
+) -> EffectiveModifier:
+    """Apply Header params using the selected engine family's Speed semantics.
+
+    R!SE's ApplyStepParamToMod normalizes Header 0 by 0.25 for float values in
+    0..255. Prime/Fiesta-era NX20 charts serialize the *final* speed multiplier
+    as an IEEE-754 float instead. Corpus examples include 2.80, 3.66, 4.35 and
+    5.50, so applying R!SE's quarter-speed conversion to those profiles turns
+    EF1299's authored 4.0 into the erroneous 1.0x seen in preview.
+
+    Header 1111 remains downstream: the direct legacy Header-0 value is placed
+    into the base modifier first, then the recovered dispatcher handles all
+    remaining fields and multiplies speed by 1111 in its native order.
+    """
+
+    allow_mid = profile == "nxa-step5-patched"
+    if profile not in LEGACY_DIRECT_HEADER_SPEED_PROFILES:
+        return apply_step_params(params, base, allow_mid=allow_mid)
+
+    speed = _present_float(params, 0)
+    if speed is None:
+        return apply_step_params(params, base, allow_mid=allow_mid)
+
+    result = EffectiveModifier() if base is None else base
+    result = replace(result, speed=float(speed))
+    without_speed = tuple(param for param in params if param.metadata_id != 0)
+    return apply_step_params(without_speed, result, allow_mid=allow_mid)

@@ -7,7 +7,11 @@ from math import isfinite
 
 from stepnx.core.model import NoteRow, PackedNoteRow
 from stepnx.core.validation import Severity
-from stepnx.preview.modifiers import EffectiveModifier, StepParam, apply_step_params
+from stepnx.preview.modifiers import (
+    EffectiveModifier,
+    StepParam,
+    apply_header_step_params,
+)
 from stepnx.preview.native_timing import (
     NativeTimingProjection,
     NativeTimingState,
@@ -335,10 +339,10 @@ class RuntimeEventStream:
         """
 
         base = EffectiveModifier(speed=float(speed))
-        return apply_step_params(
+        return apply_header_step_params(
             self.header_step_params,
+            self.profile,
             base,
-            allow_mid=self.profile == "nxa-step5-patched",
         )
 
     def with_randomized_lanes(self, *, seed: int) -> RuntimeEventStream:

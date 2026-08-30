@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from dataclasses import replace
 from pathlib import Path
 
@@ -30,7 +31,7 @@ except ImportError as exc:
 else:
     QT_UNAVAILABLE = ""
 
-from tests.fixture_factory import make_large_lightmap
+from tests.fixture_factory import make_large_lightmap, make_normal_nx20
 
 
 @unittest.skipIf(QApplication is None, f"Qt runtime unavailable: {QT_UNAVAILABLE}")
@@ -164,6 +165,47 @@ class QtViewportSmokeTests(unittest.TestCase):
             )
         finally:
             widget.close()
+
+    def test_collapsed_long_draws_head_as_top_terminal_in_editor(self) -> None:
+        document = parse_bytes(
+            make_normal_nx20(), source="short-long.NX", row_storage="rich"
+        )
+        split = document.splits[0]
+        block = split.blocks[0]
+        row = block.rows[0]
+        cells = list(row.cells)
+        cells[0] = replace(cells[0], raw=bytes((0x07, 0x03, 0, 0)))
+        cells[3] = replace(cells[3], raw=bytes((0x0F, 0x03, 0, 0)))
+        row = replace(row, cells=tuple(cells))
+        block = replace(block, rows=(row,) + tuple(block.rows[1:]))
+        document = replace(document, splits=(replace(split, blocks=(block,)),))
+        widget = TimelineWidget(create_authoring_snapshot(document))
+        try:
+            widget.resize(640, 360)
+            visible = widget._layout.visible_segments(
+                0.0, float(widget.viewport().height()), overscan_rows=2
+            )[0]
+            image = QImage(widget.viewport().size(), QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            order = []
+            original = widget._draw_note
+
+            def record(painter_arg, lane, y, row_height, raw):
+                order.append(raw[0] & 0x0F)
+                return original(painter_arg, lane, y, row_height, raw)
+
+            try:
+                with patch.object(widget, "_draw_note", side_effect=record):
+                    widget._draw_segment(painter, visible)
+            finally:
+                painter.end()
+            self.assertIn(0x0F, order)
+            self.assertEqual(order[-1], 0x07)
+            self.assertLess(order.index(0x0F), order.index(0x07))
+        finally:
+            widget.close()
+
 
     def test_hold_terminals_meet_their_per_column_silhouettes(self) -> None:
         document = parse_bytes(

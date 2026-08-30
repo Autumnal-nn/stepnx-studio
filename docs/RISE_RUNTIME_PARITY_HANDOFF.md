@@ -447,3 +447,7 @@ The dormant R!SE Snake 20-unit helper is deliberately **not** accepted as behavi
 - Exceed correction: the recovered linear `d` is now shared by X and Y, removing the residual R!SE vertical-scale mismatch seen in EF029.
 
 - Prime/NXA playfield geometry is now explicit: 50-unit lane pitch, 60-unit legacy path measure and 64-unit note quad, with Single/Double/Versus/Centered layouts and active-block Division 200 projection. Five-column launch defaults to Centered; six/ten-column launch defaults to Double.
+
+- Prime/Fiesta/NXA Header Metadata 0 is an already-final IEEE-754 speed multiplier, not R!SE's quarter-normalized Header 0. EF1299 stores `4.0` (`0x40800000`), and the local corpora contain non-quarter values such as `2.80`, `3.66`, `4.35`, and `5.50`; legacy preview launch must therefore use the float directly before downstream Header 1111 multiplication.
+- Hold-terminal z-order is intentionally head-last in both authoring and gameplay renderers. Dense high-BeatSplit charts use very short holds as tap-like visuals; when head/tail artwork overlaps, the head must remain the visible top terminal.
+- EF1299 paint cost is now stable near the user's ~2 ms after body and shaft culling. Remaining temporary ~20 fps drops in BeatSplit/TickCount-128 sections occur with paint staying low and therefore point to GameplaySession judgment/tick processing rather than anticipatory rendering.

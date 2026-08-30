@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from stepnx.authoring.semantics import ConditionClause, DivisionTrigger, project_routes
 from stepnx.core.model import NX20Document, Row
 from stepnx.core.validation import Severity, validate
-from stepnx.preview.modifiers import EffectiveModifier, StepParam, apply_step_params
+from stepnx.preview.modifiers import (
+    EffectiveModifier,
+    StepParam,
+    apply_header_step_params,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,10 +84,10 @@ class PreviewSnapshot:
     ) -> EffectiveModifier:
         """Apply Header StepParams with profile-gated Metadata 32 extensions."""
 
-        return apply_step_params(
+        return apply_header_step_params(
             self.header_step_params,
+            self.profile,
             base,
-            allow_mid=self.profile == "nxa-step5-patched",
         )
 
 

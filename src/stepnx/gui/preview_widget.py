@@ -917,7 +917,13 @@ class GameplayPreviewWidget(QWidget):
     ) -> None:
         self._draw_hold_shafts(painter, geometry.note_size, visibility_filter)
         notes = self._visible_render_events() if visible_notes is None else visible_notes
-        for note in notes:
+        # Prime-era charts deliberately use very short high-tick holds as
+        # tap-like ornaments. Preserve chronological order inside each layer,
+        # but draw every head last so a collapsed head/tail pair reads as head.
+        ordered_notes = tuple(note for note in notes if note.note_type != 0x7) + tuple(
+            note for note in notes if note.note_type == 0x7
+        )
+        for note in ordered_notes:
             if self._effective_visibility(note) != int(visibility_filter):
                 continue
             key = self.session.event_key(note)

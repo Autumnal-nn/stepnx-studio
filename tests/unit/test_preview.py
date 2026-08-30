@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import unittest
 from dataclasses import replace
 from math import isnan
@@ -64,6 +65,54 @@ class PreviewSnapshotTests(unittest.TestCase):
         self.assertTrue(
             any(item.code == "preview.lightmap" for item in snapshot.diagnostics)
         )
+
+
+class LegacyHeaderSpeedTests(unittest.TestCase):
+    @staticmethod
+    def _f32_bits(value: float) -> int:
+        return struct.unpack("<I", struct.pack("<f", value))[0]
+
+    def test_prime_family_header_zero_is_direct_float_and_overrides_launch_speed(self) -> None:
+        for profile in ("nxa-native", "fiesta2", "prime2", "nxa-step5-patched"):
+            with self.subTest(profile=profile):
+                document = parse_bytes(
+                    make_normal_nx20(),
+                    source="EF1299.NX",
+                    profile=profile,
+                    row_storage="compact",
+                )
+                document = InsertMetadata.from_ints(
+                    document.stable_id, 0, self._f32_bits(4.0)
+                ).apply(document)
+                snapshot = create_preview_snapshot(document)
+                route = resolve_route(snapshot, RoutePolicy.MANUAL)
+                stream = build_event_stream(snapshot, route)
+                session = GameplaySession(
+                    stream,
+                    parse_gameplay_command("").with_speed(9),
+                    autoplay=True,
+                )
+                self.assertEqual(session.selected_speed, 4.0)
+                self.assertEqual(session.runtime_modifier.speed, 4.0)
+
+    def test_prime_family_preserves_non_quarter_header_speed_values(self) -> None:
+        document = parse_bytes(
+            make_normal_nx20(),
+            source="Prime.NX",
+            profile="prime2",
+            row_storage="compact",
+        )
+        document = InsertMetadata.from_ints(
+            document.stable_id, 0, self._f32_bits(4.35)
+        ).apply(document)
+        snapshot = create_preview_snapshot(document)
+        route = resolve_route(snapshot, RoutePolicy.MANUAL)
+        session = GameplaySession(
+            build_event_stream(snapshot, route),
+            parse_gameplay_command("").with_speed(1),
+            autoplay=True,
+        )
+        self.assertAlmostEqual(session.selected_speed, 4.35, places=5)
 
 
 class GameplayCommandTests(unittest.TestCase):

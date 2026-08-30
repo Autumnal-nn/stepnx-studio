@@ -123,7 +123,7 @@ class RiseVisualSpeedTests(unittest.TestCase):
         self.assertAlmostEqual(stream.position_at(62.5), 0.125)
         self.assertAlmostEqual(stream.beat_distance_at(event, 62.5), 0.125)
 
-    def test_header_speed_is_applied_after_launch_speed(self) -> None:
+    def test_legacy_header_speed_is_applied_after_launch_speed(self) -> None:
         document = parse_bytes(make_normal_nx20(), source="NM.NX")
         document = InsertMetadata.from_ints(
             document.stable_id, 1111, _f32_bits(1.5)
@@ -138,8 +138,9 @@ class RiseVisualSpeedTests(unittest.TestCase):
         ).apply(document)
         snapshot = create_preview_snapshot(document)
         stream = build_event_stream(snapshot, resolve_route(snapshot, RoutePolicy.MANUAL))
-        # ID 0 decodes 12 -> 3 and replaces the launch speed before 1111 x1.5.
-        self.assertAlmostEqual(stream.modifier_for_launch_speed(9.0).speed, 4.5)
+        # NXA/Fiesta/Prime Header 0 is the final float multiplier. It replaces
+        # the dropdown selection before Header 1111 applies its x1.5 factor.
+        self.assertAlmostEqual(stream.modifier_for_launch_speed(9.0).speed, 18.0)
 
     def test_session_exposes_high_speed_easing_without_rewriting_command_target(self) -> None:
         stream = _single_block_stream(speed=1.0)
