@@ -337,14 +337,41 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 event = replace(widget.stream.events[0], lane=2)
                 # A centred lane is still diagonal: P1 approaches from the
                 # right, P2 from the left.
+                distance = widget._event_beat_distance(event)
+                expected = abs(distance) * widget.session.high_speed * widget._geometry().note_size
                 if widget is p1:
-                    self.assertGreater(widget._event_x_offset(event), 0.0)
+                    self.assertAlmostEqual(widget._event_x_offset(event), expected)
                 else:
-                    self.assertLess(widget._event_x_offset(event), 0.0)
+                    self.assertAlmostEqual(widget._event_x_offset(event), -expected)
         finally:
             p1.close()
             p2.close()
             p2_base.close()
+
+    def test_double_exceed_offsets_native_five_lane_banks_without_clamp(self) -> None:
+        base = self._widget("x")
+        widget = GameplayPreviewWidget(
+            base.stream,
+            columns=10,
+            start_column=0,
+            command=parse_gameplay_command("x"),
+        )
+        try:
+            widget.resize(640, 480)
+            source = widget.stream.events[0]
+            current_position = widget.stream.position_at(widget.chart_time_ms)
+            # Four beats at 2x is deliberately farther than the old half-field
+            # cap, reproducing EF029's off-screen diagonal entry condition.
+            widget.session.select_speed(2)
+            p1 = replace(source, lane=2, native_block_index=-1, position=current_position + 4.0)
+            p2 = replace(source, lane=7, native_block_index=-1, position=current_position + 4.0)
+            expected = 4.0 * widget.session.high_speed * widget._geometry().note_size
+            self.assertGreater(expected, widget._geometry().field_width * 0.5)
+            self.assertAlmostEqual(widget._event_x_offset(p1), expected)
+            self.assertAlmostEqual(widget._event_x_offset(p2), -expected)
+        finally:
+            widget.close()
+            base.close()
 
     def test_throw_projects_depth_instead_of_adding_y_offset(self) -> None:
         sink = self._widget("(")

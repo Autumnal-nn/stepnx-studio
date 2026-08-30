@@ -51,7 +51,9 @@ Prime/NXA identify the `200/-200` branch as **NX Mode**. After the same 1.5 mult
 
 ## Exceed
 
-Prime 2 and the PIUTESTER lineage confirm that Exceed/X Mode is a real horizontal path transform, not a lane permutation. The exact affine coefficient has not yet been recovered strongly enough to call the current 2D projection source-exact. The preview keeps that approximation isolated in `legacy_exceed_x_offset()` rather than contaminating Mirror, Under Attack, Drop, or Random semantics.
+Prime 1's live `path_exeed` flag is the global byte at `0x0AC0255D`; it is set by the historical Exceed path option and consumed directly in the note renderer at `0x0806D3E2..0x0806D426`. The renderer forms `d = beatDistance * 60 * highSpeed`. Native five-lane bank 0 receives `+d`; bank 1 receives `-d` relative to its ordinary bank origin. Single retains the selected player's sign. There is no absolute value, viewport-height normalization, or half-field clamp.
+
+StepNX scales the native 60-unit path pitch by rendered note size and otherwise preserves that signed, unbounded producer exactly. This reproduces EF029/PIUTESTER's diagonal rail, including notes and items entering from well outside the visible field.
 
 ## Implementation boundary
 
@@ -61,7 +63,7 @@ The Studio preview now treats:
 - selectable Sink/Rise as the recovered Prime 2 sine path;
 - R!SE Header Throw as using the historical curve as a compatibility projection because the modern runtime ultimately drives an Animator;
 - path-modified long-note shafts as sampled trajectories rather than straight endpoint rectangles;
-- Exceed as a separately labelled approximation until its exact legacy affine coefficient is recovered.
+- Exceed as the recovered signed Prime/NXA five-lane-bank path, with no viewport clamp.
 
 No proprietary executable bytes or game assets are copied into the repository.
 

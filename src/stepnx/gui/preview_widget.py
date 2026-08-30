@@ -390,20 +390,19 @@ class GameplayPreviewWidget(QWidget):
             offset += prime2_snake_x_offset(beat_distance, geometry.note_size)
 
         if self.command.exceed_mode or self.session.runtime_modifier.exceed:
-            anchor_y = self._base_screen_y_for_beat_distance(beat_distance)
             if self.columns <= 5:
-                # A centred Single field still has one approach side per player:
-                # P1 enters from the right, P2 from the left. StartColumn >= 5 is
-                # the only chart-local P2 signal available to standalone preview.
+                # Prime stores one signed bank offset for the selected Single
+                # player. P1 approaches from the right; P2 approaches from left.
                 from_right = self.start_column < 5
             else:
-                centre_lane = (self.columns - 1) / 2.0
-                from_right = event.lane < centre_lane
+                # Double keeps the two native five-lane bank origins: bank 0 gets
+                # +d and bank 1 gets -d. Do not normalize against field width.
+                from_right = event.lane < 5
             offset += legacy_exceed_x_offset(
-                anchor_y - self._receptor_y(),
-                geometry.field_width,
+                beat_distance,
+                self.session.high_speed,
+                geometry.note_size,
                 from_right=from_right,
-                travel_height=float(self.height()),
             )
         return offset
 

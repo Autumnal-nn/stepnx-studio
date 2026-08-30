@@ -376,24 +376,28 @@ prime2_zigzag_lane_position = prime2_snake_path_lane_position
 
 
 def legacy_exceed_x_offset(
-    vertical_pixels: float,
-    field_width: float,
+    beat_distance: float,
+    high_speed: float,
+    note_size: float,
     *,
     from_right: bool,
-    travel_height: float,
 ) -> float:
-    """Approximate the historical Exceed diagonal path.
+    """Port Prime/NXA's historical Exceed diagonal path.
 
-    Prime 2 and Andamiro's own modifier documentation confirm the semantic path:
-    notes approach the receptors diagonally from the opposite player's side.
-    The exact legacy affine coefficient has not yet been recovered from either
-    Prime 2 or PIUTESTER. Keep the approximation isolated here so it cannot be
-    mistaken for the source-exact Snake/Sink/Rise formulas.
+    Prime's live ``path_exeed`` branch at 0x0806D3E2..0x0806D426 forms
+    ``d = beatDistance * 60 * highSpeed``. The first five-lane bank receives
+    ``+d`` while the second receives ``-d`` relative to its normal bank origin.
+    The value is signed and intentionally unbounded: there is no viewport-height
+    normalization, half-field clamp, or absolute-value step in the runtime.
+
+    StepNX scales Prime's 60-unit lane/path pitch to the rendered note pitch,
+    preserving the original near-45-degree trajectory at native geometry.
     """
 
-    span = max(1.0, abs(float(travel_height)))
-    progress_from_receptor = _clamp01(abs(float(vertical_pixels)) / span)
-    shift = float(field_width) * 0.5 * progress_from_receptor
+    native_distance = (
+        float(beat_distance) * PRIME2_PATH_UNIT * float(high_speed)
+    )
+    shift = native_distance * (float(note_size) / PRIME2_PATH_UNIT)
     return shift if from_right else -shift
 
 

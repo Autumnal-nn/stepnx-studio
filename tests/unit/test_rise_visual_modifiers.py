@@ -33,6 +33,7 @@ from stepnx.preview import (
     create_preview_snapshot,
     earthworm_user_speed,
     legacy_acc_dec_distance,
+    legacy_exceed_x_offset,
     native_acc_dec_offset,
     native_line_local_y,
     native_line_y,
@@ -201,6 +202,33 @@ class RiseLineBaseVisualTests(unittest.TestCase):
         self.assertEqual(PRIME2_SNAKE_AMPLITUDE, 30.0)
         self.assertAlmostEqual(prime2_snake_x_offset(0.5, 60.0), 30.0, places=5)
         self.assertAlmostEqual(prime2_snake_x_offset(1.5, 60.0), -30.0, places=5)
+
+    def test_prime_exceed_uses_signed_unbounded_path_distance(self) -> None:
+        # Prime 1 0x0806D3E2..0x0806D426: d = beat * 60 * highSpeed.
+        self.assertEqual(
+            legacy_exceed_x_offset(1.0, 1.0, 60.0, from_right=True),
+            60.0,
+        )
+        self.assertEqual(
+            legacy_exceed_x_offset(1.0, 1.0, 60.0, from_right=False),
+            -60.0,
+        )
+        self.assertEqual(
+            legacy_exceed_x_offset(2.0, 2.0, 60.0, from_right=True),
+            240.0,
+        )
+        # There is no old half-field clamp: distant notes can originate well
+        # outside the visible playfield and enter along the diagonal rail.
+        self.assertEqual(
+            legacy_exceed_x_offset(10.0, 1.0, 60.0, from_right=True),
+            600.0,
+        )
+        # The producer is signed; post-receptor distance crosses the rail rather
+        # than being forced back to the same side by abs().
+        self.assertEqual(
+            legacy_exceed_x_offset(-1.0, 1.0, 60.0, from_right=True),
+            -60.0,
+        )
 
     def test_prime2_sink_and_rise_are_opposite_z_depths(self) -> None:
         self.assertEqual(PRIME2_THROW_SPAN, 453.0)
