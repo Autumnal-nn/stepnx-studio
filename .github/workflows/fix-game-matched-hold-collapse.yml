@@ -21,8 +21,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Apply hold-collapse patch
-        run: python .github/scripts/fix-gameplay-hold-terminals.py
+      - name: Fix migration anchor and apply hold-collapse patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/fix-gameplay-hold-terminals.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'end = text.index("    def _sync_scrollbars(\\n", start)',
+              'end = text.index("    def _sync_scrollbars(self) -> None:\\n", start)',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+          python .github/scripts/fix-gameplay-hold-terminals.py
       - name: Install Linux Qt runtime libraries
         run: |
           sudo apt-get update
