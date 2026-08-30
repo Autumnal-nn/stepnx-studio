@@ -33,7 +33,7 @@ _FIESTA2_FIELDS = (
     ),
     TrailerFieldDefinition(
         1100,
-        "Localized mission text",
+        "Trailer string field 1100",
         TrailerEvidence.OFFICIAL_CORPUS,
         localized=True,
     ),
