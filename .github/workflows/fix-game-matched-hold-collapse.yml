@@ -21,45 +21,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Apply game-matched hold-collapse patch
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('.github/scripts/fix-gameplay-hold-terminals.py')
-          text = path.read_text(encoding='utf-8')
-          text = text.replace(
-              'end = text.index("    def _sync_scrollbars(\\n", start)',
-              'end = text.index("    def _sync_scrollbars(self) -> None:\\n", start)',
-          )
-          path.write_text(text, encoding='utf-8')
-          PY
-          python .github/scripts/fix-gameplay-hold-terminals.py
-      - name: Make collapsed-hold regression fixture explicit
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('tests/unit/test_qt_viewport.py')
-          text = path.read_text(encoding='utf-8')
-          old = '''        rows = list(block.rows)
-        next_id = document.next_stable_id
-        for index, note_type in enumerate((0x07, 0x0B, 0x0F)):
-'''
-          new = '''        rows = list(block.rows)
-        next_id = document.next_stable_id
-        while len(rows) < 3:
-            row_id = next_id
-            next_id += 1
-            cells = []
-            for lane in range(int(document.columns.value)):
-                cells.append(NoteCell(next_id, bytes(4), None))
-                next_id += 1
-            rows.append(NoteRow(row_id, tuple(cells), None))
-        for index, note_type in enumerate((0x07, 0x0B, 0x0F)):
-'''
-          if old not in text:
-              raise SystemExit('generated collapsed-hold fixture anchor not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
+      - name: Apply game-matched hold collapse
+        run: python .github/scripts/prepare-hold-collapse-stage.py && python .github/scripts/fix-gameplay-hold-terminals.py && python .github/scripts/fix-hold-collapse-test-fixture.py
       - name: Install Linux Qt runtime libraries
         run: |
           sudo apt-get update
@@ -70,11 +33,13 @@ jobs:
         run: python -m pip install -e '.[gui]'
       - name: Run complete repository suite
         run: python -m unittest discover -s tests -v
-      - name: Commit verified hold-collapse fix
+      - name: Commit verified hold collapse
         run: |
           git config user.name 'OpenAI'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/scripts/fix-gameplay-hold-terminals.py
+          git rm .github/scripts/prepare-hold-collapse-stage.py
+          git rm .github/scripts/fix-hold-collapse-test-fixture.py
           git rm .github/workflows/fix-game-matched-hold-collapse.yml
           git add src tests docs
           git diff --cached --check
