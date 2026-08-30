@@ -37,10 +37,10 @@ jobs:
         run: |
           git config user.name 'OpenAI'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/scripts/fix-gameplay-hold-terminals.py
-          git rm .github/scripts/prepare-hold-collapse-stage.py
-          git rm .github/scripts/fix-hold-collapse-test-fixture.py
-          git rm .github/workflows/fix-game-matched-hold-collapse.yml
+          git rm -f .github/scripts/fix-gameplay-hold-terminals.py
+          git rm -f .github/scripts/prepare-hold-collapse-stage.py
+          git rm -f .github/scripts/fix-hold-collapse-test-fixture.py
+          git rm -f .github/workflows/fix-game-matched-hold-collapse.yml
           git add src tests docs
           git diff --cached --check
           git commit -m 'Match legacy collapsed hold rendering'
