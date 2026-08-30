@@ -829,6 +829,29 @@ class GameplayPreviewWidget(QWidget):
             if head.time_ms <= window_end and tail.time_ms >= window_start
         )
 
+    @staticmethod
+    def _hold_shaft_height(
+        y1: float,
+        y2: float,
+        rendered_note_size: float,
+        *,
+        head_terminal_visible: bool,
+        tail_terminal_visible: bool,
+    ) -> float:
+        span = abs(float(y2) - float(y1))
+        # Subpixel endpoint noise must not manufacture a visible long body.
+        if span <= 0.5:
+            return 0.0
+        # When both terminal quads are still present, there is no exposed shaft
+        # until their screen-space silhouettes stop overlapping.
+        if (
+            head_terminal_visible
+            and tail_terminal_visible
+            and span <= max(1.0, float(rendered_note_size))
+        ):
+            return 0.0
+        return span
+
     def _draw_hold_shafts(
         self,
         painter: QPainter,
@@ -857,6 +880,23 @@ class GameplayPreviewWidget(QWidget):
                 )
             centre = (x1 + x2) / 2.0
             rendered_note_size = note_size * scale
+            head_visible = (
+                self.session.event_key(head) not in self.session.judgments
+                or head.time_ms >= self._chart_time_ms - 80.0
+            )
+            tail_visible = (
+                self.session.event_key(tail) not in self.session.judgments
+                or tail.time_ms >= self._chart_time_ms - 80.0
+            )
+            shaft_height = self._hold_shaft_height(
+                y1,
+                y2,
+                rendered_note_size,
+                head_terminal_visible=head_visible,
+                tail_terminal_visible=tail_visible,
+            )
+            if shaft_height <= 0.0:
+                continue
             if (
                 not self._effective_nx_mode()
                 and (max(y1, y2) < -100 or min(y1, y2) > self.height() + 100)
@@ -866,7 +906,7 @@ class GameplayPreviewWidget(QWidget):
                 centre - rendered_note_size / 2,
                 min(y1, y2),
                 rendered_note_size,
-                max(2.0, abs(y2 - y1)),
+                shaft_height,
             )
             bank = (
                 None
@@ -905,7 +945,7 @@ class GameplayPreviewWidget(QWidget):
                             centre - width / 2,
                             min(y1, y2),
                             width,
-                            max(2.0, abs(y2 - y1)),
+                            shaft_height,
                         ),
                         QColor(88, 160, 230, 210),
                     )

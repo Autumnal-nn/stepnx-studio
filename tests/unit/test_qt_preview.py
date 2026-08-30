@@ -137,6 +137,35 @@ class QtGameplayPreviewTests(unittest.TestCase):
                 widget.close()
 
 
+    def test_collapsed_and_overlapping_long_terminals_do_not_fabricate_a_shaft(self) -> None:
+        widget = self._widget()
+        try:
+            size = widget._geometry().note_size
+            self.assertEqual(
+                widget._hold_shaft_height(100.0, 100.0, size, head_terminal_visible=True, tail_terminal_visible=True),
+                0.0,
+            )
+            self.assertEqual(
+                widget._hold_shaft_height(100.0, 100.4, size, head_terminal_visible=True, tail_terminal_visible=True),
+                0.0,
+            )
+            self.assertEqual(
+                widget._hold_shaft_height(100.0, 100.0 + size, size, head_terminal_visible=True, tail_terminal_visible=True),
+                0.0,
+            )
+            self.assertGreater(
+                widget._hold_shaft_height(100.0, 101.0 + size, size, head_terminal_visible=True, tail_terminal_visible=True),
+                0.0,
+            )
+            # If the head has already disappeared during an active sustain, a
+            # short real interval remains drawable instead of losing feedback.
+            self.assertEqual(
+                widget._hold_shaft_height(100.0, 110.0, size, head_terminal_visible=False, tail_terminal_visible=True),
+                10.0,
+            )
+        finally:
+            widget.close()
+
     def test_collapsed_long_draws_head_after_tail_in_gameplay_preview(self) -> None:
         widget = self._widget()
         try:

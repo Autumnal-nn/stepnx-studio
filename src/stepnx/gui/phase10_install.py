@@ -1208,6 +1208,34 @@ def _set_first_start_time(window, value: float):
         QMessageBox.critical(window, "Cannot set chart Start Time", str(exc))
 
 
+def _suspend_follow_chart_for_preview(window) -> None:
+    action = getattr(window, "follow_audio_action", None)
+    if action is None:
+        return
+    if getattr(window, "phase10_follow_chart_restore", None) is None:
+        window.phase10_follow_chart_restore = (
+            bool(action.isChecked()),
+            bool(action.isEnabled()),
+        )
+    action.setChecked(False)
+    action.setEnabled(False)
+
+
+def _restore_follow_chart_after_preview(window) -> None:
+    if getattr(window, "phase10_preview_windows", ()):  # another preview owns it
+        return
+    restore = getattr(window, "phase10_follow_chart_restore", None)
+    if restore is None:
+        return
+    action = getattr(window, "follow_audio_action", None)
+    window.phase10_follow_chart_restore = None
+    if action is None:
+        return
+    checked, enabled = restore
+    action.setChecked(bool(checked))
+    action.setEnabled(bool(enabled))
+
+
 def _open_external_gameplay_preview(window) -> None:
     """Build the external preview directly.
 
@@ -1373,8 +1401,12 @@ def _open_external_gameplay_preview(window) -> None:
     preview.setWindowTitle(f"StepNX Preview — {entry.path.name}")
     preview.setFixedSize(640, 480)
     preview.setWindowState(Qt.WindowState.WindowNoState)
+    # close() must destroy the standalone widget so ownership state is restored
+    # deterministically rather than waiting for Python/Qt object collection.
+    preview.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
     window.phase10_preview_windows.append(preview)
+    _suspend_follow_chart_for_preview(window)
     if not hasattr(window, "phase10_preview_snapshots"):
         window.phase10_preview_snapshots = {}
     window.phase10_preview_snapshots[preview] = metronome_snapshot
@@ -1383,6 +1415,7 @@ def _open_external_gameplay_preview(window) -> None:
         if preview in window.phase10_preview_windows:
             window.phase10_preview_windows.remove(preview)
         window.phase10_preview_snapshots.pop(preview, None)
+        _restore_follow_chart_after_preview(window)
         # Restore metronome context to whichever authoring tab is active.
         try:
             window._active_tab_changed()
@@ -1682,6 +1715,7 @@ def install_phase10(window) -> None:
     window._phase10_installed = True
     window.phase10_show_advanced_timing = False
     window.phase10_preview_windows = []
+    window.phase10_follow_chart_restore = None
     window.phase10_raw_override = None
     window.phase10_source_slot_value = 0
     window.phase10_brain_code_value = 0
