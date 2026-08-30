@@ -1,0 +1,45 @@
+name: Fix game-matched hold collapse
+
+on:
+  push:
+    branches:
+      - audit/rise-visual-command-re
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.head_commit.message == 'Run game-matched hold collapse fix'
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/rise-visual-command-re
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply hold-collapse patch
+        run: python .github/scripts/fix-gameplay-hold-terminals.py
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libpulse0 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+      - name: Install StepNX Studio with GUI dependencies
+        run: python -m pip install -e '.[gui]'
+      - name: Run complete repository suite
+        run: python -m unittest discover -s tests -v
+      - name: Commit verified hold-collapse fix
+        run: |
+          git config user.name 'OpenAI'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/scripts/fix-gameplay-hold-terminals.py
+          git rm .github/workflows/fix-game-matched-hold-collapse.yml
+          git add src tests docs
+          git diff --cached --check
+          git commit -m 'Match legacy collapsed hold rendering'
+          git push origin HEAD:audit/rise-visual-command-re
