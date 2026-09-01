@@ -12,13 +12,24 @@ from tests.fixture_factory import make_normal_nx20
 
 class TrailerRelocationPolicyTests(unittest.TestCase):
     def test_unknown_scalar_that_looks_like_pointer_does_not_block_relocation(self) -> None:
-        document = parse_bytes(make_normal_nx20())
+        document = parse_bytes(make_normal_nx20(), profile="fiesta2")
         entries = list(document.header_metadata)
-        # Point the registered field at the first aligned string and make an
-        # unrelated unknown scalar numerically equal to a later UTF-8 start.
-        entries[-1] = replace(entries[-1], value=RawU32.from_value(0))
-        entries[0] = replace(entries[0], value=RawU32.from_value(12))
-        document = replace(document, header_metadata=tuple(entries))
+        # Use an aligned synthetic trailer pool so this test exercises only the
+        # typed-pointer policy rather than the independent alignment guard.
+        entries[-1] = replace(
+            entries[-1],
+            meta_id=RawU32.from_value((1 << 16) | 1103),
+            value=RawU32.from_value(0),
+            span=None,
+        )
+        entries[0] = replace(entries[0], value=RawU32.from_value(12), span=None)
+        payload = b"condition\x00\x00\x00localized text\x00"
+        marker = RawU32.from_value(len(payload) + 4).raw
+        document = replace(
+            document,
+            header_metadata=tuple(entries),
+            envelope=replace(document.envelope, raw=payload + marker, span=None),
+        )
 
         target = project_trailer_strings(document).strings[0]
         self.assertEqual(target.text, "condition")
