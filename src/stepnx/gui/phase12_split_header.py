@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QMessageBox,
     QSpinBox,
@@ -23,12 +24,14 @@ class SplitSelectionDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Edit Split selection byte")
         self.block_count = int(block_count)
+        self._syncing = False
 
         layout = QVBoxLayout(self)
         explanation = QLabel(
-            "NX20 stores Split selection in one byte. The upper three bits are "
-            "independent selector flags; the lower five bits are the random bank. "
-            "Unusual combinations are preserved and warned about, not normalized.",
+            "NX20 stores Split selection in one byte. Runtime validation shows that "
+            "0x80 takes precedence over 0x40, so the typed controls keep those two "
+            "modes mutually exclusive. The raw field remains authoritative and can "
+            "still represent every byte from 0x00 through 0xFF.",
             self,
         )
         explanation.setWordWrap(True)
@@ -41,8 +44,15 @@ class SplitSelectionDialog(QDialog):
         self.bank = QSpinBox(self)
         self.bank.setRange(0, 31)
         self.bank.setToolTip(
-            "0 = independent/unbanked random event. Non-zero values share the "
-            "random event with matching banks when random selection is active."
+            "0 = independent/unbanked random event. Non-zero values associate "
+            "matching selector events with the same bank."
+        )
+        self.raw_edit = QLineEdit(self)
+        self.raw_edit.setMaxLength(4)
+        self.raw_edit.setToolTip(
+            "Complete raw selector byte. Accepts 0x00..0xFF or decimal 0..255. "
+            "Raw entry may deliberately encode otherwise discouraged combinations "
+            "such as 0xC0."
         )
         self.raw_label = QLabel(self)
         self.warning_label = QLabel(self)
@@ -52,21 +62,20 @@ class SplitSelectionDialog(QDialog):
         form.addRow("Random at trigger:", self.random_trigger)
         form.addRow("Force select:", self.force_select)
         form.addRow("Random bank (0..31):", self.bank)
-        form.addRow("Encoded byte:", self.raw_label)
+        form.addRow("Raw byte:", self.raw_edit)
+        form.addRow("Decoded:", self.raw_label)
         layout.addLayout(form)
         layout.addWidget(self.warning_label)
 
         initial = SplitSelectionByte.from_raw(int(value))
-        self.random_start.setChecked(initial.random_at_start)
-        self.random_trigger.setChecked(initial.random_at_trigger)
-        self.force_select.setChecked(initial.force_select)
-        self.bank.setValue(initial.bank)
+        self._set_controls(initial)
 
-        self.random_start.toggled.connect(self._refresh)
-        self.random_trigger.toggled.connect(self._refresh)
-        self.force_select.toggled.connect(self._refresh)
-        self.bank.valueChanged.connect(self._refresh)
-        self._refresh()
+        self.random_start.toggled.connect(self._start_toggled)
+        self.random_trigger.toggled.connect(self._trigger_toggled)
+        self.force_select.toggled.connect(self._typed_changed)
+        self.bank.valueChanged.connect(self._typed_changed)
+        self.raw_edit.editingFinished.connect(self._raw_changed)
+        self._refresh(update_raw=True)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -75,6 +84,16 @@ class SplitSelectionDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _set_controls(self, selection: SplitSelectionByte) -> None:
+        self._syncing = True
+        try:
+            self.random_start.setChecked(selection.random_at_start)
+            self.random_trigger.setChecked(selection.random_at_trigger)
+            self.force_select.setChecked(selection.force_select)
+            self.bank.setValue(selection.bank)
+        finally:
+            self._syncing = False
 
     @property
     def selection(self) -> SplitSelectionByte:
@@ -85,8 +104,52 @@ class SplitSelectionDialog(QDialog):
             bank=self.bank.value(),
         )
 
-    def _refresh(self, *_args) -> None:
+    def _start_toggled(self, checked: bool) -> None:
+        if self._syncing:
+            return
+        if checked and self.random_trigger.isChecked():
+            self._syncing = True
+            try:
+                self.random_trigger.setChecked(False)
+            finally:
+                self._syncing = False
+        self._refresh(update_raw=True)
+
+    def _trigger_toggled(self, checked: bool) -> None:
+        if self._syncing:
+            return
+        if checked and self.random_start.isChecked():
+            self._syncing = True
+            try:
+                self.random_start.setChecked(False)
+            finally:
+                self._syncing = False
+        self._refresh(update_raw=True)
+
+    def _typed_changed(self, *_args) -> None:
+        if not self._syncing:
+            self._refresh(update_raw=True)
+
+    def _raw_changed(self) -> None:
+        text = self.raw_edit.text().strip()
+        try:
+            value = int(text, 0) if text.lower().startswith("0x") else int(text, 10)
+            selection = SplitSelectionByte.from_raw(value)
+        except (ValueError, TypeError):
+            QMessageBox.warning(
+                self,
+                "Invalid raw selector byte",
+                "Enter 0x00..0xFF or decimal 0..255.",
+            )
+            self._refresh(update_raw=True)
+            return
+        self._set_controls(selection)
+        self._refresh(update_raw=True)
+
+    def _refresh(self, *, update_raw: bool = False) -> None:
         selection = self.selection
+        if update_raw:
+            self.raw_edit.setText(f"0x{selection.raw:02X}")
         self.raw_label.setText(f"0x{selection.raw:02X}  ({selection.mode_label})")
         warnings = selection.warnings(block_count=self.block_count)
         self.warning_label.setText("\n".join(f"Warning: {item}" for item in warnings))
@@ -192,9 +255,6 @@ def install_phase12_split_header(window) -> None:
         return
     window._phase12_split_header_installed = True
 
-    # phase11_workspace connects a lambda that resolves its module-global
-    # _show_tree_context at click time, so wrapping that function extends the
-    # existing context menu instead of creating two menus for one right-click.
     import stepnx.gui.phase11_workspace as workspace_module
 
     previous_show = workspace_module._show_tree_context
@@ -226,7 +286,7 @@ def install_phase12_split_header(window) -> None:
 
     action = QAction("Edit Split selection…", window)
     action.setToolTip(
-        "Edit the complete NX20 Split selector byte: random flags, force-select flag, and bank."
+        "Edit the complete NX20 Split selector byte: selector mode, force-select flag, and bank."
     )
     action.triggered.connect(lambda *_args: _edit_split_selection(window))
     window.structure_menu.addAction(action)
