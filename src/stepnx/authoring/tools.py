@@ -27,6 +27,8 @@ class NoteVisibility(IntEnum):
     APPEAR = 1
     VANISH = 2
     VISIBLE = 3
+    RAW_4 = 4
+    RAW_5 = 5
 
 
 _FUNCTION_BITS = {
@@ -49,7 +51,11 @@ def apply_note_modifiers(
     functionality: NoteFunction,
     visibility: NoteVisibility,
 ) -> bytes:
-    """Change orthogonal note flags while preserving type, bank, slot, and BS."""
+    """Change orthogonal note flags while preserving type, bank, slot, and BS.
+
+    RAW_4 and RAW_5 are deliberate lossless aliases observed in official NX20
+    charts. Their runtime behavior is not named here because it is not proven.
+    """
     if len(raw) != 4:
         raise ValueError("an NX20 note requires exactly four bytes")
     if raw[0] & 0x0F == 0:
