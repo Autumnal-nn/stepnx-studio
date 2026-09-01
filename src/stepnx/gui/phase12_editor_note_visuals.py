@@ -6,7 +6,8 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
 
 
-_EDITOR_LOW_ALPHA = 102  # 40%: visible enough to edit, distinct at a glance.
+_EDITOR_LOW_ALPHA = 102  # 40% for Invisible/Hidden editor visibility.
+_EDITOR_TRANSITION_ALPHA = 0  # Appear/Vanish use the full 0%..100% ramp.
 
 
 def _apply_alpha_mask(image: QImage, *, hidden: bool, visibility: int) -> None:
@@ -20,11 +21,11 @@ def _apply_alpha_mask(image: QImage, *, hidden: bool, visibility: int) -> None:
             painter.fillRect(rect, QColor(255, 255, 255, _EDITOR_LOW_ALPHA))
         if visibility in (1, 2):
             gradient = QLinearGradient(0.0, 0.0, 0.0, float(image.height()))
-            if visibility == 1:  # Appear: opaque at top, faint at bottom.
+            if visibility == 1:  # Appear: opaque at top, transparent at bottom.
                 gradient.setColorAt(0.0, QColor(255, 255, 255, 255))
-                gradient.setColorAt(1.0, QColor(255, 255, 255, _EDITOR_LOW_ALPHA))
-            else:  # Vanish: faint at top, opaque at bottom.
-                gradient.setColorAt(0.0, QColor(255, 255, 255, _EDITOR_LOW_ALPHA))
+                gradient.setColorAt(1.0, QColor(255, 255, 255, _EDITOR_TRANSITION_ALPHA))
+            else:  # Vanish: transparent at top, opaque at bottom.
+                gradient.setColorAt(0.0, QColor(255, 255, 255, _EDITOR_TRANSITION_ALPHA))
                 gradient.setColorAt(1.0, QColor(255, 255, 255, 255))
             painter.fillRect(rect, gradient)
     finally:
@@ -69,7 +70,6 @@ def _draw_roll_head(self, painter, lane, y, row_height, raw, rect) -> bool:
         return False
     atlas_lane = (self._snapshot.start_column + lane) % 5
 
-    # Keep the same head/body underlay used by the Phase 11 authoring renderer.
     tile_x, tile_y, tile_width, tile_height = atlas.tile(atlas_lane, 0)
     body_source = QRectF(tile_x, tile_y, tile_width, min(8, tile_height))
     body_target = QRectF(rect.x(), y, rect.width(), max(1.0, row_height))
@@ -95,7 +95,6 @@ def _install_note_renderer() -> None:
         hidden = function == 0x60
         needs_mask = hidden or visibility in (0, 1, 2)
 
-        # Common visible notes can keep the fast path.
         if not ghost_tap and not roll_head and not needs_mask:
             return original_draw(self, painter, lane, y, row_height, raw, rect)
 
@@ -113,8 +112,6 @@ def _install_note_renderer() -> None:
             else:
                 render_raw = raw
                 if ghost_tap:
-                    # A ghost TAP uses normal tap artwork. 0x20 selects the
-                    # roll-head atlas row only when the cell itself is a hold head.
                     changed = bytearray(raw)
                     changed[0] = (changed[0] & ~0x60) | 0x40
                     render_raw = bytes(changed)
@@ -144,8 +141,6 @@ def _install_note_renderer() -> None:
         painter.drawImage(rect, image)
         return True
 
-    # The old single-letter badges were a workaround for indistinguishable
-    # artwork. Keep badges only for still-unidentified raw visibility aliases.
     def draw_unknown_markers(painter, raw, rect) -> None:
         if raw[0] & 0x0F not in (0x3, 0x7):
             return
