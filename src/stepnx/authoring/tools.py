@@ -6,6 +6,7 @@ from enum import Enum, IntEnum
 class NoteTool(str, Enum):
     SELECT = "select"
     TAP = "tap"
+    ROLL = "roll"
     HOLD_HEAD = "hold-head"
     HOLD_BODY = "hold-body"
     HOLD_TAIL = "hold-tail"
@@ -40,6 +41,7 @@ _FUNCTION_BITS = {
 
 _NOTE_TYPES = {
     NoteTool.TAP: 0x3,
+    NoteTool.ROLL: 0x7,
     NoteTool.HOLD_HEAD: 0x7,
     NoteTool.HOLD_BODY: 0xB,
     NoteTool.HOLD_TAIL: 0xF,
@@ -82,9 +84,9 @@ def note_tool_raw(
     divisions. Function and visibility are explicit; slot and Brain Shower
     remain separate raw-preserving edits.
 
-    Ordinary authored longs set bit 0x10 (can-hold/sustain). Clearing 0x10 on a
-    Hold Head is the roll/retrigger variant, so the default Hold tools must not
-    emit the old 0x47/0x4B/0x4F roll-family bytes.
+    Ordinary authored longs set bit 0x10 (can-hold/sustain). Roll is the same
+    Hold Head type with 0x10 clear; a dragged Roll also clears 0x10 from its
+    Body/Tail cells in the GUI adapter so it matches official 47/4B/4F runs.
     """
 
     if not 0 <= value <= 0xFF:
