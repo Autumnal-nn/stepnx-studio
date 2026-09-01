@@ -27,8 +27,8 @@ class NoteVisibility(IntEnum):
     APPEAR = 1
     VANISH = 2
     VISIBLE = 3
-    RAW_4 = 4
-    RAW_5 = 5
+    VANISH_LOW = 4
+    APPEAR_LOW = 5
 
 
 _FUNCTION_BITS = {
@@ -44,6 +44,9 @@ _NOTE_TYPES = {
     NoteTool.HOLD_BODY: 0xB,
     NoteTool.HOLD_TAIL: 0xF,
 }
+_HOLD_TOOLS = frozenset(
+    {NoteTool.HOLD_HEAD, NoteTool.HOLD_BODY, NoteTool.HOLD_TAIL}
+)
 
 
 def apply_note_modifiers(
@@ -53,8 +56,9 @@ def apply_note_modifiers(
 ) -> bytes:
     """Change orthogonal note flags while preserving type, bank, slot, and BS.
 
-    RAW_4 and RAW_5 are deliberate lossless aliases observed in official NX20
-    charts. Their runtime behavior is not named here because it is not proven.
+    Visibility 4/5 are the NXA Brain Shower VanishLow/AppearLow encodings.
+    The function-bit edit deliberately preserves 0x10: on long-note cells that
+    bit is the sustain/can-hold flag and is independent from Normal/Bonus/Ghost.
     """
     if len(raw) != 4:
         raise ValueError("an NX20 note requires exactly four bytes")
@@ -77,6 +81,10 @@ def note_tool_raw(
     The value byte is a noteskin bank for taps/holds and an ID for items or
     divisions. Function and visibility are explicit; slot and Brain Shower
     remain separate raw-preserving edits.
+
+    Ordinary authored longs set bit 0x10 (can-hold/sustain). Clearing 0x10 on a
+    Hold Head is the roll/retrigger variant, so the default Hold tools must not
+    emit the old 0x47/0x4B/0x4F roll-family bytes.
     """
 
     if not 0 <= value <= 0xFF:
@@ -86,8 +94,9 @@ def note_tool_raw(
     if tool is NoteTool.ERASE:
         return b"\x00\x00\x00\x00"
     if tool in _NOTE_TYPES:
+        base_flags = 0x50 if tool in _HOLD_TOOLS else 0x40
         return apply_note_modifiers(
-            bytes((0x40 | _NOTE_TYPES[tool], 0x03, value, 0x00)),
+            bytes((base_flags | _NOTE_TYPES[tool], 0x03, value, 0x00)),
             functionality,
             visibility,
         )

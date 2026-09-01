@@ -1,9 +1,10 @@
-# NX20 visibility low-bit corpus audit
+# NX20 visibility low-bit corpus/runtime audit
 
 Date: 2026-09-01
 
 This note records the exhaustive scan of the low three bits of note-cell byte 1
-(`raw[1] & 0x07`) across the supplied NXA, Fiesta 2, and Prime 2 NX20 corpora.
+(`raw[1] & 0x07`) across the supplied NXA, Fiesta 2, and Prime 2 NX20 corpora,
+plus runtime validation in NXA Brain Shower.
 
 The scan excludes EmptyRow markers, Lightmap rows, and type-0 decorated empty
 cells. Counts below therefore refer to actual note cells only.
@@ -16,15 +17,18 @@ cells. Counts below therefore refer to actual note cells only.
 | Fiesta 2 | 137,122 | 22,542 | 172,385 | 3,697,639 | 0 | 0 | 0 | 0 |
 | Prime 2 | 50,998 | 3,532 | 31,188 | 3,635,814 | 0 | 0 | 0 | 0 |
 
-Therefore visibility values 4 and 5 are real official encodings in NXA. No
-visibility 6 or 7 cell exists in any of the three supplied corpora.
+Runtime validation of `STEP/FF704/NO.NX` closes the two NXA-only names:
 
-## Visibility 4
+- visibility `4` = **VanishLow**;
+- visibility `5` = **AppearLow**.
 
-NXA contains 364 V4 cells in 12 files. Every one is:
+Values 6 and 7 have zero occurrences in all three supplied corpora. They were a
+previous speculative extension and are not typed Studio choices.
 
-- Tap (`type 0x3`);
-- function bits `0x20` (Ghost-family encoding).
+## Visibility 4: VanishLow
+
+NXA contains 364 V4 cells in 12 files. Every one is Tap (`type 0x3`) with
+function bits `0x20`.
 
 File counts:
 
@@ -43,13 +47,17 @@ File counts:
 | 9 | `STEP/FFF04/NO.NX` |
 | 6 | `STEP/FFE15/NO.NX` |
 
-This concentration means V4 should not be generalized into a named visibility
-mode merely from its numeric value.
+Runtime example from FF704:
 
-## Visibility 5
+```text
+23 02 03 00  Poker Card Skin: Vanish
+23 04 02 80  Hanafuda Card Skin: VanishLow
+```
 
-NXA contains 1,855 V5 cells in 23 files. Every one has function bits `0x40`
-(Normal). The note-type distribution is:
+## Visibility 5: AppearLow
+
+NXA contains 1,855 V5 cells in 23 files. Every one has function bits `0x40`.
+The note-type distribution is:
 
 | Type | Cells |
 | --- | ---: |
@@ -60,7 +68,7 @@ NXA contains 1,855 V5 cells in 23 files. Every one has function bits `0x40`
 | Hold Tail (`0xF`) | 1 |
 
 The six Hold cells are one complete fixture in `STEP/FF704/NO.NX`, Split 2,
-Block 1, lane 4, rows 120..125 (zero-based split/block/lane indices 1/0/3):
+Block 1, lane 4, rows 120..125:
 
 ```text
 47 05 00 00
@@ -71,14 +79,33 @@ Block 1, lane 4, rows 120..125 (zero-based split/block/lane indices 1/0/3):
 4F 05 00 00
 ```
 
-Representative V5 Division encodings include `42 05 00 C6` and
-`42 05 00 C7`.
+Brain Shower Step G blocks use encodings such as `42 05 00 C6`, confirming
+AppearLow. Ordinary arrows in the same runtime can use Appear, e.g.
+`43 01 00 00`.
+
+The validated FF704 Header metadata is `901=5, 902=1, 903=7`.
+
+## Long-note first-byte correction exposed by FF704
+
+Visibility is independent from the long-note sustain bit. The runtime comparison
+between `37 02 00 00` and `47 05 00 00` resolves the editor's old Roll mistake:
+
+- `37`: Hold Head with bit `0x10` set. It is a sustained long, not Roll.
+- `47`: Hold Head with bit `0x10` clear. It is the Roll/retrigger variant.
+
+Therefore function bits `0x20/0x40/0x60` cannot be used to identify Roll. On
+Hold Head/Body/Tail, bit `0x10` is the independent can-hold/sustain bit. This is
+also consistent with the NX10 importer, whose normal non-roll long conversions
+set `0x10` while roll conversions clear it.
 
 ## Studio policy
 
-- V4 and V5 remain explicit raw/unknown choices. Their runtime names are not
-  proven.
-- V6 and V7 are preserved if encountered through raw editing/round-trip, but are
-  not advertised as typed choices because the supplied official corpora contain
-  zero examples.
-- No raw value is normalized to another visibility value.
+- `VanishLow` and `AppearLow` are typed options only in NXA and NXA-patched
+  profiles. Fiesta/Prime+ do not expose them.
+- Visibility opacity/filter cues are drawn on Tap and Hold Head only. Hold
+  Body/Tail remain 100% visible in the authoring grid; the Head communicates the
+  property for the complete long.
+- V6/V7 are not advertised or assigned names. Raw round-trip remains lossless if
+  such bytes are encountered outside the audited corpus.
+- Roll artwork uses the long-note `0x10` sustain bit, not the function-bit family.
+- No raw visibility value is normalized to another value.

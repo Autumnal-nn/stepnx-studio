@@ -425,7 +425,9 @@ class NoteskinPackTests(unittest.TestCase):
 class NoteToolTests(unittest.TestCase):
     def test_typed_presets_keep_value_and_orthogonal_bytes_explicit(self) -> None:
         self.assertEqual(note_tool_raw(NoteTool.TAP, 5), b"\x43\x03\x05\x00")
-        self.assertEqual(note_tool_raw(NoteTool.HOLD_TAIL, 2), b"\x4f\x03\x02\x00")
+        self.assertEqual(note_tool_raw(NoteTool.HOLD_HEAD, 2), b"\x57\x03\x02\x00")
+        self.assertEqual(note_tool_raw(NoteTool.HOLD_BODY, 2), b"\x5b\x03\x02\x00")
+        self.assertEqual(note_tool_raw(NoteTool.HOLD_TAIL, 2), b"\x5f\x03\x02\x00")
         self.assertEqual(note_tool_raw(NoteTool.ITEM, 23), b"\x41\x03\x17\x00")
         self.assertEqual(note_tool_raw(NoteTool.DIVISION, 4), b"\x02\x03\x04\x00")
         self.assertEqual(note_tool_raw(NoteTool.ERASE), b"\x00\x00\x00\x00")
@@ -439,6 +441,15 @@ class NoteToolTests(unittest.TestCase):
                 NoteVisibility.APPEAR,
             ),
             b"\x23\x01\x05\x00",
+        )
+        self.assertEqual(
+            note_tool_raw(
+                NoteTool.HOLD_HEAD,
+                0,
+                NoteFunction.GHOST,
+                NoteVisibility.VANISH,
+            ),
+            b"\x37\x02\x00\x00",
         )
 
 
