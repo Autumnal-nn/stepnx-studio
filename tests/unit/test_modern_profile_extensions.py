@@ -38,7 +38,7 @@ class ModernProfileExtensionTests(unittest.TestCase):
     def test_step_artist_is_modern_only_trailer_metadata(self) -> None:
         definition = metadata_definition("prime2", MetadataScope.HEADER, 1008)
         self.assertIsNotNone(definition)
-        self.assertEqual(definition.label, "Step Artist (XX and beyond)")
+        self.assertEqual(definition.label, "Step Artist")
         self.assertEqual(definition.kind, ValueKind.TRAILER_OFFSET)
         self.assertFalse(definition.authorable)
         self.assertIsNone(metadata_definition("fiesta2", MetadataScope.HEADER, 1008))
@@ -65,7 +65,7 @@ class ModernProfileExtensionTests(unittest.TestCase):
 
         field = trailer_field_definition("prime2", 1008)
         self.assertIsNotNone(field)
-        self.assertEqual(field.label, "Step Artist (XX and beyond)")
+        self.assertEqual(field.label, "Step Artist")
 
         projection = project_trailer_strings(document)
         target = next(item for item in projection.strings if item.base_field_id == 1008)
