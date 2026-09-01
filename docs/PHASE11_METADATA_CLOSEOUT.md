@@ -4,6 +4,8 @@ Date: 2026-08-26
 
 Status: semantic registry frozen for the Phase 11 merge candidate. Unknown/raw fields listed below are deliberate preservation cases, not missing implementation.
 
+> **2026-09-01 correction:** later executable/LIST/corpus work finalized the Fiesta+ Header 1000..1008 family and supersedes the provisional Header1004/1005/1006 interpretations recorded during Phase 11. The canonical reference is `docs/NX20_HEADER_1000_1008.md`. In that reference, “all” means Fiesta and later; NXA does not use Header IDs 1000+.
+
 ## Evidence policy
 
 StepNX Studio uses three compact public engine-family profiles while keeping stable internal keys for compatibility:
@@ -36,7 +38,7 @@ Important profile-specific rules:
 - GM35/Zigzag is deliberately absent from the NXA registry. No direct Global consumer was demonstrated and the official NXA corpus contains no GM35.
 - GM65 uses the native simplified judgment-window decoder: `A = (750 - value) / 100.0`. This is distinct from the Fiesta-style decoder used by the patched profile.
 - GM900..905 are raw external noteskin references in NXA and are not clamped to the slot number.
-- later-generation Header 1000/1001/1002 fields are not native NXA fields and are therefore not advertised by the NXA profile.
+- The later-generation Header 1000..1008 family is not native NXA metadata and is therefore not advertised by the NXA profile.
 
 ### Division metadata
 
@@ -104,10 +106,15 @@ This is the extended VJ/XJ/UJ-capable behavior and must not leak back into `nxa-
 - GM65 uses the Fiesta decimal judgment-window decoder.
 - GM67 = Judge Hide.
 - GM68 = Judge by Note. Executable/corpus evidence takes precedence over the conflicting legacy note that labeled GM68 Judge Hide.
-- Header1000 = Section; Header1001 = Difficulty; Header1002 = Co-op players. These are later-generation fields, not NXA-native fields.
-- Header1004 = reset gameplay options.
-- Header1005 is strongly inferred as the Fiesta-era Auto Velocity enable flag. Official values are 1, use is almost mutually exclusive with explicit Header0 speed, and the executable exposes `speed_auto_velocity`. Typed creation remains disabled because a direct Header1005 dispatcher xref was not recovered.
-- Header1006 remains unidentified/raw-only.
+- Header1000 = Section. Value 1 is Arcade; values above 1 are version-dependent.
+- Header1001 = Difficulty. Chart levels use 1..50; Fiesta through Fiesta 2 Quest Zone floor difficulty uses the separate 1..8 mission scale.
+- Header1002 = Players, the expected player count. Prime through R!SE expose Arcade values above 1 as Co-Op when Header1000 is 1; R!SE names this field `mpPlayers`.
+- Header1003 = Paired Chart, the Fiesta-series Player 2 companion-chart reference. Later engines retain parser support.
+- Header1004 = New Chart, the `NEW` Select Screen/catalog classification.
+- Header1005 = Lock, marking content restricted to special selection paths such as Quest/Music Train.
+- Header1006 = Another, the Fiesta through Fiesta 2 `Another` Select Screen classification. It is retired after Fiesta 2.
+
+The previous Phase 11 Header1005 Auto Velocity interpretation was a scope collision. Prime 2 does contain a separate same-number gameplay/event ID 1005 in speed/timing code, but Header1005 itself is a boolean Lock/catalog flag. Same-number Header, Split, and Division IDs must never inherit semantics from one another.
 
 ### Per-floor mission parameters
 
@@ -157,12 +164,14 @@ Fiesta 2 uses Division200 extensively as the per-block style override. The NXA S
 ## Prime+ modern family
 
 - Header19 retains the later Random Skin selector family.
-- Header1005 = Auto Velocity using an **absolute final scroll-velocity target**, rather than the Fiesta-era value-1 enable-flag interpretation.
-- Header1007 = Card-only / AM.PASS.
-- Header1008 = **Step Artist (XX and beyond)**. This field is absent from Prime/Prime 2 because the player-visible Step Artist credit was introduced later. In the supplied R!SE dump, the executable names it `mpStepArtist`; all observed Header1008 payloads are trailer-relative offsets and resolve to NUL-terminated UTF-8 Step Artist strings. It is therefore registered in Prime+ as a typed trailer field rather than creating a R!SE-specific profile.
+- Header1004 retains the Fiesta+ New Chart classification.
+- Header1005 = Lock. Prime 2 corpus values are boolean; this is not an absolute Auto Velocity value.
+- Header1006 is a legacy Fiesta/Fiesta 2 Another flag. It is absent from the supplied Prime 2 corpus and should not be offered for Prime-era authoring.
+- Header1007 = AM.PASS for the Prime through XX AM.PASS-exclusive chart classification.
+- Header1008 = **Step Artist** for XX through R!SE. In the supplied R!SE dump, the executable names it `mpStepArtist`; observed Header1008 payloads are trailer-relative offsets resolving to NUL-terminated UTF-8 Step Artist strings.
 - mission difficulty `1101/1201/1301/1401` uses Arcade-comparable chart levels rather than Fiesta's 1..8 mission scale.
 - Fiesta Division11/12 O/X conditions are not demonstrated in supplied Prime 2 Brain charts and Prime 2 mission results omit the O/X result counter. Preserve if encountered but do not offer them for Prime+ authoring.
-- discarded `EF2166_D18_MINAMI` contains placeholder Split IDs 0..4 and Division IDs 1005..1007. These are raw-only discarded-mission fields and must not inherit same-number gameplay semantics.
+- discarded `EF2166_D18_MINAMI` contains placeholder Split IDs 0..4 and Division IDs 1005..1007. These are raw-only discarded-mission fields and must not inherit same-number Header semantics.
 
 The R!SE corpus does not justify a separate profile: no new Split IDs, Division IDs, select modes, Brain values, padding semantics, Block flags, or note-cell families were observed relative to the modern baseline.
 
@@ -203,7 +212,8 @@ The semantic registry has no research blocker for merge. Remaining unknowns are 
 
 - NXA Brain Div43..49;
 - Fiesta 2 Split11/12;
-- Fiesta 2 Header1006;
 - Prime 2 discarded placeholder Split/Division fields.
+
+Header1000..1008 is no longer on the unresolved list; the finalized family is documented in `docs/NX20_HEADER_1000_1008.md`.
 
 They do not require invented labels or further reverse engineering for the current editor release. The final merge gate remains the strict Windows test gate plus manual closed-alpha smoke testing of the packaged build.
