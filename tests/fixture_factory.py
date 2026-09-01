@@ -127,3 +127,21 @@ def make_large_lightmap(*, rows: int = 267_264) -> bytes:
     data += u32(rows)
     data += b"\x01\x00\x00\x00" * rows
     return bytes(data)
+
+
+def make_large_playable(*, rows: int = 200_000) -> bytes:
+    """Large compact playable chart used to guard sparse edit latency."""
+
+    data = bytearray(b"NX20")
+    data += u32(0) + u32(5) + u32(0)
+    data += metadata()
+    data += u32(1)
+    data += b"\x00\x00\x00\x00"
+    data += metadata()
+    data += u32(1)
+    data += f32(0.0) + f32(120.0) + f32(0.5) + f32(0.0) + f32(1.0)
+    data += bytes((4, 4, 0, 0))
+    data += metadata()
+    data += u32(rows)
+    data += b"\x80\x00\x00\x00" * rows
+    return bytes(data)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from time import perf_counter
 
 from stepnx.authoring import (
     CellSelection,
@@ -16,7 +17,8 @@ from stepnx.authoring import (
 )
 from stepnx.codecs.nx20 import parse_bytes
 from stepnx.core.commands import SetNoteAt
-from tests.fixture_factory import make_normal_nx20
+from stepnx.core.model import OverlayRows
+from tests.fixture_factory import make_large_playable, make_normal_nx20
 
 
 class CellSelectionTests(unittest.TestCase):
@@ -148,6 +150,32 @@ class BulkSelectionTests(unittest.TestCase):
                 edited.cells[lane].raw,
                 bytes((0x60 | note_type, 0x01, lane, 0xA0)),
             )
+
+    def test_fifty_note_copy_and_paste_stays_sparse_on_a_large_chart(self) -> None:
+        document = parse_bytes(
+            make_large_playable(rows=200_000), row_storage="compact"
+        )
+        rows = document.splits[0].blocks[0].rows
+        selection = CellSelection(
+            frozenset(
+                CellTarget(rows[index].stable_id, 0)
+                for index in range(100_000, 100_050)
+            )
+        )
+
+        started = perf_counter()
+        source = set_selection_raw(selection, b"\x43\x03\x00\x00").apply(document)
+        clipboard = copy_selection(source, selection)
+        command, _ = paste_clipboard(
+            source, clipboard, CellTarget(rows[150_000].stable_id, 1)
+        )
+        pasted = command.apply(source)
+        elapsed = perf_counter() - started
+
+        pasted_rows = pasted.splits[0].blocks[0].rows
+        self.assertIsInstance(pasted_rows, OverlayRows)
+        self.assertEqual(len(pasted_rows.replacements), 100)
+        self.assertLess(elapsed, 1.0)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QFontDatabase,
     QImage,
     QLinearGradient,
     QKeyEvent,
@@ -1196,30 +1197,25 @@ class GameplayPreviewWidget(QWidget):
             elapsed = self._paint_timestamps[-1] - self._paint_timestamps[0]
             if elapsed > 0.0:
                 fps = (len(self._paint_timestamps) - 1) / elapsed
-        lines = (
+        system_lines = (
+            f"TIME {self._chart_time_ms:10.3f} ms  POS {position:9.3f}",
+            f"BLOCK {speed_factor:7.3f}  HIGH {self.session.high_speed:7.3f}",
             (
-                f"TIME {self._chart_time_ms:10.3f} ms   POS {position:9.3f}  "
-                f"BLOCK {speed_factor:7.3f}  HIGH {self.session.high_speed:7.3f}"
-            ),
-            (
-                f"SPEEDMODE {self.session.speed_mode.name}  "
+                f"SPEED {self.session.speed_mode.name}  "
                 f"ACCDEC {self._effective_acc_dec().name}  "
                 f"THROW {self._effective_throw().name}"
             ),
             (
                 f"RENDER {fps:6.1f} fps  PAINT {self._paint_cost_ms:6.2f} ms  "
+            ),
+            (
                 f"ADV {self._advance_cost_ms:6.2f} ms  "
                 f"HOST {self._host_paint_cost_ms:6.2f} ms  "
                 f"E/G {self.session.last_advance_event_count}/"
                 f"{self.session.last_advance_group_count}"
             ),
             (
-                "LOCAL P/G/GD/B/M "
-                f"{stats.perfect}/{stats.great}/{stats.good}/{stats.bad}/{stats.miss}"
-            ),
-            f"LOCAL COMBO {stats.combo}  MAX {stats.max_combo}  SCORE {stats.score}",
-            (
-                f"LOCAL GAUGE {stats.gauge}/{self.session.gauge_limit}  "
+                f"GAUGE {stats.gauge}/{self.session.gauge_limit}  "
                 f"ROUTE {self.stream.route.policy.value}"
             ),
             (
@@ -1232,11 +1228,77 @@ class GameplayPreviewWidget(QWidget):
                 f"PENDING {','.join(self.command.pending_effects) or '-'}"
             ),
         )
-        rect = QRectF(left + 8, 220, width - 16, len(lines) * 20 + 12)
+
+        def bank_counts(index: int) -> str:
+            banks = stats.judgments_by_bank
+            return f"{banks[3][index]} ({banks[0][index]}/{banks[1][index]}/{banks[2][index]})"
+
+        def bank_values(values) -> str:
+            return f"{values[3]} ({values[0]}/{values[1]}/{values[2]})"
+
+        def bank_pairs(current, maximum) -> str:
+            return (
+                f"{current[3]}/{maximum[3]} "
+                f"({current[0]}/{maximum[0]} {current[1]}/{maximum[1]} "
+                f"{current[2]}/{maximum[2]})"
+            )
+
+        grades = [stats.grade_for_bank(bank) for bank in range(4)]
+        ended = self._chart_time_ms >= self.stream.duration_ms
+        clears = [
+            int(ended and grades[bank] != "-" and stats.gauge > 0)
+            for bank in range(4)
+        ]
+        stat_lines = (
+            f"CLEAR {clears[3]} ({clears[0]}/{clears[1]}/{clears[2]})",
+            f"SCORE {bank_values(stats.score_by_bank)}",
+            f"GRADE {grades[3]} ({grades[0]}/{grades[1]}/{grades[2]})",
+            f"PERFECT {bank_counts(0)}",
+            f"GREAT   {bank_counts(1)}",
+            f"GOOD    {bank_counts(2)}",
+            f"BAD     {bank_counts(3)}",
+            f"MISS    {bank_counts(4)}",
+            f"COMBO {bank_pairs(stats.combo_by_bank, stats.max_combo_by_bank)}",
+            (
+                "MISSCOMBO "
+                f"{bank_pairs(stats.miss_combo_by_bank, stats.max_miss_combo_by_bank)}"
+            ),
+            f"HEART    {stats.heart}/{stats.heart_max}",
+            f"BOMB     {stats.bomb}/{stats.bomb_max}",
+            f"POTION   {stats.potion}/{stats.potion_max}",
+            f"VELOCITY {stats.velocity}/{stats.velocity_max}",
+            f"ITEM     {stats.item}/{stats.item_max}",
+            f"HIDDEN   {stats.hidden}/{stats.hidden_max}",
+        )
+
+        line_height = 16
+        panel_height = max(len(system_lines), len(stat_lines)) * line_height + 12
+        panel_top = max(128, self.height() - 34 - panel_height)
+        rect = QRectF(
+            12,
+            panel_top,
+            self.width() - 24,
+            panel_height,
+        )
         painter.fillRect(rect, QColor(0, 0, 0, 205))
+        painter.save()
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        font.setPointSizeF(8.5)
+        painter.setFont(font)
         painter.setPen(QColor("#79ff8c"))
-        for index, line in enumerate(lines):
-            painter.drawText(rect.adjusted(8, 5 + index * 20, -8, 0), line)
+        column_width = (rect.width() - 24) / 2
+        left_rect = QRectF(rect.left() + 8, rect.top() + 5, column_width, rect.height())
+        right_rect = QRectF(
+            rect.left() + 16 + column_width,
+            rect.top() + 5,
+            column_width,
+            rect.height(),
+        )
+        for index, line in enumerate(system_lines):
+            painter.drawText(left_rect.adjusted(0, index * line_height, 0, 0), line)
+        for index, line in enumerate(stat_lines):
+            painter.drawText(right_rect.adjusted(0, index * line_height, 0, 0), line)
+        painter.restore()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.isAutoRepeat():

@@ -137,6 +137,72 @@ class RiseScoreTests(unittest.TestCase):
         self.assertEqual(session.stats.score, 1000)
         self.assertEqual(session.stats.combo, 1)
 
+    def test_debug_stats_keep_judgments_combo_score_and_grade_per_skin(self) -> None:
+        stream = _tap_stream()
+        first = stream.events[0]
+        second = replace(
+            first,
+            time_ms=first.time_ms + 100.0,
+            row_index=first.row_index + 1,
+            raw=bytes((first.raw[0], first.raw[1], first.raw[2], 0x40)),
+        )
+        stream = replace(stream, events=(first, second))
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+
+        session.advance(second.time_ms)
+
+        self.assertEqual(session.stats.judgments_by_bank[0], [1, 0, 0, 0, 0])
+        self.assertEqual(session.stats.judgments_by_bank[1], [1, 0, 0, 0, 0])
+        self.assertEqual(session.stats.judgments_by_bank[3], [2, 0, 0, 0, 0])
+        self.assertEqual(session.stats.combo_by_bank, [1, 1, 0, 2])
+        self.assertEqual(session.stats.max_combo_by_bank, [1, 1, 0, 2])
+        self.assertEqual(session.stats.score_by_bank, [1000, 1000, 0, 2000])
+        self.assertEqual(session.stats.grade_for_bank(3), "S")
+
+    def test_debug_stats_keep_current_and_max_miss_combo_per_skin(self) -> None:
+        stream = _tap_stream()
+        first = stream.events[0]
+        second = replace(
+            first,
+            time_ms=first.time_ms + 10.0,
+            row_index=first.row_index + 1,
+            raw=bytes((first.raw[0], first.raw[1], first.raw[2], 0x40)),
+        )
+        stream = replace(stream, events=(first, second))
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=False)
+
+        session.advance(second.time_ms + session.windows.late_limit_ms + 1.0)
+
+        self.assertEqual(session.stats.miss_combo_by_bank, [1, 1, 0, 2])
+        self.assertEqual(session.stats.max_miss_combo_by_bank, [1, 1, 0, 2])
+
+    def test_debug_stats_count_items_and_piutester_categories(self) -> None:
+        stream = _tap_stream()
+        source = stream.events[0]
+        items = tuple(
+            replace(
+                source,
+                time_ms=source.time_ms + offset,
+                row_index=source.row_index + index,
+                raw=bytes((0x01, 0x03, item_id, 0x00)),
+            )
+            for index, (offset, item_id) in enumerate(
+                ((10.0, 9), (20.0, 6), (30.0, 16), (40.0, 21), (50.0, 4)),
+                start=1,
+            )
+        )
+        stream = replace(stream, events=items)
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+
+        session.advance(items[-1].time_ms)
+
+        self.assertEqual((session.stats.item, session.stats.item_max), (5, 5))
+        self.assertEqual((session.stats.heart, session.stats.heart_max), (1, 1))
+        self.assertEqual((session.stats.bomb, session.stats.bomb_max), (1, 1))
+        self.assertEqual((session.stats.potion, session.stats.potion_max), (1, 1))
+        self.assertEqual((session.stats.velocity, session.stats.velocity_max), (1, 1))
+        self.assertEqual((session.stats.hidden, session.stats.hidden_max), (1, 1))
+
 
 class RiseGaugeTests(unittest.TestCase):
     def test_reset_hp_presets_and_level_limit(self) -> None:
