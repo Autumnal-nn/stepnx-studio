@@ -101,6 +101,14 @@ class Phase10GameplayPreviewWidget(_BaseGameplayPreviewWidget):
         return self._draw_atlas(painter, atlas, column, row, rect)
 
     def _draw_asset(self, painter, event, rect):
+        # Prime 2 (and some related NX20 material) contains decorated empty
+        # cells such as 00 03 00 00.  They are serialized data, not arrows.
+        # Preserve them byte-for-byte in the chart while rendering absolutely
+        # nothing in gameplay preview, matching the editor's note_type == 0
+        # behavior and avoiding a misleading unknown-note fallback tile.
+        if event.raw == b"\x00\x03\x00\x00":
+            return True
+
         pack = getattr(self, "_noteskin_pack", None)
         profile = getattr(getattr(self, "stream", None), "profile", "")
         if (
