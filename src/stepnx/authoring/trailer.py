@@ -9,7 +9,7 @@ from stepnx.core.model import EnvelopeKind, NX20Document
 from stepnx.core.scalars import RawU32
 
 # Phase 7 accepted these corpus-proven offset families before the engine-profile
-# registry existed.  Keep them readable for older/synthetic documents while
+# registry existed. Keep them readable for older/synthetic documents while
 # profile-specific additions such as Fiesta 2 GM20 and GM1003 are resolved by
 # trailer_registry.
 TRAILER_STRING_BASE_IDS = frozenset(
@@ -153,9 +153,9 @@ def _aligned_storage_end(payload: bytes, target: TrailerString) -> int:
     """Return the end of an official aligned string slot or reject relocation.
 
     Later-generation corpus trailers store UTF-8/NUL strings with zero padding
-    to a four-byte boundary.  Same-size edits do not need this invariant, but a
+    to a four-byte boundary. Same-size edits do not need this invariant, but a
     length-changing edit does: preserving a multiple-of-four displacement keeps
-    every later official string boundary aligned.
+    every later proven string boundary aligned.
     """
 
     if target.offset % 4:
@@ -175,27 +175,15 @@ def _aligned_storage_end(payload: bytes, target: TrailerString) -> int:
     return storage_end
 
 
-def _looks_like_unknown_pointer(payload: bytes, value: int) -> bool:
-    if value < 0 or value >= len(payload) or value % 4:
-        return False
-    end = payload.find(b"\x00", value)
-    if end < 0:
-        return False
-    try:
-        payload[value:end].decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    return True
-
-
 @dataclass(frozen=True, slots=True)
 class SetTrailerString:
     """Edit a UTF-8 trailer string, relocating later proven offsets if needed.
 
-    Relocation is intentionally conservative.  It is enabled only for the
-    aligned UTF-8/NUL pool shape observed throughout the supplied Fiesta 2 and
-    Prime 2 corpora.  A header metadata value from an untyped field that looks
-    like a downstream string pointer blocks the edit instead of being guessed.
+    Relocation is intentionally typed, not heuristic. Only fields registered as
+    trailer-string offsets are moved. Unknown metadata remains an opaque scalar,
+    even when its numeric value happens to fall on a NUL-terminated UTF-8 string
+    boundary. The corpus contains such coincidences, so treating every plausible
+    integer as a pointer creates false-positive blockers and invents semantics.
     """
 
     metadata_stable_id: int
@@ -216,24 +204,13 @@ class SetTrailerString:
         replacement = encoded + b"\x00" + b"\x00" * (new_storage_size - len(encoded) - 1)
         delta = new_storage_size - old_storage_size
 
-        # Refuse relocation when an untyped header field plausibly points into
-        # the region that would move.  This is conservative by design: a false
-        # positive costs one edit; a false negative silently corrupts a chart.
-        for entry in document.header_metadata:
-            metadata_id = int(entry.meta_id.value)
-            value = int(entry.value.value)
-            if _is_trailer_string_field(document, metadata_id):
-                continue
-            if value >= old_storage_end and _looks_like_unknown_pointer(payload, value):
-                raise ModelInvariantError(
-                    f"untyped header metadata 0x{metadata_id:08X} may point to trailer offset {value}; relocation is blocked"
-                )
-
         new_payload = payload[: target.offset] + replacement + payload[old_storage_end:]
         new_metadata = []
         for entry in document.header_metadata:
             metadata_id = int(entry.meta_id.value)
             if not _is_trailer_string_field(document, metadata_id):
+                # Unknown fields remain byte-for-byte scalar values. Do not infer
+                # pointer semantics from their numeric range or target bytes.
                 new_metadata.append(entry)
                 continue
             value = int(entry.value.value)
