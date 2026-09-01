@@ -11,10 +11,11 @@ from stepnx.core.scalars import RawU8
 class SplitSelectionByte:
     """Typed projection of the first NX20 Split header byte.
 
-    The upper three bits are independently meaningful selector flags.  The
-    lower five bits are a random-selection bank/group: zero is unbanked, while
-    a non-zero value shares the random event with matching Splits.  The raw byte
-    remains authoritative so uncommon combinations such as 0xC0 round-trip.
+    Runtime validation on official NXA charts shows that 0x80 and 0x40 are
+    selector modes with precedence rather than two composable behaviors:
+    whenever both bits are present, 0x80 wins. The lower five bits are a
+    selection bank/group. The raw byte remains authoritative so malformed or
+    historical combinations such as 0xC0 still round-trip exactly.
     """
 
     random_at_start: bool = False
@@ -49,7 +50,9 @@ class SplitSelectionByte:
         modes: list[str] = []
         if self.random_at_start:
             modes.append("random at start")
-        if self.random_at_trigger:
+            if self.random_at_trigger:
+                modes.append("0x40 also set (overridden)")
+        elif self.random_at_trigger:
             modes.append("random at trigger")
         if self.force_select:
             modes.append("force select")
@@ -66,11 +69,12 @@ class SplitSelectionByte:
             )
         if self.bank and not (self.random_at_start or self.random_at_trigger):
             warnings.append(
-                "A non-zero random bank without either random flag is unusual in the audited corpus."
+                "A non-zero selection bank without either selector mode is unusual in the audited corpus."
             )
         if self.random_at_start and self.random_at_trigger:
             warnings.append(
-                "Both random flags are set (0xC0 family). This is valid and occurs in official charts."
+                "Both 0x80 and 0x40 are encoded. Runtime validation shows that 0x80 overrides 0x40; "
+                "official charts containing this combination include known broken implementations."
             )
         return tuple(warnings)
 
