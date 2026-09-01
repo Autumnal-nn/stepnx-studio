@@ -338,7 +338,7 @@ class NoteskinPackTests(unittest.TestCase):
         pack = load_noteskin_pack(bundled_noteskin_root())
 
         self.assertEqual([bank.bank_id for bank in pack.banks], list(range(6)))
-        self.assertTrue(all(len(bank.animation) == 1 for bank in pack.banks))
+        self.assertTrue(all(len(bank.animation) == 6 for bank in pack.banks))
         self.assertIsNotNone(pack.division)
         self.assertEqual(len(pack.item_animation), 1)
         self.assertIsNone(pack.special_items)
