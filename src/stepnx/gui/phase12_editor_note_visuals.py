@@ -113,7 +113,7 @@ def _install_note_renderer() -> None:
             else:
                 render_raw = raw
                 if ghost_tap:
-                    # A ghost TAP uses normal tap artwork.  0x20 selects the
+                    # A ghost TAP uses normal tap artwork. 0x20 selects the
                     # roll-head atlas row only when the cell itself is a hold head.
                     changed = bytearray(raw)
                     changed[0] = (changed[0] & ~0x60) | 0x40
@@ -145,8 +145,7 @@ def _install_note_renderer() -> None:
         return True
 
     # The old single-letter badges were a workaround for indistinguishable
-    # artwork.  Keep badges only for the still-unidentified raw visibility
-    # aliases 4..7; known modes are now encoded directly in the editor image.
+    # artwork. Keep badges only for still-unidentified raw visibility aliases.
     def draw_unknown_markers(painter, raw, rect) -> None:
         if raw[0] & 0x0F not in (0x3, 0x7):
             return
@@ -167,8 +166,20 @@ def _install_note_renderer() -> None:
     timeline_class._phase12_editor_note_visuals = True
 
 
+def _install_raw_visibility_choices(window) -> None:
+    combo = getattr(window, "visibility_combo", None)
+    if combo is None:
+        return
+    existing = {int(combo.itemData(index)) for index in range(combo.count())}
+    if 4 not in existing:
+        combo.addItem("Raw 4 (unknown runtime meaning)", 4)
+    if 5 not in existing:
+        combo.addItem("Raw 5 (unknown runtime meaning)", 5)
+
+
 def install_phase12_editor_note_visuals(window) -> None:
     if getattr(window, "_phase12_editor_note_visuals_installed", False):
         return
     window._phase12_editor_note_visuals_installed = True
     _install_note_renderer()
+    _install_raw_visibility_choices(window)
