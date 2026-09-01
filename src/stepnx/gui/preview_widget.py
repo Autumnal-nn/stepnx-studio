@@ -1252,7 +1252,7 @@ class GameplayPreviewWidget(QWidget):
         stat_lines = (
             f"CLEAR {clears[3]} ({clears[0]}/{clears[1]}/{clears[2]})",
             f"SCORE {bank_values(stats.score_by_bank)}",
-            f"GRADE {grades[3]} ({grades[0]}/{grades[1]}/{grades[2]})",
+            f"GRADE LOCAL {grades[3]} ({grades[0]}/{grades[1]}/{grades[2]})",
             f"PERFECT {bank_counts(0)}",
             f"GREAT   {bank_counts(1)}",
             f"GOOD    {bank_counts(2)}",
