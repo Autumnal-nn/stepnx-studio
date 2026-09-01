@@ -41,18 +41,18 @@ class SplitSelectionByteTests(unittest.TestCase):
         self.assertEqual(single_block.raw, 0x21)
 
 
-class RawVisibilityAliasTests(unittest.TestCase):
-    def test_modes_four_and_five_remain_explicit_raw_values(self) -> None:
-        self.assertEqual(int(NoteVisibility.RAW_4), 4)
-        self.assertEqual(int(NoteVisibility.RAW_5), 5)
-        raw4 = note_tool_raw(
-            NoteTool.TAP, 0, NoteFunction.NORMAL, NoteVisibility.RAW_4
+class LowVisibilityEncodingTests(unittest.TestCase):
+    def test_nxa_low_visibility_names_keep_exact_values(self) -> None:
+        self.assertEqual(int(NoteVisibility.VANISH_LOW), 4)
+        self.assertEqual(int(NoteVisibility.APPEAR_LOW), 5)
+        vanish_low = note_tool_raw(
+            NoteTool.TAP, 0, NoteFunction.NORMAL, NoteVisibility.VANISH_LOW
         )
-        raw5 = note_tool_raw(
-            NoteTool.TAP, 0, NoteFunction.NORMAL, NoteVisibility.RAW_5
+        appear_low = note_tool_raw(
+            NoteTool.TAP, 0, NoteFunction.NORMAL, NoteVisibility.APPEAR_LOW
         )
-        self.assertEqual(raw4[1] & 0x07, 4)
-        self.assertEqual(raw5[1] & 0x07, 5)
+        self.assertEqual(vanish_low[1] & 0x07, 4)
+        self.assertEqual(appear_low[1] & 0x07, 5)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from stepnx.gui.phase10_preview import _phase10_noteskin_terminal_row
 from stepnx.gui.phase12_editor_note_visuals import (
     _is_roll_head,
     _profile_supports_low_visibility,
@@ -34,6 +35,13 @@ class Phase12EditorLongVisualTests(unittest.TestCase):
         self.assertTrue(_profile_supports_low_visibility("nxa-step5-patched"))
         self.assertFalse(_profile_supports_low_visibility("fiesta2"))
         self.assertFalse(_profile_supports_low_visibility("prime2"))
+
+    def test_preview_uses_normal_art_for_ghost_tap_and_roll_art_for_no_sustain_head(self) -> None:
+        self.assertEqual(_phase10_noteskin_terminal_row(bytes.fromhex("23 04 02 80")), 1)
+        self.assertEqual(_phase10_noteskin_terminal_row(bytes.fromhex("37 02 00 00")), 1)
+        self.assertEqual(_phase10_noteskin_terminal_row(bytes.fromhex("47 05 00 00")), 2)
+        self.assertEqual(_phase10_noteskin_terminal_row(bytes.fromhex("57 03 00 00")), 1)
+        self.assertIsNone(_phase10_noteskin_terminal_row(bytes.fromhex("4B 05 00 00")))
 
 
 if __name__ == "__main__":

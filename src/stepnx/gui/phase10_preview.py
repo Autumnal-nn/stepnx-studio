@@ -8,6 +8,24 @@ from stepnx.preview.geometry import PlayfieldGeometry
 from stepnx.preview.holds import pair_nx20_holds
 
 
+def _phase10_noteskin_terminal_row(raw: bytes) -> int | None:
+    """Return the corrected animated-atlas row for Tap/Hold Head terminals.
+
+    Atlas row 2 is the Roll head. NX20 identifies that long variant by clearing
+    the independent 0x10 sustain/can-hold bit on a Hold Head. Function 0x20 on
+    a Tap is therefore not permission to reuse the Roll artwork.
+    """
+
+    if len(raw) != 4:
+        return None
+    note_type = raw[0] & 0x0F
+    if note_type == 0x3:
+        return 1
+    if note_type == 0x7:
+        return 2 if not (raw[0] & 0x10) else 1
+    return None
+
+
 class Phase10GameplayPreviewWidget(_BaseGameplayPreviewWidget):
     """Phase-10 rendering fixes and NXA-Patched SPECIAL.PNG support."""
 
@@ -144,5 +162,26 @@ class Phase10GameplayPreviewWidget(_BaseGameplayPreviewWidget):
                     painter, atlas, tens_cell, rect
                 )
                 return units or tens
+
+        # Correct the old atlas-row shortcut in the base preview. Ghost Tap
+        # keeps normal tap artwork; Roll is a Hold Head whose 0x10 sustain bit
+        # is clear. Body/Tail remain delegated to the shared renderer.
+        terminal_row = _phase10_noteskin_terminal_row(event.raw)
+        if terminal_row is not None and pack is not None:
+            bank = pack.bank(event.raw[2])
+            if bank is not None and bank.animation:
+                frame = int(max(0.0, self._chart_time_ms) // 80) % len(
+                    bank.animation
+                )
+                atlas_lane = (
+                    self.start_column + self._visual_lane(event.lane)
+                ) % 5
+                return self._draw_atlas(
+                    painter,
+                    bank.animation[frame],
+                    atlas_lane,
+                    terminal_row,
+                    rect,
+                )
 
         return super()._draw_asset(painter, event, rect)
