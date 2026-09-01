@@ -130,7 +130,7 @@ def install_profile_extensions() -> None:
                 (
                     "Fiesta+ chart classification for content restricted to a special "
                     "selection path such as Quest or Music Train. The Header mirrors "
-                    "the catalog classification; it is not the Auto Velocity field."
+                    "the catalog classification; it is not a speed-control field."
                 ),
             ),
             _flag_definition(
@@ -169,8 +169,8 @@ def install_profile_extensions() -> None:
                 "Lock",
                 (
                     "Fiesta+ lock classification. In Prime-era content this marks "
-                    "charts restricted to special selection paths rather than an "
-                    "absolute Auto Velocity target."
+                    "charts restricted to special selection paths rather than a "
+                    "speed-control target."
                 ),
             ),
             _flag_definition(
