@@ -77,6 +77,14 @@ class NoteClipboard:
             raise ValueError("note clipboard cannot be empty")
 
 
+@dataclass(frozen=True, slots=True)
+class _SelectionRectangle:
+    block: Block
+    rows: Sequence[Row]
+    row_ids: tuple[int, ...]
+    lanes: tuple[int, ...]
+
+
 def _compact_row_index(rows: CompactRows | OverlayRows, row_id: int) -> int | None:
     base = rows.base if isinstance(rows, OverlayRows) else rows
     index = bisect_left(base._row_ids, row_id)
@@ -134,6 +142,13 @@ def set_selection_raw(selection: CellSelection, raw: bytes) -> SetNotesAt:
     )
 
 
+def cut_selection(
+    document: NX20Document, selection: CellSelection
+) -> tuple[NoteClipboard, SetNotesAt]:
+    clipboard = copy_selection(document, selection)
+    return clipboard, set_selection_raw(selection, b"\x00\x00\x00\x00")
+
+
 def modify_selection_notes(
     document: NX20Document,
     selection: CellSelection,
@@ -187,35 +202,116 @@ def modify_selection_notes(
     return SetNotesAt(tuple(edits))
 
 
+def _selection_rectangle(
+    document: NX20Document, selection: CellSelection
+) -> _SelectionRectangle:
+    if not selection.targets:
+        raise ValueError("a transform requires a non-empty selection")
+    located = _locate_rows(document, {target.row_id for target in selection.targets})
+    block_ids = {located[target.row_id][0].stable_id for target in selection.targets}
+    if len(block_ids) != 1:
+        raise ValueError("a transform selection cannot cross Block boundaries")
+
+    row_indexes = sorted({located[target.row_id][2] for target in selection.targets})
+    if row_indexes != list(range(row_indexes[0], row_indexes[-1] + 1)):
+        raise ValueError("a transform requires contiguous rows")
+    rows = located[next(iter(selection.targets)).row_id][1]
+    row_ids = tuple(rows[index].stable_id for index in row_indexes)
+
+    lanes = tuple(sorted({target.lane for target in selection.targets}))
+    if lanes != tuple(range(lanes[0], lanes[-1] + 1)):
+        raise ValueError("a transform requires contiguous columns")
+    expected = frozenset(
+        CellTarget(row_id, lane) for row_id in row_ids for lane in lanes
+    )
+    if selection.targets != expected:
+        raise ValueError("a transform requires a rectangular selection")
+    return _SelectionRectangle(
+        located[row_ids[0]][0],
+        rows,
+        row_ids,
+        lanes,
+    )
+
+
+def _transform_selection(
+    document: NX20Document,
+    selection: CellSelection,
+    destination,
+) -> tuple[SetNotesAt, CellSelection]:
+    rectangle = _selection_rectangle(document, selection)
+    located = _locate_rows(document, set(rectangle.row_ids))
+    transformed: dict[CellTarget, bytes] = {}
+    target_map: dict[CellTarget, CellTarget] = {}
+    for row_position, row_id in enumerate(rectangle.row_ids):
+        row = located[row_id][3]
+        for lane_position, lane in enumerate(rectangle.lanes):
+            source = CellTarget(row_id, lane)
+            target_row, target_lane = destination(row_position, lane_position)
+            target = CellTarget(
+                rectangle.row_ids[target_row], rectangle.lanes[target_lane]
+            )
+            transformed[target] = _raw_from_row(document, row, lane)
+            target_map[source] = target
+    if len(transformed) != len(selection.targets):
+        raise ModelInvariantError("selection transform is not a bijection")
+    edits = tuple(
+        NoteEdit(target.row_id, target.lane, raw)
+        for target, raw in sorted(transformed.items())
+    )
+    anchor = target_map.get(selection.anchor) if selection.anchor is not None else None
+    return SetNotesAt(edits), CellSelection(selection.targets, anchor)
+
+
+def flip_horizontal_selection(
+    document: NX20Document, selection: CellSelection
+) -> tuple[SetNotesAt, CellSelection]:
+    rectangle = _selection_rectangle(document, selection)
+    lane_count = len(rectangle.lanes)
+    return _transform_selection(
+        document,
+        selection,
+        lambda row, lane: (row, lane_count - 1 - lane),
+    )
+
+
+def flip_vertical_selection(
+    document: NX20Document, selection: CellSelection
+) -> tuple[SetNotesAt, CellSelection]:
+    rectangle = _selection_rectangle(document, selection)
+    row_count = len(rectangle.row_ids)
+    return _transform_selection(
+        document,
+        selection,
+        lambda row, lane: (row_count - 1 - row, lane),
+    )
+
+
 def mirror_selection(
     document: NX20Document, selection: CellSelection
 ) -> tuple[SetNotesAt, CellSelection]:
-    if not selection.targets:
-        raise ValueError("mirror requires a non-empty selection")
+    rectangle = _selection_rectangle(document, selection)
     columns = int(document.columns.value)
-    located = _locate_rows(document, {target.row_id for target in selection.targets})
-    mirrored = {
-        CellTarget(target.row_id, columns - 1 - target.lane): _raw_from_row(
-            document, located[target.row_id][3], target.lane
+    lanes = rectangle.lanes
+    if len(lanes) == 5 and (
+        (columns == 5 and lanes == tuple(range(5)))
+        or (columns == 10 and lanes in (tuple(range(5)), tuple(range(5, 10))))
+    ):
+        permutation = (3, 4, 2, 0, 1)
+    elif columns == 6 and lanes == tuple(range(6)):
+        permutation = (5, 3, 4, 1, 2, 0)
+    elif columns == 10 and lanes == tuple(range(10)):
+        permutation = (8, 9, 7, 5, 6, 3, 4, 2, 0, 1)
+    else:
+        raise ValueError(
+            "Mirror requires all 5 Single columns, either 5-column pad or all "
+            "10 Double columns, or all 6 Half Double columns"
         )
-        for target in selection.targets
-    }
-    original = set(selection.targets)
-    destinations = set(mirrored)
-    edits = [
-        NoteEdit(target.row_id, target.lane, b"\x00\x00\x00\x00")
-        for target in sorted(original - destinations)
-    ]
-    edits.extend(
-        NoteEdit(target.row_id, target.lane, raw)
-        for target, raw in sorted(mirrored.items())
+    return _transform_selection(
+        document,
+        selection,
+        lambda row, lane: (row, permutation[lane]),
     )
-    new_anchor = None
-    if selection.anchor is not None:
-        new_anchor = CellTarget(
-            selection.anchor.row_id, columns - 1 - selection.anchor.lane
-        )
-    return SetNotesAt(tuple(edits)), CellSelection(frozenset(destinations), new_anchor)
 
 
 def _block_rows_for_target(

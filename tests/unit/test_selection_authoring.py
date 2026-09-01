@@ -9,6 +9,9 @@ from stepnx.authoring import (
     NoteFunction,
     NoteVisibility,
     copy_selection,
+    cut_selection,
+    flip_horizontal_selection,
+    flip_vertical_selection,
     mirror_selection,
     modify_selection_notes,
     paste_clipboard,
@@ -16,7 +19,7 @@ from stepnx.authoring import (
     set_selection_raw,
 )
 from stepnx.codecs.nx20 import parse_bytes
-from stepnx.core.commands import SetNoteAt
+from stepnx.core.commands import NoteEdit, SetNoteAt, SetNotesAt
 from stepnx.core.model import OverlayRows
 from tests.fixture_factory import make_large_playable, make_normal_nx20
 
@@ -51,24 +54,101 @@ class BulkSelectionTests(unittest.TestCase):
         self.assertEqual(row.cells[0].raw, b"\x43\x03\x02\x00")
         self.assertEqual(row.cells[4].raw, b"\x43\x03\x02\x00")
 
-    def test_mirror_moves_raw_notes_and_selection(self) -> None:
-        document = SetNoteAt(self.row.stable_id, 0, b"\x43\x03\x05\x00").apply(
-            self.document
+    @staticmethod
+    def _numbered_document(columns: int, rows: int = 2):
+        document = parse_bytes(
+            make_large_playable(rows=rows, columns=columns), row_storage="compact"
         )
-        selection = CellSelection(
-            frozenset((CellTarget(self.row.stable_id, 0),)),
-            CellTarget(self.row.stable_id, 0),
+        block_rows = document.splits[0].blocks[0].rows
+        edits = tuple(
+            NoteEdit(
+                row.stable_id,
+                lane,
+                bytes((0x43, 0x03, row_index * 16 + lane, 0x00)),
+            )
+            for row_index, row in enumerate(block_rows)
+            for lane in range(columns)
         )
-        command, mirrored_selection = mirror_selection(document, selection)
-        mirrored = command.apply(document)
-        row = mirrored.splits[0].blocks[0].rows[0]
+        return SetNotesAt(edits).apply(document)
 
-        self.assertEqual(row.cells[0].raw, b"\x00\x00\x00\x00")
-        self.assertEqual(row.cells[4].raw, b"\x43\x03\x05\x00")
-        self.assertEqual(
-            mirrored_selection.targets,
-            frozenset((CellTarget(self.row.stable_id, 4),)),
+    @staticmethod
+    def _rectangle(document, row_indexes, lanes):
+        rows = document.splits[0].blocks[0].rows
+        targets = frozenset(
+            CellTarget(rows[row_index].stable_id, lane)
+            for row_index in row_indexes
+            for lane in lanes
         )
+        return CellSelection(targets, min(targets))
+
+    def test_flip_horizontal_is_bounded_by_selected_columns(self) -> None:
+        document = self._numbered_document(5)
+        selection = self._rectangle(document, (0,), (1, 2, 3))
+
+        command, transformed_selection = flip_horizontal_selection(
+            document, selection
+        )
+        transformed = command.apply(document).splits[0].blocks[0].rows[0]
+
+        self.assertEqual([cell.raw[2] for cell in transformed.cells], [0, 3, 2, 1, 4])
+        self.assertEqual(transformed_selection.targets, selection.targets)
+
+    def test_flip_vertical_reverses_rows_only_inside_selected_columns(self) -> None:
+        document = self._numbered_document(5)
+        selection = self._rectangle(document, (0, 1), (1, 2, 3))
+
+        command, _ = flip_vertical_selection(document, selection)
+        transformed = command.apply(document).splits[0].blocks[0].rows
+
+        self.assertEqual(
+            [cell.raw[2] for cell in transformed[0].cells], [0, 17, 18, 19, 4]
+        )
+        self.assertEqual(
+            [cell.raw[2] for cell in transformed[1].cells], [16, 1, 2, 3, 20]
+        )
+
+    def test_mirror_uses_stepedit_single_half_double_and_double_permutations(
+        self,
+    ) -> None:
+        cases = (
+            (5, tuple(range(5)), [3, 4, 2, 0, 1]),
+            (6, tuple(range(6)), [5, 3, 4, 1, 2, 0]),
+            (10, tuple(range(10)), [8, 9, 7, 5, 6, 3, 4, 2, 0, 1]),
+            (10, tuple(range(5)), [3, 4, 2, 0, 1, 5, 6, 7, 8, 9]),
+            (10, tuple(range(5, 10)), [0, 1, 2, 3, 4, 8, 9, 7, 5, 6]),
+        )
+        for columns, lanes, expected in cases:
+            with self.subTest(columns=columns, lanes=lanes):
+                document = self._numbered_document(columns)
+                selection = self._rectangle(document, (0,), lanes)
+
+                command, _ = mirror_selection(document, selection)
+                transformed = command.apply(document).splits[0].blocks[0].rows[0]
+
+                self.assertEqual([cell.raw[2] for cell in transformed.cells], expected)
+
+    def test_mirror_rejects_a_five_column_slice_between_double_pads(self) -> None:
+        document = self._numbered_document(10)
+        selection = self._rectangle(document, (0,), (1, 2, 3, 4, 5))
+
+        with self.assertRaisesRegex(ValueError, "Mirror requires"):
+            mirror_selection(document, selection)
+
+    def test_transform_rejects_non_rectangular_selection(self) -> None:
+        document = self._numbered_document(5)
+        rows = document.splits[0].blocks[0].rows
+        selection = CellSelection(
+            frozenset(
+                (
+                    CellTarget(rows[0].stable_id, 0),
+                    CellTarget(rows[0].stable_id, 1),
+                    CellTarget(rows[1].stable_id, 0),
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "rectangular"):
+            flip_horizontal_selection(document, selection)
 
     def test_copy_and_paste_preserve_raw_cells_and_refuse_boundary_crossing(self) -> None:
         document = SetNoteAt(self.row.stable_id, 0, b"\x43\x03\x05\x00").apply(
@@ -88,6 +168,19 @@ class BulkSelectionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "lane boundary"):
             paste_clipboard(document, clipboard, CellTarget(self.row.stable_id, 5))
+
+    def test_cut_copies_then_clears_the_selection(self) -> None:
+        document = self._numbered_document(5)
+        selection = self._rectangle(document, (0,), (1, 2, 3))
+
+        clipboard, command = cut_selection(document, selection)
+        cut = command.apply(document).splits[0].blocks[0].rows[0]
+
+        self.assertEqual([cell[2][2] for cell in clipboard.cells], [1, 2, 3])
+        self.assertEqual(
+            [cell.raw for cell in cut.cells[1:4]],
+            [b"\x00\x00\x00\x00"] * 3,
+        )
 
     def test_replace_filters_by_low_nibble_type(self) -> None:
         selection = CellSelection(

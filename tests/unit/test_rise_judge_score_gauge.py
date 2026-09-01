@@ -25,8 +25,18 @@ from stepnx.preview import (
 from tests.fixture_factory import make_normal_nx20
 
 
-def _tap_stream(*, raw: bytes = b"\x43\x03\x00\x00", metadata=()):
-    document = parse_bytes(make_normal_nx20(), source="NM.NX", row_storage="compact")
+def _tap_stream(
+    *,
+    raw: bytes = b"\x43\x03\x00\x00",
+    metadata=(),
+    profile: str = "nxa-native",
+):
+    document = parse_bytes(
+        make_normal_nx20(),
+        source="NM.NX",
+        row_storage="compact",
+        profile=profile,
+    )
     split = document.splits[0]
     block = replace(
         split.blocks[0],
@@ -98,6 +108,40 @@ class RiseJudgeTimingTests(unittest.TestCase):
 
 
 class RiseScoreTests(unittest.TestCase):
+    def test_event_stream_rebuilds_runtime_bank_from_payload_for_each_profile(
+        self,
+    ) -> None:
+        for profile, metadata_id in (
+            ("nxa-native", 64),
+            ("fiesta2", 68),
+            ("prime2", 68),
+        ):
+            with self.subTest(profile=profile):
+                stream = _tap_stream(
+                    raw=b"\x43\x03\x01\x00",
+                    metadata=((metadata_id, 1),),
+                    profile=profile,
+                )
+                event = stream.events[0]
+                session = GameplaySession(
+                    stream, parse_gameplay_command(""), autoplay=True
+                )
+
+                session.advance(event.time_ms)
+
+                self.assertEqual(event.bank, 1)
+                self.assertEqual(
+                    session.stats.judgments_by_bank[0], [0, 0, 0, 0, 0]
+                )
+                self.assertEqual(
+                    session.stats.judgments_by_bank[1], [1, 0, 0, 0, 0]
+                )
+
+    def test_event_stream_does_not_treat_source_slot_as_runtime_bank(self) -> None:
+        stream = _tap_stream(raw=b"\x43\x03\x00\x40")
+
+        self.assertEqual(stream.events[0].bank, 0)
+
     def test_getscore_table_combo_bonus_and_chord_multipliers(self) -> None:
         expected = (1000, 1000, 500, 100, -200)
         for grade, value in enumerate(expected):

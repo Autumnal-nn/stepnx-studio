@@ -44,12 +44,16 @@ def _two_note_stream(*, second_bank: int = 0, judge_by_note: bool = False):
             document = SetNoteAt(row.stable_id, lane, b"\0\0\0\0").apply(document)
     row = document.splits[0].blocks[0].rows[0]
     document = SetNoteAt(row.stable_id, 0, b"\x43\x03\x00\x00").apply(document)
-    bank_param = second_bank << 14
+    # Source-slot bits are not runtime banks. With Judge by Note/Multibank,
+    # the native preparation pass assigns the runtime bank from payload % 3.
+    bank_param = second_bank
     document = SetNoteAt(
         row.stable_id,
         1,
         bytes((0x43, 0x03, bank_param & 0xFF, bank_param >> 8)),
     ).apply(document)
+    if second_bank:
+        document = InsertMetadata.from_ints(document.stable_id, 64, 1).apply(document)
     if judge_by_note:
         document = InsertMetadata.from_ints(document.stable_id, 68, 1).apply(document)
     snapshot = create_preview_snapshot(document)
