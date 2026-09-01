@@ -53,6 +53,8 @@ def main(argv=None) -> int:
     from stepnx.gui.phase11_waveform import install_phase11_waveform
     from stepnx.gui.phase11_waveform_precision import install_phase11_waveform_precision
     from stepnx.gui.phase11_workspace import install_phase11_workspace_tools
+    from stepnx.gui.phase12_editor_note_visuals import install_phase12_editor_note_visuals
+    from stepnx.gui.phase12_split_header import install_phase12_split_header
 
     timeline_module.TimelineWidget = Phase10TimelineWidget
     timing_module.BlockTimingDialog = Phase10BlockTimingDialog
@@ -72,12 +74,14 @@ def main(argv=None) -> int:
             install_phase11_profile_gate(self)
             install_phase11_import(self)
             install_phase11_workspace_tools(self)
+            install_phase12_split_header(self)
             install_phase11_state_guard(self)
             install_phase11_waveform(self)
             install_phase11_audio_staging_cleanup(self)
             install_phase11_audio_picker(self)
             install_phase11_waveform_precision(self)
             install_phase11_authoring_polish(self)
+            install_phase12_editor_note_visuals(self)
             install_phase11_trailer_edit(self)
             install_phase11_nx10_materialization(self)
             install_phase11_preferences(self)

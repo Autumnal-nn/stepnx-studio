@@ -12,4 +12,4 @@ def bundled_noteskin_root() -> Path:
 def bundled_metronome_path() -> Path:
     """Return the installed default PCM metronome sample."""
 
-    return Path(__file__).with_name("assets") / "BEAT.WAV"
+    return Path(__file__).with_name("assets") / "BEAT.wav"

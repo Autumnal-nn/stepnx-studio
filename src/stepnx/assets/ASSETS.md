@@ -1,12 +1,18 @@
 # Bundled authoring assets
 
-The noteskin PNG atlases in `noteskin/` are original, royalty-free assets
-contributed to StepNX Studio by the project maintainer in August 2026. They are
-distributed under the repository's Apache-2.0 license.
+## Noteskins
 
-`BEAT.WAV` is a third-party royalty-free metronome sample that was distributed
-with StepEdit 5.63. The project maintainer confirmed that it may be redistributed
-and used by StepNX Studio. Its original sound-library metadata is not embedded in
-the WAV and was not available with the supplied reference package.
+The noteskin atlases in `noteskin/00` through `noteskin/05` were produced for
+StepNX Studio from the StepMania 5.1 `NoteSkins/pump/cmd` noteskin by `shujito`.
+That upstream noteskin is distributed under the MIT License. The StepNX Studio
+copies are modified/adapted assets for NX20 authoring and preview use.
+
+The `DIVISION` and `ITEM` visual assets are bundled as editor/runtime support
+artwork for StepNX Studio. See the adjacent source/readme material where present.
+
+## Metronome
+
+`BEAT.wav` is the replacement metronome sample supplied for StepNX Studio from
+Pixabay, credited to `freesound_community`, and released under CC0.
 
 No Pump It Up game artwork is included in this directory.
