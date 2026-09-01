@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+      - agent/noteskin-split-corpus-20260831
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,7 +16,7 @@ env:
 
 jobs:
   windows:
-    if: startsWith(github.event.head_commit.message, 'Release StepNX Studio 0.9.2a')
+    if: github.ref == 'refs/heads/agent/noteskin-split-corpus-20260831' || startsWith(github.event.head_commit.message, 'Release StepNX Studio 0.9.2a')
     runs-on: windows-latest
     steps:
       - name: Check out release commit
@@ -53,7 +55,7 @@ jobs:
           if-no-files-found: error
 
   linux:
-    if: startsWith(github.event.head_commit.message, 'Release StepNX Studio 0.9.2a')
+    if: github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release StepNX Studio 0.9.2a')
     runs-on: ubuntu-22.04
     steps:
       - name: Check out release commit
@@ -102,7 +104,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.event.head_commit.message, 'Release StepNX Studio 0.9.2a')
+    if: github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release StepNX Studio 0.9.2a')
     needs:
       - windows
       - linux
