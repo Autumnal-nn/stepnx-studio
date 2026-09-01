@@ -69,6 +69,12 @@ class ProfileRegistryTests(unittest.TestCase):
         self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1000))
         self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1001))
         self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1002))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1003))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1004))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1005))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1006))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1007))
+        self.assertIsNone(metadata_definition("nxa-native", MetadataScope.HEADER, 1008))
         self.assertIsNone(metadata_definition("nxa-native", MetadataScope.DIVISION, 11))
         self.assertIsNone(metadata_definition("nxa-native", MetadataScope.DIVISION, 12))
         self.assertIsNone(metadata_definition("nxa-native", MetadataScope.DIVISION, 200))
@@ -133,36 +139,51 @@ class ProfileRegistryTests(unittest.TestCase):
             "Random",
         )
 
-        reset = metadata_definition("fiesta2", MetadataScope.HEADER, 1004)
-        self.assertEqual(reset.label, "Reset gameplay options")
-        self.assertTrue(reset.authorable)
-        self.assertEqual(reset.minimum, 1)
-        self.assertEqual(reset.maximum, 1)
+        new_chart = metadata_definition("fiesta2", MetadataScope.HEADER, 1004)
+        self.assertEqual(new_chart.label, "New Chart")
+        self.assertTrue(new_chart.authorable)
+        self.assertEqual(new_chart.minimum, 1)
+        self.assertEqual(new_chart.maximum, 1)
         self.assertEqual(
             metadata_definition("prime2", MetadataScope.HEADER, 1004).label,
-            "Reset gameplay options",
+            "New Chart",
         )
 
         fiesta_1005 = metadata_definition("fiesta2", MetadataScope.HEADER, 1005)
-        self.assertFalse(fiesta_1005.authorable)
-        self.assertEqual(fiesta_1005.label, "Auto Velocity flag (Fiesta-era)")
-        self.assertEqual(fiesta_1005.evidence, Evidence.STRONGLY_INFERRED)
+        self.assertTrue(fiesta_1005.authorable)
+        self.assertEqual(fiesta_1005.label, "Lock")
+        self.assertEqual(fiesta_1005.evidence, Evidence.RUNTIME_CONFIRMED)
+        self.assertEqual(fiesta_1005.maximum, 1)
+        self.assertNotIn("Auto Velocity", fiesta_1005.description)
 
-        auto_velocity = metadata_definition("prime2", MetadataScope.HEADER, 1005)
-        self.assertEqual(auto_velocity.label, "Auto Velocity")
-        self.assertTrue(auto_velocity.authorable)
-        self.assertEqual(auto_velocity.minimum, 1)
-        self.assertIsNone(auto_velocity.maximum)
-        self.assertIn("absolute target scroll velocity", auto_velocity.description)
+        prime_lock = metadata_definition("prime2", MetadataScope.HEADER, 1005)
+        self.assertEqual(prime_lock.label, "Lock")
+        self.assertTrue(prime_lock.authorable)
+        self.assertEqual(prime_lock.minimum, 1)
+        self.assertEqual(prime_lock.maximum, 1)
+        self.assertNotIn("absolute target scroll velocity", prime_lock.description)
 
         fiesta_1006 = metadata_definition("fiesta2", MetadataScope.HEADER, 1006)
-        self.assertFalse(fiesta_1006.authorable)
-        self.assertIn("Unidentified", fiesta_1006.label)
+        self.assertTrue(fiesta_1006.authorable)
+        self.assertEqual(fiesta_1006.label, "Another")
+        prime_1006 = metadata_definition("prime2", MetadataScope.HEADER, 1006)
+        self.assertFalse(prime_1006.authorable)
+        self.assertIn("Legacy", prime_1006.description)
 
-        card_only = metadata_definition("prime2", MetadataScope.HEADER, 1007)
-        self.assertEqual(card_only.label, "Card-only (AM.PASS)")
-        self.assertTrue(card_only.authorable)
+        ampass = metadata_definition("prime2", MetadataScope.HEADER, 1007)
+        self.assertEqual(ampass.label, "AM.PASS")
+        self.assertTrue(ampass.authorable)
         self.assertIsNone(metadata_definition("fiesta2", MetadataScope.HEADER, 1007))
+
+        players = metadata_definition("prime2", MetadataScope.HEADER, 1002)
+        self.assertEqual(players.label, "Players")
+        self.assertEqual(players.minimum, 1)
+        self.assertEqual(players.maximum, 5)
+
+        paired = metadata_definition("fiesta2", MetadataScope.HEADER, 1003)
+        self.assertEqual(paired.label, "Paired Chart")
+        self.assertEqual(paired.kind, ValueKind.TRAILER_OFFSET)
+        self.assertFalse(paired.authorable)
 
         for meta_id in (1005, 1006, 1007):
             discarded = metadata_definition(
@@ -184,7 +205,8 @@ class ProfileRegistryTests(unittest.TestCase):
 
         capabilities = profile_capabilities("prime2")
         self.assertIn("direct-noteskin-index", capabilities)
-        self.assertIn("auto-velocity", capabilities)
+        self.assertNotIn("auto-velocity", capabilities)
+        self.assertIn("header-lock", capabilities)
         self.assertIn("ampass-card-only", capabilities)
 
     def test_fiesta_brain_and_other_player_condition_families(self) -> None:
@@ -573,7 +595,7 @@ class SemanticProjectionTests(unittest.TestCase):
         self.assertFalse(any(issue.code == "profile.unknown" for issue in report.issues))
         self.assertTrue(
             any(
-                issue.code == "metadata.value-high" and "Card-only" in issue.message
+                issue.code == "metadata.value-high" and "AM.PASS" in issue.message
                 for issue in report.errors
             )
         )
