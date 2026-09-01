@@ -18,16 +18,17 @@ class TrailerFieldDefinition:
     localized: bool = False
 
 
-# Fiesta 2 labels below are intentionally more specific than Prime 2.  They are
-# backed by repeated placement/content patterns in the supplied official corpus;
-# the three *99 failure/break predicates are strong structural inferences rather
-# than runtime-confirmed names.
+# Fiesta 2 labels below are intentionally more specific than Prime 2. They are
+# backed by runtime evidence where available and repeated placement/content
+# patterns in the supplied official corpus; the three *99 failure/break
+# predicates are strong structural inferences rather than runtime-confirmed
+# names.
 _FIESTA2_FIELDS = (
     TrailerFieldDefinition(20, "V resource override", TrailerEvidence.RUNTIME_CONFIRMED),
     TrailerFieldDefinition(
         1003,
         "Co-op companion chart reference",
-        TrailerEvidence.OFFICIAL_CORPUS,
+        TrailerEvidence.RUNTIME_CONFIRMED,
     ),
     TrailerFieldDefinition(
         1100,
