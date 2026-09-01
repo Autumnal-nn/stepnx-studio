@@ -87,9 +87,10 @@ class Phase11TrailerTests(unittest.TestCase):
             [0, 0, 20],
         )
 
-    def test_untyped_plausible_downstream_pointer_blocks_relocation(self) -> None:
+    def test_untyped_plausible_downstream_scalar_does_not_block_relocation(self) -> None:
         document = self._fiesta2_pool()
         entries = document.header_metadata
+        scalar_id = entries[2].stable_id
         guarded = replace(
             document,
             header_metadata=(
@@ -99,8 +100,10 @@ class Phase11TrailerTests(unittest.TestCase):
             ),
         )
         target = project_trailer_strings(guarded).strings[0]
-        with self.assertRaisesRegex(ModelInvariantError, "may point to trailer offset"):
-            SetTrailerString(target.metadata_stable_id, "alphabet").apply(guarded)
+        edited = SetTrailerString(target.metadata_stable_id, "alphabet").apply(guarded)
+        unknown = next(entry for entry in edited.header_metadata if entry.stable_id == scalar_id)
+        self.assertEqual(int(unknown.value.value), 16)
+        self.assertEqual([item.offset for item in project_trailer_strings(edited).strings], [0, 12])
 
     def test_unaligned_synthetic_string_remains_same_size_only(self) -> None:
         document = self._fiesta2_pool()
