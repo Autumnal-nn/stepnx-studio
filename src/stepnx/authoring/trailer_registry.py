@@ -27,7 +27,7 @@ _FIESTA2_FIELDS = (
     TrailerFieldDefinition(20, "V resource override", TrailerEvidence.RUNTIME_CONFIRMED),
     TrailerFieldDefinition(
         1003,
-        "Co-op companion chart reference",
+        "Paired Chart",
         TrailerEvidence.RUNTIME_CONFIRMED,
     ),
     TrailerFieldDefinition(
@@ -87,12 +87,12 @@ _FIESTA2_FIELDS = (
     TrailerFieldDefinition(1450, "Floor 4 condition", TrailerEvidence.OFFICIAL_CORPUS),
 )
 
-# Prime 2 reuses the storage family, but not every Fiesta 2 label carries over.
-# In particular, 1100/1103 can duplicate objective strings. Keep conservative
-# names here instead of smuggling Fiesta 2 semantics into the modern profile.
+# Prime+ reuses the storage family, but not every Fiesta 2 mission label carries
+# over. Header1003 remains a supported legacy paired-chart reference, while
+# Header1008 is the modern Step Artist string introduced in XX.
 _PRIME2_FIELDS = (
     TrailerFieldDefinition(20, "V resource override", TrailerEvidence.RUNTIME_CONFIRMED),
-    TrailerFieldDefinition(1003, "Resource/reference string", TrailerEvidence.RUNTIME_CONFIRMED),
+    TrailerFieldDefinition(1003, "Paired Chart", TrailerEvidence.RUNTIME_CONFIRMED),
     TrailerFieldDefinition(1100, "Localized mission/objective text", TrailerEvidence.OFFICIAL_CORPUS, localized=True),
     TrailerFieldDefinition(1102, "Trailer string field 1102", TrailerEvidence.OFFICIAL_CORPUS),
     TrailerFieldDefinition(1103, "Localized mission/objective text", TrailerEvidence.RUNTIME_CONFIRMED, localized=True),
@@ -109,7 +109,7 @@ _PRIME2_FIELDS = (
     TrailerFieldDefinition(1450, "Mission condition string", TrailerEvidence.OFFICIAL_CORPUS),
     TrailerFieldDefinition(
         1008,
-        "Step Artist (XX and beyond)",
+        "Step Artist",
         TrailerEvidence.RUNTIME_CONFIRMED,
     ),
 )
