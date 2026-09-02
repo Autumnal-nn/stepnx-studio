@@ -2,7 +2,7 @@
 
 Date: 2026-09-02
 
-Status: planned 0.9.5 hardening item 5
+Status: planned 0.9.5 hardening item 5; starts after item 4 manual keyboard/Lightmap re-smoke closes successfully.
 
 ## Scope
 
@@ -41,6 +41,10 @@ At every scale, exercise at least the following surfaces:
    - timing lines, lanes, notes and selection outlines remain aligned;
    - mouse hit testing resolves the visibly targeted row/lane;
    - keyboard cursor/selection remains aligned with the same cells;
+   - cross-Block/Split selection outlines remain coherent across changes in
+     Beat Split/timing density;
+   - the three `LM.NX` light lanes remain aligned with their corresponding
+     clickable/selectable cells;
    - Ctrl-wheel zoom does not introduce scale-dependent drift;
    - scrollbars can still reach the first and final editable timing positions.
 
@@ -88,7 +92,7 @@ A scale passes when:
 
 - no crash, assertion or Qt warning indicates broken scaling behavior;
 - all authoring targets remain reachable by mouse and keyboard;
-- visible note/timing geometry agrees with hit testing;
+- visible note/Lightmap/timing geometry agrees with hit testing;
 - dialogs do not hide required controls;
 - no destructive action can be accidentally targeted because visual and input
   geometry diverged;
