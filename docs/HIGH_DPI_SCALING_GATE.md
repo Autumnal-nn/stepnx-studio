@@ -1,15 +1,20 @@
-# StepNX Studio 0.9.5 high-DPI/scaling gate
+# StepNX Studio 0.9.5 editor-field zoom gate
 
 Date: 2026-09-02
 
-Status: planned 0.9.5 hardening item 5; starts after item 4 manual keyboard/Lightmap re-smoke closes successfully.
+Status: implemented for 0.9.5 hardening item 5; awaiting manual Windows validation.
 
 ## Scope
 
-Validate the desktop editor at every 25% Windows display-scaling increment from
-100% through 300% inclusive:
+Item 5 is **not application-wide DPI scaling**. The surrounding StepNX Studio UI
+keeps its normal Qt size. Only the Timeline/editor field is scaled: encoded-row
+geometry, lanes, ruler, Split/Block information area, waveform, notes, Lightmap
+lights, selection outlines and the hit-testing geometry that belongs to that
+field.
 
-- 100%
+The existing 100% editor field is the accepted baseline. The item-5 validation
+matrix therefore contains the eight additional presets:
+
 - 125%
 - 150%
 - 175%
@@ -19,104 +24,81 @@ Validate the desktop editor at every 25% Windows display-scaling increment from
 - 275%
 - 300%
 
-Scaling above 300% is outside the 0.9.5 gate unless a defect found inside the
-gated range clearly indicates the same root cause would continue upward.
+Scaling above 300% is outside the 0.9.5 gate.
 
-The gate is not a screenshot-comparison exercise. It verifies that authoring
-semantics, hit testing, layout, rendering and external-preview behavior remain
-usable and internally consistent at each supported scale.
+Menus, toolbars, Workspace tree, chart tabs, Inspector, Diagnostics, Routes,
+status bar and authoring dialogs are explicitly outside this zoom transform.
+They remain at the application's ordinary UI scale.
 
-## Validation areas
+## User-facing control
 
-At every scale, exercise at least the following surfaces:
+`View > Editor zoom` exposes 100% through 300% in 25% increments. The selection
+is shared across currently open authoring Timeline tabs and is applied to a newly
+activated Timeline tab as well.
 
-1. **Main-window composition**
-   - menu bar, both toolbars and status bar remain readable;
-   - toolbar controls do not overlap or become inaccessible;
-   - splitters, Workspace tree and side tabs remain usable at ordinary window
-     sizes;
-   - no important label is clipped solely because of scaling.
+The pre-existing Ctrl+wheel Timeline magnification remains a separate vertical
+precision control. Changing Editor zoom scales the *current* row geometry and
+its vertical-zoom bounds by the same ratio, so a user's Ctrl+wheel precision
+level is preserved when switching between editor zoom presets.
 
-2. **Timeline geometry and input**
-   - timing lines, lanes, notes and selection outlines remain aligned;
-   - mouse hit testing resolves the visibly targeted row/lane;
-   - keyboard cursor/selection remains aligned with the same cells;
-   - cross-Block/Split selection outlines remain coherent across changes in
-     Beat Split/timing density;
-   - the three `LM.NX` light lanes remain aligned with their corresponding
-     clickable/selectable cells;
-   - Ctrl-wheel zoom does not introduce scale-dependent drift;
-   - scrollbars can still reach the first and final editable timing positions.
+## Geometry contract
 
-3. **Note and noteskin rendering**
-   - Tap, Hold, Roll, Item and Division visuals remain centered;
-   - hold heads/bodies/tails remain continuous enough for editing;
-   - glyphs and noteskin atlases do not acquire obvious integer-scaling seams,
-     clipping or misplaced source rectangles;
-   - selection and drag-preview artwork tracks the underlying note geometry.
+At every preset, these values scale together relative to the previous preset:
 
-4. **Dialogs and typed editors**
-   - Block timing, metadata, Split selector, trailer and other authoring dialogs
-     fit their controls without hidden fields;
-   - standard keyboard traversal and OK/Cancel controls remain reachable;
-   - warnings and explanatory labels wrap rather than disappear horizontally.
+- encoded-row height;
+- lane width;
+- ruler width;
+- Split/Block information width;
+- footer/segment spacing;
+- minimum and maximum row-height bounds used by vertical precision zoom.
 
-5. **Inspector, Diagnostics and Routes**
-   - table/tree headers and contents remain legible;
-   - row heights do not clip text;
-   - horizontal scrolling, where genuinely required, remains possible;
-   - double-click/Enter activation targets the visible row.
+The Timeline layout is rebuilt after a preset change. Horizontal and vertical
+scroll positions are adjusted around the viewport centre so zooming does not
+arbitrarily throw the user to an unrelated chart location.
 
-6. **Split/Block structure affordances**
-   - gutter summaries remain readable;
-   - context menus open at sensible positions;
-   - tree selection and structure editing target the intended Split/Block.
+Because render and hit-test code consume the same `TimelineGeometry` and
+`TimelineLayout`, the painted lane/row and the clickable lane/row must remain the
+same object-space target at every preset.
 
-7. **Audio and waveform UI**
-   - transport controls remain accessible;
-   - waveform stays aligned to timing positions;
-   - playhead/follow behavior does not shift relative to chart geometry.
+## Required validation
 
-8. **External gameplay preview**
-   - the preview opens on the intended screen and remains independently usable;
-   - playfield/receptors scale without clipping or geometry drift;
-   - keyboard/pad input remains mapped correctly;
-   - F6 debug text remains readable and contained within the preview;
-   - editor/preview synchronization remains correct after moving either window
-     between displays with different scale factors when such a setup is
-     available.
+For each of 125%, 150%, 175%, 200%, 225%, 250%, 275% and 300%, verify:
 
-## Required outcomes
+1. notes, lane boundaries and timing rows remain aligned;
+2. mouse hit testing selects the visibly targeted row/lane;
+3. keyboard cursor and Shift-selection outlines remain aligned;
+4. cross-Block/Split selections remain coherent across different Beat Splits;
+5. waveform and playhead remain aligned with chart timing;
+6. Tap/Hold/Roll/Item/Division artwork stays centred on its lane;
+7. scrolling can still reach the beginning and end of the editable field;
+8. `LM.NX` keeps exactly three light lanes, with light rectangles and selection
+   outlines aligned to the same scaled geometry;
+9. Toggle/Select/Cut/Copy/Paste/Delete still target the intended Lightmap cells;
+10. surrounding application chrome does **not** resize when the editor zoom
+    preset changes.
 
-A scale passes when:
+The Lightmap visual baseline for this gate is 80% alpha for an active light and
+5% alpha for an inactive light. Lightmap selection uses the exact light rectangle
+rather than the generic playable-chart cell outline.
 
-- no crash, assertion or Qt warning indicates broken scaling behavior;
-- all authoring targets remain reachable by mouse and keyboard;
-- visible note/Lightmap/timing geometry agrees with hit testing;
-- dialogs do not hide required controls;
-- no destructive action can be accidentally targeted because visual and input
-  geometry diverged;
-- the external preview remains usable and synchronized;
-- any cosmetic degradation is recorded and classified rather than silently
-  accepted.
+## Automated gate
 
-Defects that reproduce at one or more gated scales are part of item 5 even when
-they also happen at 100%. The goal is to validate scaling as a system, not merely
-to special-case high percentages.
+The item-5 regression suite checks all eight new presets in one run. It verifies:
 
-## Automation strategy
+- the exact 100..300 preset sequence in 25% steps;
+- proportional Timeline geometry at every new preset;
+- preservation of an existing Ctrl+wheel vertical magnification ratio;
+- row/lane hit testing at every preset;
+- Timeline viewport size remaining unchanged while internal field geometry grows;
+- Lightmap light rectangles following the same scaled lane geometry.
 
-Where Qt permits deterministic offscreen assertions, add regression tests for
-logical geometry, size hints, hit targets and layout constraints at representative
-scale factors. Pixel-perfect screenshots are not a release requirement because
-font rasterization and platform theme details vary across environments.
-
-Manual Windows validation remains required for the complete 100%..300% matrix,
-including real OS display scaling and at least one packaged-build smoke pass.
+These are logical/offscreen assertions. They deliberately do not attempt
+pixel-perfect screenshot comparison because platform font and rasterization
+choices are outside the editor-field geometry contract.
 
 ## Completion criterion
 
-Item 5 is complete when all nine scale points have been exercised, every
-blocking defect found in the matrix has been fixed or explicitly deferred with a
-non-blocking rationale, automated regressions cover reproducible logical bugs,
-and the final validation record identifies the Windows/Qt environment used.
+Item 5 is complete when the automated 607-test hardening gate is green and the
+eight new editor zoom presets have passed one manual Windows authoring smoke pass.
+Any failure where the painted target and input target diverge is blocking. Purely
+cosmetic issues are fixed when practical or recorded explicitly if non-blocking.
