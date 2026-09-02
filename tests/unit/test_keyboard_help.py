@@ -31,14 +31,22 @@ class KeyboardHelpTests(unittest.TestCase):
         action = window.keyboard_help_action
         self.assertEqual(action.text(), "Keyboard shortcuts…")
         self.assertEqual(action.shortcut(), QKeySequence("F1"))
-        help_menus = [
-            menu_action.menu()
-            for menu_action in window.menuBar().actions()
-            if menu_action.menu() is not None
-            and menu_action.menu().title().replace("&", "") == "Help"
-        ]
-        self.assertEqual(len(help_menus), 1)
-        self.assertIn(action, help_menus[0].actions())
+
+        # Keep the QMenu wrapper strongly referenced while inspecting it. Some
+        # Linux/offscreen PySide builds transfer ownership through QAction and
+        # may invalidate a temporary wrapper returned repeatedly by action.menu().
+        help_menu = None
+        for menu_action in window.menuBar().actions():
+            candidate = menu_action.menu()
+            if (
+                candidate is not None
+                and candidate.title().replace("&", "") == "Help"
+            ):
+                help_menu = candidate
+                break
+
+        self.assertIsNotNone(help_menu)
+        self.assertIn(action, help_menu.actions())
 
 
 if __name__ == "__main__":
