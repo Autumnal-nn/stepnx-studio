@@ -64,9 +64,22 @@ incompatible with four-byte playable-note clipboards. Paste may cross a
 Block/Split boundary because clipboard height counts encoded rows, not musical
 ticks.
 
-Playable-note transforms such as horizontal/vertical flip and StepEdit Mirror do
-not apply to Lightmaps. Other placement tools remain rejected as non-chart
-operations rather than being reinterpreted as light controls.
+Other placement tools remain blocked with the existing non-playable-chart
+semantics. Bank/ID, Function, Visibility, Brain Code, Source Slot and analogous
+playable-note controls are ignored by Lightmap Toggle/Select. Playable-note
+transforms such as horizontal/vertical flip and StepEdit Mirror are not exposed
+as Lightmap operations.
+
+## Cross-Block row semantics
+
+The same row-order rule used by playable selection applies to Lightmaps. The
+active projected Timeline route is flattened as a sequence of encoded rows. A
+selection containing four rows in one Block and eight rows in the next contains
+twelve rows even if their Beat Splits or timing densities differ. Cut, Copy,
+Paste and Delete address those row positions directly.
+
+Only visible/active branch Blocks participate. Alternate route Blocks that are
+not projected into the Timeline remain untouched.
 
 ## Save and sparsity guarantees
 
