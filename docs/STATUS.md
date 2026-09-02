@@ -8,10 +8,10 @@ Version: 0.9.5 pre-alpha
 
 StepNX Studio is in a polish and hardening cycle. The canonical NX20/NFO model,
 practical authoring workflow, legacy import layer, folder publication workflow,
-and native gameplay preview are implemented. The documentation truth pass and
-selection-performance regression gate are complete. Remaining 0.9.5 work is
-primarily save/recovery fault injection, keyboard/high-DPI validation, and UX
-cleanup rather than additional NX20 format discovery.
+and native gameplay preview are implemented. The documentation truth pass,
+selection-performance regression gate, and save/recovery durability torture pass
+are complete. Remaining 0.9.5 work is primarily keyboard/high-DPI validation and
+editor UX cleanup rather than additional NX20 format discovery.
 
 ## Delivered
 
@@ -126,17 +126,41 @@ Delivered behavior includes:
   size;
 - the existing 50-note / 200,000-row one-second smoke test remains as a coarse
   wall-clock alarm;
-- the strict Windows discovery floor is 560 tests, based on the 551-test 0.9.4
-  release gate plus nine dedicated performance regressions;
+- source-backed rectangle selection avoids whole-Block row decoding when
+  collecting stable row IDs;
 - pull-request CI runs both the strict Windows gate and the full Linux glibc-2.31
   suite.
 
-Validation checkpoint for this hardening pass:
-
-- Linux: 560 tests in 3.803 s, OK;
-- Windows: 560 tests in 6.352 s, OK with the one expected case-collision skip.
-
 See `PERFORMANCE_REGRESSION_GATE.md` for the contract and rationale.
+
+### Save/recovery durability hardening
+
+- save stage and original-backup paths are registered before write/copy/fsync
+  operations that can fail, preventing untracked transaction debris;
+- catchable Python-level interruptions after partial multi-file publication run
+  rollback before the interruption propagates;
+- rollback of newly created targets removes the partial publication;
+- if rollback of an existing target itself fails, its `.stepnx-original` backup
+  is deliberately preserved and identified in the raised `WorkspaceError`;
+- recovery writes use hidden staging that is never listed as a completed
+  snapshot;
+- catchable recovery-write failures and interruptions remove staging before
+  returning or propagating;
+- completed recovery listings require finalized 32-character lowercase-hex
+  snapshot directories with a manifest;
+- structurally invalid NX20 recovery payloads are rejected as `RecoveryError`
+  even when their manifest SHA-256 has been changed to match the corrupt bytes;
+- the dedicated torture matrix adds 13 save/recovery fault-injection cases on
+  top of the existing stale-target, rollback, hash, path, provenance and normal
+  recovery tests;
+- the strict Windows discovery floor is now 573 tests.
+
+Validation checkpoint for the combined 0.9.5 hardening gates:
+
+- Linux/glibc 2.31: 573 tests in 5.064 s, OK;
+- Windows: 573 tests in 6.645 s, OK with the one expected case-collision skip.
+
+See `SAVE_RECOVERY_TORTURE.md` for the failure matrix and durability boundary.
 
 ## Corpus metrics
 
@@ -161,8 +185,8 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
 1. **Complete:** documentation truth pass;
 2. **Complete:** performance regression suite for sparse bulk transforms and
    source-backed selection acquisition;
-3. **Next:** save/recovery fault-injection and interrupted-write tests;
-4. keyboard workflow audit;
+3. **Complete:** save/recovery fault-injection and interrupted-write hardening;
+4. **Next:** keyboard workflow audit;
 5. high-DPI/scaling validation at 100%, 125%, 150%, and 200%;
 6. editor UX cleanup covering menus, selection, Inspector state, disabled
    actions, and error messages.
@@ -171,6 +195,9 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
 
 - structural row insertion/removal/move may still materialize the affected row
   collection; point and ordinary bulk note edits remain sparse;
+- a multi-file `Save All` is not physically atomic against hard process/machine
+  termination between target renames. Catchable failures roll back, but true
+  restart-time transaction reconciliation would require a persistent journal;
 - inputs outside a legacy importer's proven source domain are guarded with
   approximation/unsupported diagnostics rather than generalized from guesses;
 - cross-Split Block moves are not exposed by the current structural UI;
