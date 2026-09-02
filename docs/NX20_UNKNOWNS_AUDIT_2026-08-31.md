@@ -22,16 +22,37 @@ fields that later evidence has since resolved.
 
 ## Split selector byte
 
-The first Split header byte is structurally understood:
+The first Split header byte is structurally understood, but the two selector
+bits act at different phases:
 
-- `0x80`: random at Split start;
-- `0x40`: random on selection trigger;
-- `0x20`: force/select behavior;
-- `0x1F`: lower five-bit random bank/group.
+- `0x80`: random Block selection is decided when the chart is loaded;
+- `0x40`: perform a bank lookup when the Split is reached;
+- lower five bits `1..31`: selection banks;
+- lower five bits `0`: **no bank**. There is no bank 0;
+- `0x20`: force/select behavior.
 
-The flags are independent. `0xC0` is therefore not corrupt data; it means both
-random flags are set. The corpus contains 44 `0xC0` Splits: 42 in NXA and two
-Fiesta 2 deployment copies.
+That makes the raw values importantly different:
+
+- `0x40`: there is no bank to follow, so the bank lookup fails and the runtime
+  falls back to a fresh random Block choice when the Split is reached;
+- `0x41..0x5F`: follower Splits for banks `1..31`, reusing the latest Block index
+  selected for that bank;
+- `0x01..0x1F`: valid banked selectors even without either random bit. A
+  condition or explicit active candidate can establish the bank state that a
+  later follower reuses;
+- `0x81..0x9F`: load-time random selectors whose chosen Block index also becomes
+  the state of the corresponding bank.
+
+For example, `0x01 -> 0x41` is meaningful: the first Split selects a candidate
+through its normal condition/active-Block logic and records the chosen index for
+bank 1; the following `0x41` reuses that same index. Likewise `0x81 -> 0x41`
+records a load-time random choice and later follows it.
+
+The flags remain independently encodable. `0xC0` is therefore not corrupt data;
+it means both selector bits are set. Existing runtime validation shows `0x80`
+precedence for the combined form, while the raw combination is preserved exactly.
+The corpus contains 44 `0xC0` Splits: 42 in NXA and two Fiesta 2 deployment
+copies.
 
 Useful runtime examples remain:
 
@@ -43,9 +64,10 @@ Useful runtime examples remain:
 5. NXA `STEP/EF552/HD.NX`, repeated `0xC0` pattern across the chart.
 
 The editor exposes the complete selection byte without normalizing unusual
-combinations. One-Block selectors and non-zero banks without random flags are
-warnings, not save blockers. Further `0xC0` runtime testing is useful historical
-validation, not an unresolved serialization problem.
+combinations. A non-zero bank without `0x80`/`0x40` is valid and no longer emits
+an "active bank without selector" warning. One-Block selectors may still warn as
+redundant. Further `0xC0` runtime testing is useful historical validation, not an
+unresolved serialization problem.
 
 ## Structural bytes that are not active mysteries
 
