@@ -27,43 +27,26 @@ class SplitSelectionDialog(QDialog):
         self._syncing = False
 
         layout = QVBoxLayout(self)
-        explanation = QLabel(
-            "NX20 stores Split selection in one byte. 0x80 chooses a random "
-            "Block when the chart is loaded. 0x40 first looks for the encoded "
-            "selection bank: with bank 1..31 it follows the latest Block index "
-            "selected for that bank; with no bank (raw 0x40) the lookup has "
-            "nothing to follow and falls back to a fresh random choice when the "
-            "Split is reached. A bank is also meaningful on conditioned/explicit "
-            "selector Splits such as 0x01, whose choice can later be reused by "
-            "0x41. Runtime validation shows 0x80 takes precedence when both "
-            "selector bits are present. The raw field remains authoritative and "
-            "can represent every byte from 0x00 through 0xFF.",
-            self,
-        )
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
-
         form = QFormLayout()
         self.random_start = QCheckBox("0x80  Random at chart load", self)
         # Attribute name retained for compatibility with the original typed
-        # projection. Its meaning depends on whether a real bank (1..31) exists.
-        self.random_trigger = QCheckBox(
-            "0x40  Follow bank / random at block start if unbanked", self
+        # projection. In user-facing terms, 0x40 is the follower bit. A zero
+        # bank cannot be followed and therefore falls back to split-start random.
+        self.random_trigger = QCheckBox("0x40  Follower block", self)
+        self.random_trigger.setToolTip("Follow bank")
+        self.force_select = QCheckBox("0x20  Recalculate at split start", self)
+        self.force_select.setToolTip(
+            "Re-evaluate Division Metadata conditions when this Split starts. "
+            "G/W/A/B/C Division arrows already force block verification as part "
+            "of their own semantics; other Division Metadata needs this bit for "
+            "runtime re-evaluation at Split start."
         )
-        self.random_trigger.setToolTip(
-            "With bank 1..31, reuse the most recent Block index selected for "
-            "that bank. With bank 0 (no bank), the lookup cannot resolve and "
-            "the runtime falls back to a fresh random selection when this Split "
-            "is reached."
-        )
-        self.force_select = QCheckBox("0x20  Force/select behavior", self)
         self.bank = QSpinBox(self)
         self.bank.setRange(0, 31)
         self.bank.setToolTip(
             "0 means no bank. Banks 1..31 retain a selected Block index. A "
-            "banked Split remains meaningful even without 0x80/0x40: conditions "
-            "or an explicit active candidate can establish the state that a "
-            "later follower reuses."
+            "banked conditioned/explicit Split may establish state for a later "
+            "Follower block."
         )
         self.raw_edit = QLineEdit(self)
         self.raw_edit.setMaxLength(4)
@@ -76,8 +59,8 @@ class SplitSelectionDialog(QDialog):
         self.warning_label.setWordWrap(True)
 
         form.addRow("Random at load:", self.random_start)
-        form.addRow("0x40 behavior:", self.random_trigger)
-        form.addRow("Force select:", self.force_select)
+        form.addRow("Follow bank:", self.random_trigger)
+        form.addRow("Recalculate:", self.force_select)
         form.addRow("Selection bank (0 = none):", self.bank)
         form.addRow("Raw byte:", self.raw_edit)
         form.addRow("Decoded:", self.raw_label)
@@ -303,7 +286,7 @@ def install_phase12_split_header(window) -> None:
 
     action = QAction("Edit Split selection…", window)
     action.setToolTip(
-        "Edit the complete NX20 Split selector byte: load-time random, 0x40 follower/fallback behavior, force-select flag, and bank."
+        "Edit the NX20 Split selector byte: load-time random, follower behavior, split-start recalculation, and selection bank."
     )
     action.triggered.connect(lambda *_args: _edit_split_selection(window))
     window.structure_menu.addAction(action)
