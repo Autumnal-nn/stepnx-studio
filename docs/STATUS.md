@@ -8,9 +8,10 @@ Version: 0.9.5 pre-alpha
 
 StepNX Studio is in a polish and hardening cycle. The canonical NX20/NFO model,
 practical authoring workflow, legacy import layer, folder publication workflow,
-and native gameplay preview are implemented. Remaining 0.9.5 work is primarily
-regression coverage, recovery testing, keyboard/high-DPI validation, UX cleanup,
-and documentation consistency rather than additional NX20 format discovery.
+and native gameplay preview are implemented. The documentation truth pass and
+selection-performance regression gate are complete. Remaining 0.9.5 work is
+primarily save/recovery fault injection, keyboard/high-DPI validation, and UX
+cleanup rather than additional NX20 format discovery.
 
 ## Delivered
 
@@ -62,6 +63,8 @@ and documentation consistency rather than additional NX20 format discovery.
   placement;
 - sparse bulk-note execution so selection transforms no longer materialize the
   whole chart or hang on ordinary selections;
+- source-backed rectangle selection reuses compact row IDs instead of decoding
+  the complete Block merely to collect stable IDs;
 - typed Split selection-byte editing with decoded mode/bank display;
 - source-preserving Hidden, Invisible, Appear, Vanish, VanishLow and AppearLow
   authoring visualization;
@@ -112,6 +115,29 @@ Delivered behavior includes:
 - deterministic local Random Velocity/route RNG where matching the game's hidden
   global RNG state is not a product requirement.
 
+### Performance regression hardening
+
+- deterministic 200,000-row compact/source-backed selection fixture;
+- 50, 500 and 5,000-cell cases for copy, cut, paste, horizontal/vertical flip,
+  StepEdit mirror, erase, filtered replace and bulk placement;
+- full `CompactRows` and `OverlayRows` iteration is rejected during ordinary
+  selection operations;
+- indexed source-row reads are bounded by selected work rather than total chart
+  size;
+- the existing 50-note / 200,000-row one-second smoke test remains as a coarse
+  wall-clock alarm;
+- the strict Windows discovery floor is 560 tests, based on the 551-test 0.9.4
+  release gate plus nine dedicated performance regressions;
+- pull-request CI runs both the strict Windows gate and the full Linux glibc-2.31
+  suite.
+
+Validation checkpoint for this hardening pass:
+
+- Linux: 560 tests in 3.803 s, OK;
+- Windows: 560 tests in 6.352 s, OK with the one expected case-collision skip.
+
+See `PERFORMANCE_REGRESSION_GATE.md` for the contract and rationale.
+
 ## Corpus metrics
 
 | Corpus metric | Value |
@@ -132,9 +158,10 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
 
 ## 0.9.5 hardening scope
 
-1. documentation truth pass;
-2. performance regression suite, especially bulk transforms;
-3. save/recovery fault-injection and interrupted-write tests;
+1. **Complete:** documentation truth pass;
+2. **Complete:** performance regression suite for sparse bulk transforms and
+   source-backed selection acquisition;
+3. **Next:** save/recovery fault-injection and interrupted-write tests;
 4. keyboard workflow audit;
 5. high-DPI/scaling validation at 100%, 125%, 150%, and 200%;
 6. editor UX cleanup covering menus, selection, Inspector state, disabled
