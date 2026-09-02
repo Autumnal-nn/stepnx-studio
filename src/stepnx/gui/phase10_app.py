@@ -28,6 +28,7 @@ def main(argv=None) -> int:
     import stepnx.gui.timeline_widget as timeline_module
     import stepnx.gui.timing_dialog as timing_module
     import stepnx.gui.preview_widget as preview_module
+    from stepnx.gui.keyboard_workflow import install_keyboard_workflow
     from stepnx.gui.phase10_install import install_phase10
     from stepnx.gui.phase10_timeline import Phase10TimelineWidget
     from stepnx.gui.phase10_timing import Phase10BlockTimingDialog
@@ -90,6 +91,7 @@ def main(argv=None) -> int:
             install_phase11_fast_note_index(self)
             install_phase11_render_performance(self)
             install_phase11_ui_polish(self)
+            install_keyboard_workflow(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10
