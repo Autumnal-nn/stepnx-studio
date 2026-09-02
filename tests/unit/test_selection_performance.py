@@ -19,6 +19,7 @@ from stepnx.authoring import (
 )
 from stepnx.codecs.nx20 import parse_bytes
 from stepnx.core.model import CompactRows, OverlayRows
+from stepnx.gui.phase11_render_performance import _source_backed_row_ids
 
 
 _TOTAL_ROWS = 200_000
@@ -139,6 +140,17 @@ class SelectionPerformanceRegressionTests(unittest.TestCase):
             yield lambda: reads
 
     def test_copy_scales_with_selection_not_chart(self) -> None:
+        # Shift-drag selection used to build a tuple by iterating every row in
+        # the active Block before copy even began. The installed timeline path
+        # must reuse the compact parser's row-id array directly.
+        def forbid_iteration(_rows):
+            self.fail("rectangle selection materialized the CompactRows table")
+            yield None
+
+        with patch.object(CompactRows, "__iter__", forbid_iteration):
+            ordered_row_ids = _source_backed_row_ids(self.rows)
+        self.assertIs(ordered_row_ids, self.rows._row_ids)
+
         for cell_count in _SELECTION_SIZES:
             with self.subTest(cells=cell_count):
                 selection = self._selection(cell_count)
