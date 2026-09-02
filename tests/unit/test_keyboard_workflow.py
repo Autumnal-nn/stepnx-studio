@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offscreen")
 
 try:
     from PySide6.QtCore import QEvent, Qt
-    from PySide6.QtGui import QAction, QKeyEvent, QKeySequence
+    from PySide6.QtGui import QAction, QKeyEvent, QKeySequence, QShortcut
     from PySide6.QtWidgets import (
         QApplication,
         QComboBox,
@@ -18,9 +19,9 @@ try:
         QTreeWidgetItem,
     )
 
-    from stepnx.authoring.selection import CellTarget
     from stepnx.authoring.snapshot import create_authoring_snapshot
     from stepnx.codecs.nx20 import parse_bytes
+    from stepnx.core.model import CompactRows
     from stepnx.gui.keyboard_workflow import (
         KeyboardCursor,
         _TreeKeyboardFilter,
@@ -30,6 +31,8 @@ try:
         _install_save_shortcuts,
         _move_cursor,
         _scope_selection_shortcuts,
+        _scope_transport_shortcut,
+        _select_function,
         _select_tool,
         _selection_to_cursor,
     )
@@ -93,6 +96,19 @@ class KeyboardWorkflowTests(unittest.TestCase):
             segment.block.row_count - 1,
         )
 
+        first = KeyboardCursor(0, 0, 0)
+        self.assertEqual(
+            _move_cursor(widget, first, Qt.Key.Key_Up, Qt.ControlModifier),
+            first,
+        )
+        last_index = len(widget._layout.segments) - 1
+        last_segment = widget._layout.segments[last_index]
+        last = KeyboardCursor(last_index, last_segment.block.row_count - 1, 0)
+        self.assertEqual(
+            _move_cursor(widget, last, Qt.Key.Key_Down, Qt.ControlModifier),
+            last,
+        )
+
     def test_timeline_key_handler_moves_cursor_without_mouse_input(self) -> None:
         window = QMainWindow()
         widget = self._timeline(window)
@@ -108,6 +124,23 @@ class KeyboardWorkflowTests(unittest.TestCase):
         event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.ShiftModifier)
         self.assertTrue(_handle_timeline_key(widget, event))
         self.assertEqual(len(widget.selection.targets), 2)
+
+    def test_compact_keyboard_selection_never_iterates_the_row_table(self) -> None:
+        widget = self._timeline()
+        segment = widget._layout.segments[0]
+        first_row = int(segment.block.rows._row_ids[0])
+        widget.set_selected_cell(first_row, 0)
+
+        with mock.patch.object(
+            CompactRows,
+            "__iter__",
+            side_effect=AssertionError("keyboard navigation materialized CompactRows"),
+        ):
+            cursor = _cursor(widget)
+            moved = _move_cursor(widget, cursor, Qt.Key.Key_Down, Qt.NoModifier)
+            selection = _selection_to_cursor(widget, moved, extend=True)
+
+        self.assertEqual(len(selection.targets), 2)
 
     def test_number_keys_choose_tools_only_through_the_editor_combo(self) -> None:
         window = QMainWindow()
@@ -132,6 +165,20 @@ class KeyboardWorkflowTests(unittest.TestCase):
         self.assertTrue(_select_tool(window, Qt.Key.Key_0))
         self.assertEqual(combo.currentText(), "Erase")
 
+    def test_h_g_n_choose_note_function_without_touching_other_widgets(self) -> None:
+        window = QMainWindow()
+        combo = QComboBox(window)
+        for label in ("Normal", "Bonus / Hidden (H)", "Ghost (G)"):
+            combo.addItem(label)
+        window.function_combo = combo
+
+        self.assertTrue(_select_function(window, Qt.Key.Key_H))
+        self.assertEqual(combo.currentText(), "Bonus / Hidden (H)")
+        self.assertTrue(_select_function(window, Qt.Key.Key_G))
+        self.assertEqual(combo.currentText(), "Ghost (G)")
+        self.assertTrue(_select_function(window, Qt.Key.Key_N))
+        self.assertEqual(combo.currentText(), "Normal")
+
     def test_chart_edit_shortcuts_are_removed_from_window_scope(self) -> None:
         window = QMainWindow()
         names = (
@@ -155,6 +202,17 @@ class KeyboardWorkflowTests(unittest.TestCase):
         for name in names:
             self.assertTrue(getattr(window, name).shortcut().isEmpty())
 
+    def test_space_transport_is_removed_from_window_scope(self) -> None:
+        window = QMainWindow()
+        shortcut = QShortcut(QKeySequence("Space"), window)
+        shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        window.phase10_space_shortcut = shortcut
+
+        _scope_transport_shortcut(window)
+
+        self.assertFalse(shortcut.isEnabled())
+        self.assertTrue(shortcut.key().isEmpty())
+
     def test_save_all_accepts_standard_ctrl_s_and_keeps_legacy_shortcut(self) -> None:
         window = QMainWindow()
         window.save_action = QAction("Save All", window)
@@ -166,7 +224,7 @@ class KeyboardWorkflowTests(unittest.TestCase):
             [QKeySequence("Ctrl+S"), QKeySequence("Ctrl+Shift+S")],
         )
 
-    def test_alt_number_shortcuts_focus_every_major_pane(self) -> None:
+    def test_alt_number_and_ctrl_page_shortcuts_cover_panes_and_chart_tabs(self) -> None:
         window = QMainWindow()
         window.tree = QTreeWidget(window)
         window.tabs = QTabWidget(window)
@@ -190,6 +248,8 @@ class KeyboardWorkflowTests(unittest.TestCase):
                 QKeySequence("Alt+3"),
                 QKeySequence("Alt+4"),
                 QKeySequence("Alt+5"),
+                QKeySequence("Ctrl+PageUp"),
+                QKeySequence("Ctrl+PageDown"),
             ],
         )
         self.assertTrue(
@@ -199,7 +259,7 @@ class KeyboardWorkflowTests(unittest.TestCase):
             )
         )
 
-    def test_tree_enter_and_structure_keys_call_existing_actions(self) -> None:
+    def test_tree_enter_metadata_and_structure_keys_call_existing_actions(self) -> None:
         class Window(QMainWindow):
             def __init__(self):
                 super().__init__()
@@ -214,13 +274,24 @@ class KeyboardWorkflowTests(unittest.TestCase):
         item.setData(0, Qt.ItemDataRole.UserRole, ("block", 0, 1, 2))
         tree.setCurrentItem(item)
         inserted = []
+        metadata = []
         window.insert_block_action = QAction("Insert Block", window)
         window.insert_block_action.triggered.connect(lambda: inserted.append("block"))
+        window.edit_metadata_action = QAction("Edit metadata", window)
+        window.edit_metadata_action.triggered.connect(lambda: metadata.append("metadata"))
         filter_ = _TreeKeyboardFilter(window)
 
         enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.NoModifier)
         self.assertTrue(filter_.eventFilter(tree, enter))
         self.assertEqual(window.activated, 1)
+
+        control_enter = QKeyEvent(
+            QEvent.Type.KeyPress,
+            Qt.Key.Key_Return,
+            Qt.ControlModifier,
+        )
+        self.assertTrue(filter_.eventFilter(tree, control_enter))
+        self.assertEqual(metadata, ["metadata"])
 
         insert = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Insert, Qt.NoModifier)
         self.assertTrue(filter_.eventFilter(tree, insert))
