@@ -27,11 +27,55 @@ class SplitFollowerSemanticsTests(unittest.TestCase):
         self.assertEqual(selection.mode_label, "ordered, bank 1")
         self.assertEqual(selection.warnings(block_count=4), ())
 
-    def test_0x40_is_exposed_as_follower_not_random_trigger(self) -> None:
-        selection = SplitSelectionByte.from_raw(0x41)
-        self.assertTrue(selection.follower)
-        self.assertEqual(selection.mode_label, "follower block, bank 1")
-        self.assertNotIn("random", selection.mode_label)
+    def test_0x40_fallback_and_0x41_follower_are_distinct(self) -> None:
+        unbanked = SplitSelectionByte.from_raw(0x40)
+        self.assertFalse(unbanked.has_bank)
+        self.assertFalse(unbanked.follower)
+        self.assertTrue(unbanked.random_at_block_start)
+        self.assertEqual(unbanked.mode_label, "random at block start")
+        self.assertEqual(unbanked.raw, 0x40)
+
+        banked = SplitSelectionByte.from_raw(0x41)
+        self.assertTrue(banked.has_bank)
+        self.assertTrue(banked.follower)
+        self.assertFalse(banked.random_at_block_start)
+        self.assertEqual(banked.mode_label, "follower block, bank 1")
+        self.assertNotIn("random", banked.mode_label)
+
+        load_random = SplitSelectionByte.from_raw(0x80)
+        self.assertEqual(load_random.mode_label, "random at chart load")
+
+        # Timing is semantically observable. Even though the 0x40 Split appears
+        # first in chart order, every 0x80 choice consumes its RNG state at load
+        # before the 0x40 fallback is evaluated at Split entry. With seed 7 the
+        # first two binary draws are 1, 0, so decisions become [0, 1], not [1, 0].
+        snapshot = self._two_block_snapshot()
+        base = snapshot.splits[0]
+        runtime_random = replace(
+            base,
+            stable_id=201,
+            raw_select=0x40,
+            random_at_start=False,
+            random_at_trigger=True,
+            group=0,
+        )
+        preloaded_random = replace(
+            base,
+            stable_id=202,
+            raw_select=0x80,
+            random_at_start=True,
+            random_at_trigger=False,
+            group=0,
+        )
+        snapshot = replace(snapshot, splits=(runtime_random, preloaded_random))
+        route = resolve_route(snapshot, RoutePolicy.SEEDED, seed=7)
+        self.assertEqual(
+            [
+                split.block(decision.block_id).index
+                for split, decision in zip(snapshot.splits, route.decisions)
+            ],
+            [0, 1],
+        )
 
     def test_manual_or_condition_candidate_feeds_following_bank(self) -> None:
         snapshot = self._two_block_snapshot()
