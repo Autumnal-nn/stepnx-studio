@@ -132,6 +132,20 @@ def resolve_route(
     seed: int | None = None,
     manual: dict[int, int] | None = None,
 ) -> ResolvedRoute:
+    """Resolve one Block per Split while preserving selector-bank state.
+
+    ``0x80`` is the only random selector bit. A successful selection on a Split
+    with a non-zero lower-five-bit bank records the selected Block *index* for
+    that bank. ``0x40`` is a follower: it reuses that latest index. The source
+    of the remembered selection is deliberately irrelevant, so both
+    ``0x81 -> 0x41`` (random selector then follower) and ``0x01 -> 0x41``
+    (condition/manual selector then follower) resolve through the same state.
+
+    The internal snapshot field is still named ``random_at_trigger`` for API
+    compatibility with existing serialized test fixtures. It is interpreted
+    here exclusively as the 0x40 follower flag.
+    """
+
     policy = RoutePolicy(policy)
     if policy is RoutePolicy.SEEDED and seed is None:
         raise ValueError("seeded route resolution requires an explicit seed")
@@ -140,26 +154,43 @@ def resolve_route(
     decisions: list[RouteDecision] = []
     diagnostics: list[RouteDiagnostic] = []
     metrics = PreviewMetrics()
-    random_bank_indices: dict[int, int] = {}
+    bank_indices: dict[int, int] = {}
 
-    def random_bank_choice(split) -> PreviewBlock | None:
-        """Reuse one Block index for every Split in the same random bank."""
+    def remember_bank_selection(split, block: PreviewBlock) -> None:
+        bank = int(split.group)
+        if bank:
+            bank_indices[bank] = int(block.index)
 
-        bank = split.group
+    def random_selector_choice(split) -> PreviewBlock:
+        # Every 0x80 selector performs a fresh choice. If it is banked, that
+        # choice becomes the new state followers reuse until another selection
+        # for the same bank replaces it.
+        return rng.choice(split.blocks)
+
+    def follower_choice(split) -> PreviewBlock | None:
+        bank = int(split.group)
         if bank == 0:
-            # Zero lower bits mean there is no persistent bank. Every 0x80
-            # occurrence is a fresh random event, and 0x40 does not inherit a
-            # preceding 0x80 choice either.
+            # Historical code treated lower bits 0 as an independent event and
+            # the supplied regression suite contains a synthetic 0x40 case with
+            # no bank. There is no bank identity to follow, so retain that
+            # unbanked fallback without presenting 0x40 itself as a random mode.
             return rng.choice(split.blocks)
-        if bank not in random_bank_indices:
-            random_bank_indices[bank] = rng.randrange(len(split.blocks))
-        index = random_bank_indices[bank]
+        index = bank_indices.get(bank)
+        if index is None:
+            diagnostics.append(
+                RouteDiagnostic(
+                    "route.follower-bank-unset",
+                    split.stable_id,
+                    f"Follower bank {bank} has no earlier selection to reuse",
+                )
+            )
+            return None
         if index >= len(split.blocks):
             diagnostics.append(
                 RouteDiagnostic(
-                    "route.random-bank-shape",
+                    "route.follower-bank-shape",
                     split.stable_id,
-                    f"Random bank {bank} selected Block index {index}, but this "
+                    f"Follower bank {bank} reuses Block index {index}, but this "
                     f"Split contains only {len(split.blocks)} Blocks",
                 )
             )
@@ -195,40 +226,54 @@ def resolve_route(
         candidates = tuple(block.stable_id for block in split.blocks)
         chosen: PreviewBlock | None = None
         reason = ""
+        follower = bool(split.random_at_trigger) and not bool(split.random_at_start)
 
         if policy is RoutePolicy.MANUAL:
-            selected = choices.get(split.stable_id)
-            if selected is None and len(split.blocks) == 1:
-                selected = split.blocks[0].stable_id
-                reason = "only Block"
-            if selected is None:
-                diagnostics.append(
-                    RouteDiagnostic(
-                        "route.manual-choice-required",
-                        split.stable_id,
-                        "Manual preview requires a Block choice for this Split",
-                    )
-                )
+            if follower and split.group:
+                chosen = follower_choice(split)
+                if chosen is not None:
+                    reason = f"follower bank {split.group} -> Block index {chosen.index}"
             else:
-                try:
-                    chosen = split.block(selected)
-                    reason = reason or "manual choice"
-                except KeyError:
+                selected = choices.get(split.stable_id)
+                if selected is None and len(split.blocks) == 1:
+                    selected = split.blocks[0].stable_id
+                    reason = "only Block"
+                if selected is None:
                     diagnostics.append(
                         RouteDiagnostic(
-                            "route.invalid-manual-choice",
+                            "route.manual-choice-required",
                             split.stable_id,
-                            f"Block {selected} does not belong to this Split",
+                            "Manual preview requires a Block choice for this Split",
                         )
                     )
+                else:
+                    try:
+                        chosen = split.block(selected)
+                        reason = reason or "manual choice"
+                    except KeyError:
+                        diagnostics.append(
+                            RouteDiagnostic(
+                                "route.invalid-manual-choice",
+                                split.stable_id,
+                                f"Block {selected} does not belong to this Split",
+                            )
+                        )
         elif policy is RoutePolicy.SEEDED:
-            if split.random_at_start or split.random_at_trigger:
-                chosen = random_bank_choice(split)
+            if split.random_at_start:
+                chosen = random_selector_choice(split)
                 reason = (
                     "independent random event"
                     if split.group == 0
-                    else f"random bank {split.group} engine choice"
+                    else f"random bank {split.group} selector choice"
                 )
+            elif follower:
+                chosen = follower_choice(split)
+                if chosen is not None:
+                    reason = (
+                        "independent random event"
+                        if split.group == 0
+                        else f"follower bank {split.group} -> Block index {chosen.index}"
+                    )
             else:
                 selected = choices.get(split.stable_id)
                 if selected is None and len(split.blocks) == 1:
@@ -271,12 +316,30 @@ def resolve_route(
                         "; ".join(unsupported),
                     )
                 )
+            elif follower:
+                bank_choice = follower_choice(split)
+                if bank_choice is not None:
+                    eligible_by_index = {block.index: block for block in eligible}
+                    chosen = eligible_by_index.get(bank_choice.index)
+                    if chosen is None:
+                        diagnostics.append(
+                            RouteDiagnostic(
+                                "route.follower-bank-ineligible",
+                                split.stable_id,
+                                f"Follower bank {split.group} reuses Block index "
+                                f"{bank_choice.index}, which does not match the simulated state",
+                            )
+                        )
+                    else:
+                        reason = (
+                            "independent random event"
+                            if split.group == 0
+                            else f"all-perfect follower bank {split.group} -> Block index {chosen.index}"
+                        )
             elif len(eligible) == 1:
                 chosen = eligible[0]
                 reason = "all-perfect conditions"
-            elif len(eligible) > 1 and (
-                split.random_at_start or split.random_at_trigger
-            ):
+            elif len(eligible) > 1 and split.random_at_start:
                 if seed is None:
                     diagnostics.append(
                         RouteDiagnostic(
@@ -286,30 +349,23 @@ def resolve_route(
                         )
                     )
                 else:
-                    eligible_indices = {
-                        block.index: block for block in eligible
-                    }
-                    bank_choice = random_bank_choice(split)
-                    if (
-                        bank_choice is not None
-                        and bank_choice.index in eligible_indices
-                    ):
-                        chosen = eligible_indices[bank_choice.index]
+                    eligible_indices = {block.index: block for block in eligible}
+                    random_choice = random_selector_choice(split)
+                    if random_choice.index in eligible_indices:
+                        chosen = eligible_indices[random_choice.index]
                         random_label = (
                             "independent random event"
                             if split.group == 0
                             else f"random bank {split.group}"
                         )
-                        reason = (
-                            f"all-perfect {random_label} seeded choice ({seed})"
-                        )
-                    elif bank_choice is not None:
+                        reason = f"all-perfect {random_label} seeded choice ({seed})"
+                    else:
                         diagnostics.append(
                             RouteDiagnostic(
                                 "route.random-bank-ineligible",
                                 split.stable_id,
                                 f"Random bank {split.group} selected Block "
-                                f"index {bank_choice.index}, which does not match "
+                                f"index {random_choice.index}, which does not match "
                                 "the simulated state",
                             )
                         )
@@ -331,6 +387,11 @@ def resolve_route(
                 )
 
         if chosen is not None:
+            # A selected candidate on a banked Split establishes/replaces the
+            # bank state regardless of whether the choice came from 0x80,
+            # conditions, or the active/manual candidate. Followers therefore
+            # see exactly the most recent selection made for that bank.
+            remember_bank_selection(split, chosen)
             decisions.append(
                 RouteDecision(
                     split.stable_id,
