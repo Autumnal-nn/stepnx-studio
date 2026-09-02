@@ -6,9 +6,10 @@ from pathlib import Path
 
 
 # The 0.9.4 release Windows gate ran 551 tests. The 0.9.5 selection-performance
-# suite adds nine dedicated tests, so losing that file must not leave a
+# suite added nine dedicated tests (560 total), and the save/recovery torture
+# suite adds another thirteen. Losing either regression file must not leave a
 # superficially green release.
-MINIMUM_TEST_COUNT = 560
+MINIMUM_TEST_COUNT = 573
 EXPECTED_SKIP_ID = (
     "unit.test_folder_workspace.FolderWorkspaceTests."
     "test_case_collisions_block_publication"
