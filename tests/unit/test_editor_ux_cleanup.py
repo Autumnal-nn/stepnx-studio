@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+import unittest
+from types import SimpleNamespace
+
+from stepnx.authoring.selection import CellSelection, CellTarget
+from stepnx.gui.editor_ux_cleanup import (
+    _clipboard_compatible,
+    _structure_actions,
+    selection_summary,
+)
+from stepnx.gui.selection_lightmap_workflow import GridClipboard
+from stepnx.gui.split_follower_ui import route_mode_label
+
+
+class _Row:
+    def __init__(self, stable_id: int) -> None:
+        self.stable_id = stable_id
+
+
+class _Block:
+    def __init__(self, stable_id: int, row_ids) -> None:
+        self.stable_id = stable_id
+        self.rows = tuple(_Row(value) for value in row_ids)
+        self.row_count = len(self.rows)
+
+
+class _Segment:
+    def __init__(self, block: _Block) -> None:
+        self.block = block
+
+
+class EditorUxCleanupTests(unittest.TestCase):
+    @staticmethod
+    def _route(raw: int):
+        return SimpleNamespace(
+            random_at_start=bool(raw & 0x80),
+            random_at_trigger=bool(raw & 0x40),
+            force_select=bool(raw & 0x20),
+            group=raw & 0x1F,
+        )
+
+    @staticmethod
+    def _widget(targets, *, lightmap=False):
+        return SimpleNamespace(
+            selection=CellSelection(frozenset(targets), next(iter(targets), None)),
+            snapshot=SimpleNamespace(effective_lightmap=lightmap),
+            _layout=SimpleNamespace(
+                segments=(
+                    _Segment(_Block(10, (1, 2))),
+                    _Segment(_Block(20, (3, 4))),
+                )
+            ),
+        )
+
+    def test_route_labels_are_rendered_from_selector_semantics(self) -> None:
+        self.assertEqual(route_mode_label(self._route(0x80)), "random at chart load")
+        self.assertEqual(route_mode_label(self._route(0x40)), "random at block start")
+        self.assertEqual(route_mode_label(self._route(0x41)), "follower block, bank 1")
+        self.assertNotIn("random trigger", route_mode_label(self._route(0x41)))
+        self.assertNotIn("group", route_mode_label(self._route(0x41)))
+
+    def test_route_label_keeps_recalculate_flag_in_decoded_semantics(self) -> None:
+        self.assertEqual(route_mode_label(self._route(0x21)), "force select, bank 1")
+
+    def test_rectangular_selection_summary_reports_rows_lanes_and_blocks(self) -> None:
+        targets = {
+            CellTarget(row_id, lane)
+            for row_id in (2, 3)
+            for lane in (0, 1)
+        }
+        text = selection_summary(self._widget(targets))
+        self.assertEqual(text, "4 cells selected · 2 rows × 2 lanes · across 2 Blocks")
+
+    def test_sparse_selection_summary_does_not_claim_rectangle(self) -> None:
+        targets = {CellTarget(1, 0), CellTarget(3, 2)}
+        text = selection_summary(self._widget(targets))
+        self.assertEqual(text, "2 cells selected · 2 rows · 2 lanes · across 2 Blocks")
+
+    def test_lightmap_selection_summary_uses_light_cell_noun(self) -> None:
+        targets = {CellTarget(1, 0), CellTarget(1, 1), CellTarget(1, 2)}
+        text = selection_summary(self._widget(targets, lightmap=True))
+        self.assertEqual(text, "3 light cells selected · 1 rows × 3 lanes")
+
+    def test_clipboard_compatibility_rejects_cross_document_kind(self) -> None:
+        note_clipboard = GridClipboard("notes", 1, 1, ((0, 0, b"\0\0\0\0"),))
+        light_clipboard = GridClipboard("lightmap", 1, 1, ((0, 0, b"\x01"),))
+        note_widget = self._widget({CellTarget(1, 0)})
+        light_widget = self._widget({CellTarget(1, 0)}, lightmap=True)
+        self.assertTrue(_clipboard_compatible(note_widget, note_clipboard))
+        self.assertTrue(_clipboard_compatible(light_widget, light_clipboard))
+        self.assertFalse(_clipboard_compatible(note_widget, light_clipboard))
+        self.assertFalse(_clipboard_compatible(light_widget, note_clipboard))
+
+    def test_split_context_reuses_canonical_actions(self) -> None:
+        actions = {name: object() for name in (
+            "insert_split_action",
+            "remove_split_action",
+            "move_split_up_action",
+            "move_split_down_action",
+            "phase12_edit_split_selection_action",
+        )}
+        groups = _structure_actions(SimpleNamespace(**actions), "split")
+        self.assertEqual(groups[0], tuple(actions[name] for name in (
+            "insert_split_action",
+            "remove_split_action",
+            "move_split_up_action",
+            "move_split_down_action",
+        )))
+        self.assertEqual(groups[1], (actions["phase12_edit_split_selection_action"],))
+
+    def test_block_context_reuses_edit_and_structure_actions(self) -> None:
+        actions = {name: object() for name in (
+            "insert_block_action",
+            "remove_block_action",
+            "move_block_up_action",
+            "move_block_down_action",
+            "edit_timing_action",
+            "phase12_edit_split_selection_action",
+            "phase11_division_metadata_action",
+        )}
+        groups = _structure_actions(SimpleNamespace(**actions), "block")
+        flattened = tuple(action for group in groups for action in group)
+        self.assertEqual(flattened, tuple(actions.values()))
+
+
+if __name__ == "__main__":
+    unittest.main()
