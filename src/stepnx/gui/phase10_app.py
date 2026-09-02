@@ -96,7 +96,7 @@ def main(argv=None) -> int:
             install_keyboard_workflow(self)
             # Keyboard workflow installs the three-lane Lightmap renderer. The
             # final polish deliberately wraps it last so LM selection uses the
-            # exact light bounds and off/on opacity is fixed at 20%/80%.
+            # exact light bounds and off/on opacity is fixed at 5%/80%.
             install_lightmap_visual_polish(self)
             install_split_follower_ui(self)
         return original_show(self, *args, **kwargs)
