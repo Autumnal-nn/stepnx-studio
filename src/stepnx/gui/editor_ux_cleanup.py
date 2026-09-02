@@ -1,0 +1,232 @@
+from __future__ import annotations
+
+from types import MethodType
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMenu
+
+from stepnx.gui.selection_lightmap_workflow import GridClipboard, VisibleRowOrder
+
+
+def _active_timeline(window):
+    widget = window.tabs.currentWidget() if hasattr(window, "tabs") else None
+    if widget is None or not hasattr(widget, "snapshot") or not hasattr(widget, "selection"):
+        return None
+    return widget
+
+
+def _clipboard_compatible(widget, clipboard) -> bool:
+    if widget is None or clipboard is None:
+        return False
+    if not isinstance(clipboard, GridClipboard):
+        return False
+    expected = "lightmap" if widget.snapshot.effective_lightmap else "notes"
+    return clipboard.kind == expected
+
+
+def selection_summary(widget) -> str:
+    """Compact status text that distinguishes rectangles from sparse selections."""
+
+    selection = getattr(widget, "selection", None)
+    if selection is None or not selection.targets:
+        return "Ready"
+    count = len(selection.targets)
+    if count == 1:
+        return "1 light cell selected" if widget.snapshot.effective_lightmap else "1 cell selected"
+
+    rows = {int(target.row_id) for target in selection.targets}
+    lanes = {int(target.lane) for target in selection.targets}
+    rectangular = count == len(rows) * len(lanes)
+    noun = "light cells" if widget.snapshot.effective_lightmap else "cells"
+    if rectangular:
+        detail = f"{len(rows)} rows × {len(lanes)} lanes"
+    else:
+        detail = f"{len(rows)} rows · {len(lanes)} lanes"
+
+    block_ids = set()
+    try:
+        order = VisibleRowOrder(widget)
+        for row_id in rows:
+            entry, _local, _ordinal = order.locate(row_id)
+            block_ids.add(int(entry.segment.block.stable_id))
+    except Exception:
+        block_ids.clear()
+    crossing = f" · across {len(block_ids)} Blocks" if len(block_ids) > 1 else ""
+    return f"{count} {noun} selected · {detail}{crossing}"
+
+
+def _add_action_group(menu: QMenu, actions) -> None:
+    available = [action for action in actions if action is not None]
+    if not available:
+        return
+    if menu.actions():
+        menu.addSeparator()
+    for action in available:
+        menu.addAction(action)
+
+
+def _structure_actions(window, kind: str):
+    """Return canonical QAction groups appropriate to a tree structure target."""
+
+    if kind == "split":
+        return (
+            (
+                getattr(window, "insert_split_action", None),
+                getattr(window, "remove_split_action", None),
+                getattr(window, "move_split_up_action", None),
+                getattr(window, "move_split_down_action", None),
+            ),
+            (getattr(window, "phase12_edit_split_selection_action", None),),
+        )
+    if kind == "block":
+        return (
+            (
+                getattr(window, "insert_block_action", None),
+                getattr(window, "remove_block_action", None),
+                getattr(window, "move_block_up_action", None),
+                getattr(window, "move_block_down_action", None),
+            ),
+            (
+                getattr(window, "edit_timing_action", None),
+                getattr(window, "phase12_edit_split_selection_action", None),
+                getattr(window, "phase11_division_metadata_action", None),
+            ),
+        )
+    if kind == "header":
+        return ((getattr(window, "edit_metadata_action", None),),)
+    return ()
+
+
+def _install_tree_context_cleanup(window) -> None:
+    import stepnx.gui.phase11_workspace as workspace_module
+
+    previous = workspace_module._show_tree_context
+
+    def show_tree_context(target_window, point) -> None:
+        item = target_window.tree.itemAt(point)
+        payload = None if item is None else item.data(0, Qt.ItemDataRole.UserRole)
+        kind = None if not payload else str(payload[0])
+        groups = _structure_actions(target_window, kind)
+        if not groups:
+            previous(target_window, point)
+            return
+
+        target_window.tree.setCurrentItem(item)
+        refresh = getattr(target_window, "_refresh_edit_actions", None)
+        if callable(refresh):
+            refresh()
+        structure_refresh = getattr(target_window, "_refresh_structure_actions", None)
+        if callable(structure_refresh):
+            structure_refresh()
+
+        menu = QMenu(target_window.tree)
+        for group in groups:
+            _add_action_group(menu, group)
+        if menu.actions():
+            menu.exec(target_window.tree.viewport().mapToGlobal(point))
+
+    workspace_module._show_tree_context = show_tree_context
+    window._stepnx_tree_context_handler = show_tree_context
+
+
+def _install_edit_action_state(window) -> None:
+    original = window._refresh_edit_actions
+
+    def refresh_edit_actions(self, *args) -> None:
+        original(*args)
+        widget = _active_timeline(self)
+        lightmap = bool(widget is not None and widget.snapshot.effective_lightmap)
+        has_selection = bool(widget is not None and widget.selection.targets)
+        tool_text = (
+            self.tool_combo.currentText().strip().casefold()
+            if hasattr(self, "tool_combo")
+            else ""
+        )
+
+        # Lightmap supports Toggle/Select and clipboard/delete only. Do not leave
+        # note-only actions clickable merely so they can display an avoidable
+        # "not a chart" error afterwards.
+        apply_action = getattr(self, "apply_selection_action", None)
+        if apply_action is not None:
+            apply_action.setEnabled(
+                has_selection and (not lightmap or tool_text == "toggle") and tool_text != "select"
+            )
+
+        for name in (
+            "flip_horizontal_selection_action",
+            "flip_vertical_selection_action",
+            "mirror_selection_action",
+            "replace_selection_action",
+        ):
+            action = getattr(self, name, None)
+            if action is not None and lightmap:
+                action.setEnabled(False)
+
+        apply_flags = getattr(self, "apply_flags", None)
+        if apply_flags is not None and lightmap:
+            apply_flags.setEnabled(False)
+
+        paste = getattr(self, "paste_selection_action", None)
+        if paste is not None:
+            paste.setEnabled(
+                has_selection
+                and widget is not None
+                and widget.selection.anchor is not None
+                and _clipboard_compatible(widget, getattr(self, "note_clipboard", None))
+            )
+
+        # These controls are intentionally ignored by Lightmap edits. Disable
+        # them while LM.NX is active so the UI communicates that fact instead of
+        # accepting values that have no effect.
+        for name in (
+            "tool_value",
+            "function_combo",
+            "visibility_combo",
+            "phase10_brain_code",
+            "phase10_special_button",
+            "phase10_advanced_raw_button",
+        ):
+            control = getattr(self, name, None)
+            if control is not None:
+                control.setEnabled(not lightmap)
+
+        split_selection = getattr(self, "phase12_edit_split_selection_action", None)
+        if split_selection is not None:
+            selection = self._structure_selection()
+            split_selection.setEnabled(selection is not None)
+
+        edit_field = getattr(self, "phase11_edit_field_action", None)
+        if edit_field is not None:
+            edit_field.setEnabled(widget is not None and not lightmap)
+
+    window._refresh_edit_actions = MethodType(refresh_edit_actions, window)
+    window._refresh_edit_actions()
+
+
+def _install_selection_feedback(window) -> None:
+    previous = getattr(window, "_phase10_update_selection_status", None)
+
+    def update_selection_status(widget) -> None:
+        selection = getattr(widget, "selection", None)
+        if selection is None or len(selection.targets) <= 1:
+            if callable(previous):
+                previous(widget)
+            return
+        label = getattr(window, "phase10_selection_status", None)
+        if label is not None:
+            label.setText(selection_summary(widget))
+
+    window._phase10_update_selection_status = update_selection_status
+    widget = _active_timeline(window)
+    if widget is not None:
+        update_selection_status(widget)
+
+
+def install_editor_ux_cleanup(window) -> None:
+    if getattr(window, "_stepnx_editor_ux_cleanup_installed", False):
+        return
+    window._stepnx_editor_ux_cleanup_installed = True
+
+    _install_tree_context_cleanup(window)
+    _install_edit_action_state(window)
+    _install_selection_feedback(window)
