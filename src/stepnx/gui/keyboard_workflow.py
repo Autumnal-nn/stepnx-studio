@@ -23,6 +23,12 @@ _TOOL_KEY_LABELS = {
     Qt.Key.Key_0: "Erase",
 }
 
+_FUNCTION_KEY_LABELS = {
+    Qt.Key.Key_N: "Normal",
+    Qt.Key.Key_H: "Bonus / Hidden (H)",
+    Qt.Key.Key_G: "Ghost (G)",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class KeyboardCursor:
@@ -46,7 +52,7 @@ def _row_id_at(rows, index: int) -> int:
 
 def _cursor_for_anchor(widget) -> KeyboardCursor | None:
     anchor = widget.selection.anchor
-    if anchor is None:
+    if anchor is None or int(widget.snapshot.columns) <= 0:
         return None
     for segment_index, segment in enumerate(widget._layout.segments):
         row_index = _row_index(segment.block.rows, int(anchor.row_id))
@@ -83,40 +89,37 @@ def _cursor(widget) -> KeyboardCursor | None:
     return _cursor_for_anchor(widget) or _default_cursor(widget)
 
 
-def _step_vertical(widget, cursor: KeyboardCursor, delta: int) -> KeyboardCursor:
+def _neighbor_segment(widget, start: int, delta: int) -> int | None:
     segments = widget._layout.segments
-    segment_index = cursor.segment_index
-    row_index = cursor.row_index + delta
-    if delta < 0:
-        while row_index < 0 and segment_index > 0:
-            segment_index -= 1
-            row_index = int(segments[segment_index].block.row_count) - 1
-        row_index = max(0, row_index)
-    else:
-        while (
-            segment_index < len(segments)
-            and row_index >= int(segments[segment_index].block.row_count)
-        ):
-            if segment_index + 1 >= len(segments):
-                row_index = max(0, int(segments[segment_index].block.row_count) - 1)
-                break
-            segment_index += 1
-            row_index = 0
-    return KeyboardCursor(segment_index, row_index, cursor.lane)
+    index = start + delta
+    while 0 <= index < len(segments):
+        if int(segments[index].block.row_count) > 0:
+            return index
+        index += delta
+    return None
+
+
+def _step_vertical(widget, cursor: KeyboardCursor, delta: int) -> KeyboardCursor:
+    segment = widget._layout.segments[cursor.segment_index]
+    row_count = int(segment.block.row_count)
+    candidate = cursor.row_index + delta
+    if 0 <= candidate < row_count:
+        return KeyboardCursor(cursor.segment_index, candidate, cursor.lane)
+
+    neighbor = _neighbor_segment(widget, cursor.segment_index, -1 if delta < 0 else 1)
+    if neighbor is None:
+        return cursor
+    neighbor_count = int(widget._layout.segments[neighbor].block.row_count)
+    row_index = neighbor_count - 1 if delta < 0 else 0
+    return KeyboardCursor(neighbor, row_index, cursor.lane)
 
 
 def _jump_segment(widget, cursor: KeyboardCursor, delta: int) -> KeyboardCursor:
-    segments = widget._layout.segments
-    wanted = max(0, min(cursor.segment_index + delta, len(segments) - 1))
-    while wanted != cursor.segment_index and not segments[wanted].block.row_count:
-        wanted += 1 if delta > 0 else -1
-        if not 0 <= wanted < len(segments):
-            return cursor
-    row_count = int(segments[wanted].block.row_count)
-    if row_count <= 0:
+    neighbor = _neighbor_segment(widget, cursor.segment_index, -1 if delta < 0 else 1)
+    if neighbor is None:
         return cursor
-    row_index = 0 if delta > 0 else row_count - 1
-    return KeyboardCursor(wanted, row_index, cursor.lane)
+    row_count = int(widget._layout.segments[neighbor].block.row_count)
+    return KeyboardCursor(neighbor, row_count - 1 if delta < 0 else 0, cursor.lane)
 
 
 def _move_cursor(widget, cursor: KeyboardCursor, key: int, modifiers) -> KeyboardCursor:
@@ -157,6 +160,9 @@ def _selection_to_cursor(widget, cursor: KeyboardCursor, *, extend: bool) -> Cel
     anchor = selection.anchor
     anchor_index = _row_index(segment.block.rows, int(anchor.row_id))
     if anchor_index is None:
+        # A rectangular selection is intentionally confined to one Block.
+        # Crossing a Block boundary moves the keyboard cursor there and starts
+        # a fresh rectangle instead of fabricating a cross-Block selection.
         return selection.replace(target)
 
     row_start, row_end = sorted((int(anchor_index), cursor.row_index))
@@ -199,19 +205,28 @@ def _trigger(action) -> bool:
     return True
 
 
-def _select_tool(window, key: int) -> bool:
-    label = _TOOL_KEY_LABELS.get(key)
-    if label is None:
-        return False
-    combo = getattr(window, "tool_combo", None)
+def _select_combo_label(window, attribute: str, label: str, status_prefix: str) -> bool:
+    combo = getattr(window, attribute, None)
     if combo is None:
         return False
     index = combo.findText(label)
     if index < 0:
         return False
     combo.setCurrentIndex(index)
-    window.statusBar().showMessage(f"Tool: {label}", 1800)
+    window.statusBar().showMessage(f"{status_prefix}: {label}", 1800)
     return True
+
+
+def _select_tool(window, key: int) -> bool:
+    label = _TOOL_KEY_LABELS.get(key)
+    return False if label is None else _select_combo_label(window, "tool_combo", label, "Tool")
+
+
+def _select_function(window, key: int) -> bool:
+    label = _FUNCTION_KEY_LABELS.get(key)
+    return False if label is None else _select_combo_label(
+        window, "function_combo", label, "Function"
+    )
 
 
 def _focus_editor_control(window, key: int) -> bool:
@@ -255,6 +270,14 @@ def _activate_current_tool(window, widget) -> bool:
     return False
 
 
+def _toggle_playback(window) -> bool:
+    callback = getattr(window, "_phase10_toggle_playback", None)
+    if not callable(callback):
+        return False
+    callback()
+    return True
+
+
 def _handle_timeline_key(widget, event) -> bool:
     window = widget.window()
     key = event.key()
@@ -264,8 +287,12 @@ def _handle_timeline_key(widget, event) -> bool:
 
     if no_modifiers and _select_tool(window, key):
         return True
+    if no_modifiers and _select_function(window, key):
+        return True
     if no_modifiers and _focus_editor_control(window, key):
         return True
+    if no_modifiers and key == Qt.Key.Key_Space:
+        return _toggle_playback(window)
 
     if key in (
         Qt.Key.Key_Left,
@@ -357,14 +384,21 @@ class _TreeKeyboardFilter(QObject):
         payload = item.data(0, Qt.ItemDataRole.UserRole)
         kind = payload[0] if payload and len(payload) >= 4 else None
 
-        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and modifiers == Qt.KeyboardModifier.AltModifier:
-            if kind == "block":
-                return _trigger(getattr(self.window, "edit_timing_action", None))
-            if kind == "split":
-                return _trigger(getattr(self.window, "phase12_edit_split_selection_action", None))
-            if kind == "header":
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if modifiers == Qt.KeyboardModifier.ControlModifier and kind in (
+                "header",
+                "split",
+                "block",
+            ):
                 return _trigger(getattr(self.window, "edit_metadata_action", None))
-            return False
+            if modifiers == Qt.KeyboardModifier.AltModifier:
+                if kind == "block":
+                    return _trigger(getattr(self.window, "edit_timing_action", None))
+                if kind == "split":
+                    return _trigger(getattr(self.window, "phase12_edit_split_selection_action", None))
+                if kind == "header":
+                    return _trigger(getattr(self.window, "edit_metadata_action", None))
+                return False
         if key == Qt.Key.Key_Insert:
             if modifiers == Qt.KeyboardModifier.NoModifier:
                 return _trigger(getattr(self.window, "insert_block_action", None))
@@ -407,6 +441,14 @@ def _focus_side_tab(window, index: int, widget) -> None:
     widget.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
 
+def _cycle_chart_tab(window, delta: int) -> None:
+    count = window.tabs.count()
+    if count <= 1:
+        return
+    window.tabs.setCurrentIndex((window.tabs.currentIndex() + delta) % count)
+    _focus_timeline(window)
+
+
 def _install_pane_shortcuts(window) -> None:
     shortcuts = []
 
@@ -421,6 +463,8 @@ def _install_pane_shortcuts(window) -> None:
     add("Alt+3", lambda: _focus_side_tab(window, 1, window.inspector))
     add("Alt+4", lambda: _focus_side_tab(window, 0, window.diagnostics))
     add("Alt+5", lambda: _focus_side_tab(window, 2, window.routes))
+    add("Ctrl+PageUp", lambda: _cycle_chart_tab(window, -1))
+    add("Ctrl+PageDown", lambda: _cycle_chart_tab(window, 1))
     window.keyboard_pane_shortcuts = tuple(shortcuts)
 
 
@@ -444,7 +488,14 @@ def _scope_selection_shortcuts(window) -> None:
 def _install_save_shortcuts(window) -> None:
     action = getattr(window, "save_action", None)
     if action is not None:
-        action.setShortcuts((QKeySequence("Ctrl+S"), QKeySequence("Ctrl+Shift+S")))
+        action.setShortcuts([QKeySequence("Ctrl+S"), QKeySequence("Ctrl+Shift+S")])
+
+
+def _scope_transport_shortcut(window) -> None:
+    shortcut = getattr(window, "phase10_space_shortcut", None)
+    if shortcut is not None:
+        shortcut.setKey(QKeySequence())
+        shortcut.setEnabled(False)
 
 
 def install_keyboard_workflow(window) -> None:
@@ -455,11 +506,8 @@ def install_keyboard_workflow(window) -> None:
     _install_timeline_keyboard()
     _scope_selection_shortcuts(window)
     _install_save_shortcuts(window)
+    _scope_transport_shortcut(window)
     _install_pane_shortcuts(window)
-
-    space = getattr(window, "phase10_space_shortcut", None)
-    if space is not None:
-        space.setContext(Qt.ShortcutContext.WindowShortcut)
 
     tree_filter = _TreeKeyboardFilter(window)
     window.tree.installEventFilter(tree_filter)
