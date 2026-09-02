@@ -1,13 +1,13 @@
 # StepNX Studio
 
-StepNX Studio is a lossless NX20 chart core and the foundation of a future
-visual editor for Pump It Up. It is created and maintained by Autumnal
-([`Autumnal-nn`](https://github.com/Autumnal-nn)).
+StepNX Studio is a lossless NX20 chart editor for Pump It Up. It is created and
+maintained by Autumnal ([`Autumnal-nn`](https://github.com/Autumnal-nn)).
 
-Status: pre-alpha, with practical and advanced NX20 authoring plus an
-external native gameplay preview. The current build proves the project's most important contract: an unedited NX20 or NFO
-document can be rebuilt byte for byte without normalizing metadata, flags,
-padding, note cells, floating-point payloads, or its trailer.
+Status: **0.9.5 pre-alpha / hardening**. Practical and advanced NX20 authoring,
+legacy import, folder workflows, and the external native gameplay preview are
+implemented. The project's central contract remains unchanged: an unedited NX20
+or NFO document can be rebuilt byte for byte without normalizing metadata,
+flags, padding, note cells, floating-point payloads, or its trailer.
 
 ## Implemented
 
@@ -24,6 +24,9 @@ padding, note cells, floating-point payloads, or its trailer.
   conversion diagnostics;
 - conservative STF, NOT/NOT5, STX, KSF, UCS, and corpus-verified SEE import
   projections through isolated one-way importer paths;
+- complete supplied NX2 NX10 source-domain validation over 2,125 charts, with
+  2,111 same-path official NXA NX20 successor conversions used as semantic
+  evidence;
 - compact/lazy row storage, now the default;
 - sparse row overlays: editing one cell promotes one row, not the entire block;
 - immutable commands for metadata, block fields, rows, and cells;
@@ -42,50 +45,67 @@ padding, note cells, floating-point payloads, or its trailer.
 - application-state recovery snapshots with payload hash verification;
 - explicit NX/NFO mirror comparison and export primitives;
 - `inspect`, `roundtrip`, `verify`, `validate`, `diff`, `import-nx10`,
-  `import-legacy`, `folder-inspect`, `folder-save-plan`, `folder-generate-lightmap`, and
-  `mirror-compare` CLI commands;
+  `import-legacy`, `folder-inspect`, `folder-save-plan`, `folder-generate-lightmap`,
+  and `mirror-compare` CLI commands;
 - immutable authoring snapshots and Qt-independent timeline culling;
 - optional PySide6 shell with tabs, document tree, diagnostics, metadata
   inspection, branch switching, note tools, timing fields, undo/redo, and
   guarded `Save All`;
-- stable Split/Block insertion, removal, and reordering;
-- rectangular stable-ID selection with copy, paste, erase, replace, mirror,
-  typed bulk placement, visible musical snapping, and StepEdit-compatible note
-  function/visibility flags;
+- stable Split/Block insertion, removal, reordering, resizing, and typed Split
+  selection-byte editing;
+- rectangular stable-ID selection with copy, cut, paste, erase, replace,
+  horizontal/vertical flip, StepEdit-compatible mirror, typed bulk placement,
+  visible musical snapping, and note function/visibility flags;
 - deterministic row/beat/time projection, atomic Block timing editing, and
   chart-wide Start Time shifting;
 - session audio transport, selection-or-viewport Play seeking, PCM-WAV and
   Qt-decoded compressed waveform generation, adaptive stereo min/max waveform
   rendering, per-beat or per-arrow metronome, follow-playhead, and explicit
   audio offset;
-- bundled royalty-free static noteskin atlases and metronome sound, with local
+- bundled royalty-free noteskin atlases and metronome sound, with local
   noteskin/audio overrides;
-- declarative `nxa-native` and `nxa-step5-patched` capability registries with
-  scope-aware metadata labels and authoring validation; normal builds hide the
-  patched profile unless startup capability gating explicitly enables it;
+- declarative NXA, Fiesta, and Prime+ engine-family semantics with scope-aware
+  metadata labels, authoring validation, and raw preservation for unresolved
+  fields;
 - ordered, duplicate-preserving typed metadata editing, including Brain Shower
   fields and packed condition ranges;
+- finalized Fiesta-and-later Header `1000..1008` semantics and guarded trailer
+  string relocation for proven offset fields;
+- NXA `VanishLow` and `AppearLow` note authoring and visualization;
 - conditional-route projection with direct branch navigation;
 - a safe mission-condition parser validated against every condition in the
   supplied official NX2/NXA mission files;
-- guarded UTF-8 trailer-string editing for proven metadata offsets, including
-  length-changing relocation when aligned storage and all affected known
-  pointers can be updated safely; ambiguous unknown pointers block relocation;
 - previewed folder batches for header metadata and Block Start Times;
 - explicit GUI comparison and export of NX/NFO deployment mirrors;
 - immutable gameplay snapshots that retain every route branch, with internal
   random-route state and explicit non-random Block choices;
 - a native Qt gameplay preview synchronized to the shared audio transport,
   using bundled royalty-free or validated local noteskin atlases;
-- route provenance, conservative timing warnings, and
-  refusal of conditions whose runtime state cannot be proven;
+- source-backed judgment timing, score, combo, grade and gauge behavior for the
+  currently audited runtime path;
+- expanded F6 debug statistics with P/G/Good/Bad/Miss, per-bank combo and
+  MissCombo maxima, score, grade, gauge, clear state, and item counters;
+- route provenance, conservative timing warnings, and refusal of conditions
+  whose runtime state cannot be proven;
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
-  fixtures, and an external corpus gate.
+  fixtures, and external corpus gates.
 
-## Not implemented yet
+## 0.9.5 hardening scope
 
-- typed editing of trailer fields whose offsets or encodings are still unknown;
-- full-corpus validation of the NX10 importer against the official NX2 dump.
+The 0.9.5 cycle is a polish and hardening pass rather than a format-expansion
+release. Its planned work is:
+
+1. documentation truth pass;
+2. performance regression coverage for bulk transforms;
+3. save/recovery fault-injection tests;
+4. keyboard workflow audit;
+5. high-DPI/scaling validation at 100%, 125%, 150%, and 200%;
+6. editor UX cleanup, including menus, selection, Inspector state, disabled
+   actions, and error messages.
+
+Open reverse-engineering questions are tracked separately from implementation
+work. Raw-preserved fields with no proven semantics are not treated as missing
+features.
 
 This pre-alpha tree is suitable for focused authoring tests, not as a stable
 release or a substitute for runtime validation in the target game.
@@ -151,39 +171,22 @@ py -m pip install -e ".[gui]"
 py tools/run_windows_test_gate.py
 ```
 
-
 Choose a note tool and click or drag across cells to place notes; one drag is
 one undo step. `Bank / ID` supplies the noteskin bank, item ID, or Division ID.
 `Save All` performs validation, shows affected files and a structural diff,
 then uses the existing atomic multi-file save plan. Split/Block details live in
 the right-side gutter; double-click that gutter to cycle a Split's active Block.
-Hold Ctrl while using the mouse wheel to zoom; the `6144 px/row` ceiling gives
-ample magnification for precise editing. Following StepEdit's square 24 px grid,
-StepNX uses a square 48 px grid by default: every encoded row keeps the same
-height as a lane is wide. A larger Beat Split therefore makes a beat physically
-taller instead of compressing its rows. Without Ctrl, each mouse-wheel notch
-still scrolls half a musical beat in the split under the pointer.
+Hold Ctrl while using the mouse wheel to zoom. Without Ctrl, each mouse-wheel
+notch scrolls half a musical beat in the split under the pointer.
 Use **Edit → Structure → Edit Block timing** for the nine native NX20 Block
 scalars. The toolbar's **All splits** option applies a Start Time change as one
 relative delta across every Block, while **Edit → Editable Inspector timing
 values** allows direct typed edits of those same timing fields. `Shift` extends
-a rectangular selection and `Ctrl` toggles cells; copy/paste, mirror, filtered
-replace, erase, and application of the current tool operate as one undo step.
-Audio source selection, metronome mode, and chart following live under **Audio**;
-engine profile and Snap live under **File → Settings**. On Play, an active
-selection becomes the seek anchor; without one, playback starts at the beat at
-or immediately before the 7% viewport playhead. Audio offset remains a
-session-only calibration action in the Audio menu. The paused authoring grid
-retains the selected row zoom; Beat Split never silently divides it. During
-Play, the spatial projection uses per-row `Scroll`; row timing already contains
-Beat Split, so tickcount is not multiplied twice, including zero-height
-`scroll = 0` blocks. Returning to Pause restores the editable grid while
-retaining the playhead at the same viewport position. PCM WAV and supported
-compressed audio receive an in-timeline waveform; compressed and staged ENC2
-audio is decoded asynchronously through Qt while playback and waveform share the
-same staged source. A blank virtual tail after the last row lets followed
-playback keep the playhead at 7% through the chart endpoint; the tail never
-becomes editable or serialized.
+a rectangular selection and `Ctrl` toggles cells; copy/cut/paste, transforms,
+filtered replace, erase, and application of the current tool operate as one undo
+step. Audio source selection, metronome mode, and chart following live under
+**Audio**; engine profile and Snap live under **File → Settings**.
+
 Choose the engine profile before opening a folder. **Edit → Metadata** operates
 on the Header, Split, or Block selected in the workspace tree and preserves
 unknown entries and duplicate order. Proven trailer strings may be edited with
@@ -194,6 +197,7 @@ without changing chart data. Folder batches show every affected document before
 changing memory and still require **Save All**. NFO mirrors remain an explicit
 compare/export action and are never synchronized merely because their basename
 matches an NX chart.
+
 The bundled royalty-free authoring pack and optional local visual overrides are
 documented in [`docs/VISUAL_PACKS.md`](docs/VISUAL_PACKS.md). No proprietary
 sprites ship with the project.
@@ -221,17 +225,22 @@ and NFO files, reconstructs each file from the model, and compares the bytes.
 NX10 inputs are routed through the dedicated importer and its projection
 report; they are never accepted by the native NX20 codec.
 
-Baseline recorded on 2026-08-10:
+Current recorded corpus evidence includes:
 
 - 12,909/12,909 NX20/NFO files rebuilt byte-exactly;
-- 12 NX10 files correctly classified outside the native NX20 codec;
-- 12/12 NXA-embedded NX10 files imported cleanly into stable native NX20;
-- zero byte differences;
-- zero structural errors.
+- 12 NXA-embedded NX10 files imported cleanly into stable native NX20;
+- 2,125/2,125 supplied NX2 NX10 charts inside the frozen observed importer
+  domain;
+- 2,111 same-path official NX2-to-NXA successors used for semantic conversion
+  evidence;
+- all 110 observed nonzero NX10 note codes backed by successor evidence;
+- exact Division projection across 18,769 aligned successor Blocks;
+- zero NX20/NFO round-trip byte differences and zero structural errors in the
+  recorded gate.
 
 The largest measured chart improved from 150.7 MiB and 1.48 s in rich mode to
 31.3 MiB and 0.244 s in compact mode. See [the corpus gate](docs/CORPUS_GATE.md)
-and [the corpus analysis](docs/NX20_NFO_CORPUS_ANALYSIS.md).
+and [the NX2/NXA conversion analysis](docs/NX2_NXA_CONVERSION_ANALYSIS.md).
 
 ## Architecture and roadmap
 
@@ -246,24 +255,18 @@ and [the corpus analysis](docs/NX20_NFO_CORPUS_ANALYSIS.md).
 
 The authoring viewport and gameplay preview are separate projections of the same
 canonical document. Only the StepNX core may open, mutate, or save NX/NFO.
-Open **Preview → Open gameplay preview** to choose the `.NX` filename, a speed
-from 1x through 9x, and startup COMMAND in one window. The selected chart alone
-defines the field layout. Random route state is generated internally and is
-not exposed as a game option; nonzero matching lower-five-bit banks reuse one
-Block index, while different banks remain independent. Zero lower bits mean no
-bank, so every `80`/`40` occurrence is independent. During the run, `1`
-through `9` select 1x through 9x, `F6` toggles local debug and live FPS/paint
-timing, `F8` toggles autoplay, `F9` toggles the guide, and Space seeks
-forward five seconds. P1 uses `Q E S Z C`; P2 uses
+Open **Preview → Open gameplay preview** to choose the `.NX` filename, speed,
+and startup modifiers. Random route state is generated internally and is not
+exposed as a game option. During the run, `1` through `9` select 1x through 9x,
+`F6` toggles the debug overlay, `F8` toggles autoplay, `F9` toggles the guide,
+and Space seeks forward five seconds. P1 uses `Q E S Z C`; P2 uses
 `Home PageUp Num5 End PageDown`. These controls are independently implemented;
-no PIUTESTER code or official game assets are distributed. The existing Audio
-menu Metronome toggle and per-arrow/per-beat mode also apply while a preview tab
-is active.
+no PIUTESTER code or official game assets are distributed.
 
 ## License and trademark
 
-Code is licensed under Apache-2.0. Copyright © 2026 Autumnal and StepNX
-Studio contributors.
+Code is licensed under Apache-2.0. Copyright © 2026 Autumnal and StepNX Studio
+contributors.
 
 StepNX Studio is an unofficial project and is not affiliated with Andamiro.
 Official game assets are not distributed by this repository.
