@@ -72,7 +72,7 @@ class EditorFieldZoomTests(unittest.TestCase):
     def test_widget_and_lightmap_geometry_follow_all_presets(self) -> None:
         widget = TimelineWidget(self.snapshot)
         try:
-            baseline_viewport_size = widget.viewport().size()
+            baseline_widget_size = widget.size()
             previous_lane_width = widget._geometry.lane_width
             for percent in EDITOR_ZOOM_PRESETS[1:]:
                 with self.subTest(percent=percent):
@@ -81,7 +81,7 @@ class EditorFieldZoomTests(unittest.TestCase):
                     self.assertGreater(widget._geometry.lane_width, previous_lane_width)
                     rect = lightmap_rect(widget, 1, 0.0, widget._geometry.row_height)
                     self.assertAlmostEqual(rect.width(), widget._geometry.lane_width - 4.0)
-                    self.assertEqual(widget.viewport().size(), baseline_viewport_size)
+                    self.assertEqual(widget.size(), baseline_widget_size)
                     previous_lane_width = widget._geometry.lane_width
         finally:
             widget.deleteLater()
