@@ -298,14 +298,17 @@ def mirror_selection(
         or (columns == 10 and lanes in (tuple(range(5)), tuple(range(5, 10))))
     ):
         permutation = (3, 4, 2, 0, 1)
-    elif columns == 6 and lanes == tuple(range(6)):
+    elif len(lanes) == 6 and (
+        (columns == 6 and lanes == tuple(range(6)))
+        or (columns == 10 and lanes == tuple(range(2, 8)))
+    ):
         permutation = (5, 3, 4, 1, 2, 0)
     elif columns == 10 and lanes == tuple(range(10)):
         permutation = (8, 9, 7, 5, 6, 3, 4, 2, 0, 1)
     else:
         raise ValueError(
             "Mirror requires all 5 Single columns, either 5-column pad or all "
-            "10 Double columns, or all 6 Half Double columns"
+            "10 Double columns, or the 6 central Half Double columns"
         )
     return _transform_selection(
         document,

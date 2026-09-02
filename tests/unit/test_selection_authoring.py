@@ -116,6 +116,7 @@ class BulkSelectionTests(unittest.TestCase):
             (10, tuple(range(10)), [8, 9, 7, 5, 6, 3, 4, 2, 0, 1]),
             (10, tuple(range(5)), [3, 4, 2, 0, 1, 5, 6, 7, 8, 9]),
             (10, tuple(range(5, 10)), [0, 1, 2, 3, 4, 8, 9, 7, 5, 6]),
+            (10, tuple(range(2, 8)), [0, 1, 7, 5, 6, 3, 4, 2, 8, 9]),
         )
         for columns, lanes, expected in cases:
             with self.subTest(columns=columns, lanes=lanes):

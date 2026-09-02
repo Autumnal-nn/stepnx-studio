@@ -283,12 +283,15 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
             self.flip_horizontal_selection_action = self.transform_selection_menu.addAction(
                 "Flip Horizontal", self._flip_horizontal_selected_notes
             )
+            self.flip_horizontal_selection_action.setShortcut("X")
             self.flip_vertical_selection_action = self.transform_selection_menu.addAction(
                 "Flip Vertical", self._flip_vertical_selected_notes
             )
+            self.flip_vertical_selection_action.setShortcut("Y")
             self.mirror_selection_action = self.transform_selection_menu.addAction(
                 "Mirror", self._mirror_selected_notes
             )
+            self.mirror_selection_action.setShortcut("M")
             self.replace_selection_action = edit_menu.addAction(
                 "Replace selected note type…", self._replace_selected_type
             )
