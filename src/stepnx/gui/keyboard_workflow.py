@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
+from PySide6.QtWidgets import QMessageBox
 
 from stepnx.authoring.selection import CellSelection, CellTarget
 from stepnx.core.model import CompactRows, OverlayRows
@@ -28,6 +29,49 @@ _FUNCTION_KEY_LABELS = {
     Qt.Key.Key_H: "Bonus / Hidden (H)",
     Qt.Key.Key_G: "Ghost (G)",
 }
+
+_SHORTCUT_HELP = """Global / window
+Ctrl+O        Open folder
+Ctrl+W        Close folder
+Ctrl+I        Import charts
+Ctrl+S        Save All
+Ctrl+Shift+S  Save All (legacy shortcut)
+Ctrl+Z / Ctrl+Y  Undo / Redo
+Ctrl+Shift+P  Open gameplay preview
+Ctrl+PageUp / Ctrl+PageDown  Previous / next chart tab
+Alt+1..5      Workspace / Timeline / Inspector / Diagnostics / Routes
+F1            This keyboard map
+
+Timeline focus
+Arrows        Move cell cursor
+Shift+Arrows  Extend rectangular selection inside one Block
+Home / End    First / last lane
+Ctrl+Home / Ctrl+End  First / last row in current Block
+Ctrl+Up / Ctrl+Down  Previous / next Split segment
+Enter         Apply current tool; Toggle behaves like a click
+Space         Play / pause
+1..0          Toggle, Select, Roll, Tap, Hold head/body/tail, Item, Division, Erase
+N / H / G     Normal, Bonus/Hidden, Ghost function
+T / B / F / V Focus Tool, Bank/ID, Function, Visibility controls
+Delete        Erase selected notes
+Esc           Clear selection
+Ctrl+C/X/V    Copy / Cut / Paste notes
+X / Y / M     Flip horizontal / Flip vertical / Mirror
+
+Workspace tree focus
+Enter         Open / inspect selected item
+Ctrl+Enter    Edit metadata for Header, Split, or Block scope
+Alt+Enter     Block timing / Split selector / Header metadata
+Insert        Insert Block after selected Block
+Shift+Insert  Insert Split after current structure selection
+Ctrl+Delete   Remove Block
+Ctrl+Shift+Delete  Remove Split
+Ctrl+Up/Down  Move Block
+Ctrl+Shift+Up/Down  Move Split
+
+Routes focus
+Enter         Activate selected route / branch
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,9 +204,6 @@ def _selection_to_cursor(widget, cursor: KeyboardCursor, *, extend: bool) -> Cel
     anchor = selection.anchor
     anchor_index = _row_index(segment.block.rows, int(anchor.row_id))
     if anchor_index is None:
-        # A rectangular selection is intentionally confined to one Block.
-        # Crossing a Block boundary moves the keyboard cursor there and starts
-        # a fresh rectangle instead of fabricating a cross-Block selection.
         return selection.replace(target)
 
     row_start, row_end = sorted((int(anchor_index), cursor.row_index))
@@ -498,6 +539,32 @@ def _scope_transport_shortcut(window) -> None:
         shortcut.setEnabled(False)
 
 
+def _menu_by_title(window, title: str):
+    wanted = title.casefold()
+    for action in window.menuBar().actions():
+        menu = action.menu()
+        if menu is not None and menu.title().replace("&", "").casefold() == wanted:
+            return menu
+    return None
+
+
+def _install_keyboard_help(window) -> None:
+    help_menu = _menu_by_title(window, "Help")
+    if help_menu is None:
+        help_menu = window.menuBar().addMenu("&Help")
+    action = QAction("Keyboard shortcuts…", window)
+    action.setShortcut(QKeySequence("F1"))
+    action.triggered.connect(
+        lambda *_: QMessageBox.information(
+            window,
+            "Keyboard shortcuts",
+            _SHORTCUT_HELP,
+        )
+    )
+    help_menu.addAction(action)
+    window.keyboard_help_action = action
+
+
 def install_keyboard_workflow(window) -> None:
     if getattr(window, "_keyboard_workflow_installed", False):
         return
@@ -508,6 +575,7 @@ def install_keyboard_workflow(window) -> None:
     _install_save_shortcuts(window)
     _scope_transport_shortcut(window)
     _install_pane_shortcuts(window)
+    _install_keyboard_help(window)
 
     tree_filter = _TreeKeyboardFilter(window)
     window.tree.installEventFilter(tree_filter)
