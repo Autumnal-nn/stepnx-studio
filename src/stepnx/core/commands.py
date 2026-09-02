@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass, replace
 from typing import Protocol, TypeVar
 
@@ -539,11 +540,23 @@ class SetNotesAt:
             split_changed = False
             for block in split.blocks:
                 rows = block.rows
-                edited_rows: list[Row] | None = None
-                for row_index, candidate in enumerate(rows):
-                    row_edits = pending_by_row.get(candidate.stable_id)
-                    if not row_edits:
-                        continue
+                base = rows.base if isinstance(rows, OverlayRows) else rows
+                indexed_edits: dict[int, dict[int, bytes]] = {}
+                if isinstance(base, CompactRows):
+                    row_ids = base._row_ids
+                    for row_id, row_edits in pending_by_row.items():
+                        row_index = bisect_left(row_ids, row_id)
+                        if row_index < len(row_ids) and int(row_ids[row_index]) == row_id:
+                            indexed_edits[row_index] = row_edits
+                else:
+                    for row_index, candidate in enumerate(rows):
+                        row_edits = pending_by_row.get(candidate.stable_id)
+                        if row_edits:
+                            indexed_edits[row_index] = row_edits
+
+                replacements: dict[int, Row] = {}
+                for row_index, row_edits in indexed_edits.items():
+                    candidate = rows[row_index]
                     if isinstance(candidate, LightmapRow):
                         raise ModelInvariantError("note tools cannot edit a Lightmap row")
                     for lane in row_edits:
@@ -556,10 +569,21 @@ class SetNotesAt:
                         if all(raw == b"\x00\x00\x00\x00" for raw in row_edits.values()):
                             matches += len(row_edits)
                             continue
-                        cells = [
-                            NoteCell(ids.take(), b"\x00\x00\x00\x00", None)
-                            for _ in range(columns)
-                        ]
+                        original = (
+                            rows.base[row_index]
+                            if isinstance(rows, OverlayRows)
+                            else None
+                        )
+                        if isinstance(original, PackedNoteRow):
+                            cells = [
+                                NoteCell(cell.stable_id, b"\x00\x00\x00\x00", None)
+                                for cell in original.cells
+                            ]
+                        else:
+                            cells = [
+                                NoteCell(ids.take(), b"\x00\x00\x00\x00", None)
+                                for _ in range(columns)
+                            ]
                     else:
                         rich = _rich_note_row(candidate)
                         if rich.cell_count != columns:
@@ -580,12 +604,21 @@ class SetNotesAt:
                         )
                     else:
                         replacement = NoteRow(candidate.stable_id, tuple(cells), None)
-                    if edited_rows is None:
-                        edited_rows = list(rows)
-                    edited_rows[row_index] = replacement
+                    replacements[row_index] = replacement
 
-                if edited_rows is not None:
-                    block = replace(block, rows=tuple(edited_rows))
+                if replacements:
+                    if isinstance(rows, OverlayRows):
+                        merged = dict(rows.replacements)
+                        merged.update(replacements)
+                        edited_rows = OverlayRows(rows.base, tuple(merged.items()))
+                    elif isinstance(rows, CompactRows):
+                        edited_rows = OverlayRows(rows, tuple(replacements.items()))
+                    else:
+                        materialized = list(rows)
+                        for row_index, replacement in replacements.items():
+                            materialized[row_index] = replacement
+                        edited_rows = tuple(materialized)
+                    block = replace(block, rows=edited_rows)
                     split_changed = True
                 blocks.append(block)
             splits.append(replace(split, blocks=tuple(blocks)) if split_changed else split)

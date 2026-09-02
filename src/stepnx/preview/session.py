@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from stepnx.preview.commands import GameplayCommand
@@ -51,6 +51,47 @@ class GameplayStats:
     max_combo: int = 0
     score: int = 0
     gauge: int = 500
+    judgments_by_bank: list[list[int]] = field(
+        default_factory=lambda: [[0, 0, 0, 0, 0] for _ in range(4)]
+    )
+    combo_by_bank: list[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    max_combo_by_bank: list[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    miss_combo_by_bank: list[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    max_miss_combo_by_bank: list[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    score_by_bank: list[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    item: int = 0
+    item_max: int = 0
+    heart: int = 0
+    heart_max: int = 0
+    bomb: int = 0
+    bomb_max: int = 0
+    potion: int = 0
+    potion_max: int = 0
+    velocity: int = 0
+    velocity_max: int = 0
+    hidden: int = 0
+    hidden_max: int = 0
+
+    def grade_for_bank(self, bank: int = 3) -> str:
+        """Return the PIUTESTER-style local grade projection for one skin bank."""
+
+        perfect, great, good, bad, miss = self.judgments_by_bank[bank]
+        total = perfect + great + good + bad + miss
+        if total == 0:
+            return "-"
+        accuracy = (
+            perfect + great * 0.9 + good * 0.75 + bad * 0.5
+        ) / total
+        for threshold, grade in (
+            (0.95, "S"),
+            (0.90, "A"),
+            (0.80, "B"),
+            (0.70, "C"),
+            (0.60, "D"),
+        ):
+            if accuracy >= threshold:
+                return grade
+        return "F"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +109,24 @@ _JUDGMENT_RANK = {
     Judgment.MISS: 4,
 }
 _GRADE_JUDGMENT = {value: key for key, value in _JUDGMENT_RANK.items()}
+
+# Semantic projection of the ordinary item families displayed by PIUTESTER.
+# IDs not listed still contribute to the aggregate Item counter.
+_ITEM_COUNTER = {
+    4: "hidden",
+    5: "bomb",
+    6: "bomb",
+    9: "heart",
+    10: "velocity",
+    12: "velocity",
+    13: "velocity",
+    14: "velocity",
+    15: "velocity",
+    16: "potion",
+    21: "velocity",
+    22: "bomb",
+    23: "potion",
+}
 
 EventKey = tuple[int, int, int, int]
 GroupKey = tuple[int, int, int, int, int]
@@ -118,6 +177,9 @@ class GameplaySession:
         )
         self._bank_combos = [0, 0, 0, 0]
         self._bank_max_combos = [0, 0, 0, 0]
+        self._bank_miss_combos = [0, 0, 0, 0]
+        self._bank_max_miss_combos = [0, 0, 0, 0]
+        self._bank_scores = [0, 0, 0, 0]
         self.stats = GameplayStats(gauge=self._gauge.life)
         self.judgments: dict[EventKey, Judgment] = {}
         self.judged_at_ms: dict[EventKey, float] = {}
@@ -165,6 +227,12 @@ class GameplaySession:
             group.time_ms for group in self._autoplay_groups
         )
         self._event_times = tuple(event.time_ms for event in stream.events)
+        self._item_events = tuple(
+            event for event in stream.events if self.is_item(event)
+        )
+        self._item_times = tuple(event.time_ms for event in self._item_events)
+        self._resolved_items: set[EventKey] = set()
+        self._autoplay_item_cursor = 0
         self._resolved_groups: set[GroupKey] = set()
         self._autoplay_cursor = 0
         self._event_cursor = 0
@@ -329,6 +397,10 @@ class GameplaySession:
         return event.base_note_type == 0x03 and not event.no_judge
 
     @staticmethod
+    def is_item(event: PreviewEvent) -> bool:
+        return event.base_note_type == 0x01
+
+    @staticmethod
     def starts_pad_press(event: PreviewEvent) -> bool:
         return (
             event.note_type in (0x3, 0x7)
@@ -348,6 +420,9 @@ class GameplaySession:
         )
         self._bank_combos[:] = (0, 0, 0, 0)
         self._bank_max_combos[:] = (0, 0, 0, 0)
+        self._bank_miss_combos[:] = (0, 0, 0, 0)
+        self._bank_max_miss_combos[:] = (0, 0, 0, 0)
+        self._bank_scores[:] = (0, 0, 0, 0)
         self.stats = GameplayStats(gauge=self._gauge.life)
         self.judgments.clear()
         self.judged_at_ms.clear()
@@ -359,7 +434,9 @@ class GameplaySession:
         self._pressed_since.clear()
         self._errors.clear()
         self._resolved_groups.clear()
+        self._resolved_items.clear()
         self._autoplay_cursor = 0
+        self._autoplay_item_cursor = 0
         self._event_cursor = 0
         self._miss_cursor = 0
         self.last_advance_event_count = 0
@@ -437,6 +514,36 @@ class GameplaySession:
         self._bank_combos[bank] = 0
         self._bank_combos[3] = 0
 
+    def _update_miss_combo(self, bank: int, *, missed: bool) -> None:
+        if missed:
+            self._bank_miss_combos[bank] += 1
+            self._bank_max_miss_combos[bank] = max(
+                self._bank_max_miss_combos[bank], self._bank_miss_combos[bank]
+            )
+            if bank != 3:
+                self._bank_miss_combos[3] += 1
+                self._bank_max_miss_combos[3] = max(
+                    self._bank_max_miss_combos[3], self._bank_miss_combos[3]
+                )
+            return
+        self._bank_miss_combos[bank] = 0
+        self._bank_miss_combos[3] = 0
+
+    def _record_item(self, event: PreviewEvent, *, acquired: bool) -> None:
+        key = self.event_key(event)
+        if key in self._resolved_items:
+            return
+        self._resolved_items.add(key)
+        self.stats.item_max += 1
+        if acquired:
+            self.stats.item += 1
+        counter = _ITEM_COUNTER.get(event.param)
+        if counter is not None:
+            maximum = f"{counter}_max"
+            setattr(self.stats, maximum, getattr(self.stats, maximum) + 1)
+            if acquired:
+                setattr(self.stats, counter, getattr(self.stats, counter) + 1)
+
     def _apply_native_postprocess(
         self,
         projection: JudgeUnitProjection,
@@ -462,6 +569,7 @@ class GameplaySession:
         else:
             self._clear_combo(bank)
             score_combo = self._bank_combos[bank]
+        self._update_miss_combo(bank, missed=grade == 4)
 
         score_delta = native_score_delta(
             grade,
@@ -470,7 +578,13 @@ class GameplaySession:
             ordinary_note_miss=projection.note_count != 0,
             alt_skin_factor=projection.alt_skin_factor,
         )
-        score = add_score_floor_zero(self.stats.score, score_delta)
+        self._bank_scores[bank] = add_score_floor_zero(
+            self._bank_scores[bank], score_delta
+        )
+        if bank != 3:
+            self._bank_scores[3] = add_score_floor_zero(
+                self._bank_scores[3], score_delta
+            )
         self._gauge.apply_grade(grade)
 
         # This object is read continuously by the renderer. Mutating its slot
@@ -482,9 +596,17 @@ class GameplaySession:
         current.good += grade == 2
         current.bad += grade == 3
         current.miss += grade == 4
+        current.judgments_by_bank[bank][grade] += 1
+        if bank != 3:
+            current.judgments_by_bank[3][grade] += 1
         current.combo = self._bank_combos[3]
         current.max_combo = max(current.max_combo, self._bank_max_combos[3])
-        current.score = score
+        current.combo_by_bank[:] = self._bank_combos
+        current.max_combo_by_bank[:] = self._bank_max_combos
+        current.miss_combo_by_bank[:] = self._bank_miss_combos
+        current.max_miss_combo_by_bank[:] = self._bank_max_miss_combos
+        current.score_by_bank[:] = self._bank_scores
+        current.score = self._bank_scores[3]
         current.gauge = self._gauge.life
 
     def _finalize_group(self, group_key: GroupKey) -> None:
@@ -601,6 +723,14 @@ class GameplaySession:
                     for event in group.step_effect_events:
                         self._emit_step_effect(event, group.time_ms)
 
+            while self._autoplay_item_cursor < len(self._item_events):
+                event = self._item_events[self._autoplay_item_cursor]
+                if event.time_ms > time_ms:
+                    break
+                self._autoplay_item_cursor += 1
+                self.last_advance_event_count += 1
+                self._record_item(event, acquired=True)
+
             # Every eligible past group is already Perfect. Running the manual
             # miss cursor here used to traverse the same dense body stream a
             # second time just to rediscover those dictionary entries.
@@ -631,6 +761,8 @@ class GameplaySession:
             self._miss_cursor += 1
             if self.is_judged_note(event):
                 self._record_event(event, Judgment.MISS, None)
+            elif self.is_item(event):
+                self._record_item(event, acquired=False)
 
     def press(self, lane: int, time_ms: float | None = None) -> Judgment | None:
         moment = self.time_ms if time_ms is None else float(time_ms)
@@ -641,8 +773,9 @@ class GameplaySession:
             event
             for event in self.stream.events
             if event.lane == lane
-            and self.starts_pad_press(event)
+            and (self.starts_pad_press(event) or self.is_item(event))
             and self.event_key(event) not in self.judgments
+            and self.event_key(event) not in self._resolved_items
             and self.windows.can_judge(moment - event.time_ms)
         ]
         if not candidates:
@@ -650,6 +783,9 @@ class GameplaySession:
             return None
         event = min(candidates, key=lambda item: abs(item.time_ms - moment))
         self._emit_step_effect(event, moment)
+        if self.is_item(event):
+            self._record_item(event, acquired=True)
+            return None
         error = moment - event.time_ms
         grade = self.windows.grade_for_error(error)
         if grade is None:
@@ -670,6 +806,7 @@ class GameplaySession:
             self._autoplay_cursor = bisect_left(
                 self._autoplay_group_times, self.time_ms
             )
+            self._autoplay_item_cursor = bisect_left(self._item_times, self.time_ms)
         else:
             # Autoplay already resolved everything through the current time.
             # Start manual cursors at the first future / not-yet-expired event.

@@ -66,6 +66,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
         TimingProjection,
         WaveformError,
         copy_selection,
+        cut_selection,
         create_authoring_snapshot,
         insert_empty_block_after,
         insert_empty_split_after,
@@ -75,6 +76,8 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
         load_visual_pack,
         metadata_drafts,
         metadata_owner,
+        flip_horizontal_selection,
+        flip_vertical_selection,
         mirror_selection,
         modify_selection_notes,
         move_block,
@@ -260,10 +263,6 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 "Erase selected notes", self._erase_selected_notes
             )
             self.clear_selection_notes_action.setShortcut("Delete")
-            self.mirror_selection_action = edit_menu.addAction(
-                "Mirror selected notes", self._mirror_selected_notes
-            )
-            self.mirror_selection_action.setShortcut("Ctrl+M")
             self.clear_selection_action = edit_menu.addAction(
                 "Clear selection", self._clear_selection
             )
@@ -272,10 +271,27 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 "Copy selected notes", self._copy_selected_notes
             )
             self.copy_selection_action.setShortcut("Ctrl+C")
+            self.cut_selection_action = edit_menu.addAction(
+                "Cut selected notes", self._cut_selected_notes
+            )
+            self.cut_selection_action.setShortcut("Ctrl+X")
             self.paste_selection_action = edit_menu.addAction(
                 "Paste notes at selection anchor", self._paste_selected_notes
             )
             self.paste_selection_action.setShortcut("Ctrl+V")
+            self.transform_selection_menu = edit_menu.addMenu("Transform Selection")
+            self.flip_horizontal_selection_action = self.transform_selection_menu.addAction(
+                "Flip Horizontal", self._flip_horizontal_selected_notes
+            )
+            self.flip_horizontal_selection_action.setShortcut("X")
+            self.flip_vertical_selection_action = self.transform_selection_menu.addAction(
+                "Flip Vertical", self._flip_vertical_selected_notes
+            )
+            self.flip_vertical_selection_action.setShortcut("Y")
+            self.mirror_selection_action = self.transform_selection_menu.addAction(
+                "Mirror", self._mirror_selected_notes
+            )
+            self.mirror_selection_action.setShortcut("M")
             self.replace_selection_action = edit_menu.addAction(
                 "Replace selected note type…", self._replace_selected_type
             )
@@ -1319,8 +1335,11 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 )
                 self.clear_selection_notes_action.setEnabled(has_selection)
                 self.mirror_selection_action.setEnabled(has_selection)
+                self.flip_horizontal_selection_action.setEnabled(has_selection)
+                self.flip_vertical_selection_action.setEnabled(has_selection)
                 self.clear_selection_action.setEnabled(has_selection)
                 self.copy_selection_action.setEnabled(has_selection)
+                self.cut_selection_action.setEnabled(has_selection)
                 self.paste_selection_action.setEnabled(
                     has_selection and self.note_clipboard is not None
                 )
@@ -1608,7 +1627,7 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 return
             self._execute_bulk(set_selection_raw(widget.selection, b"\x00\x00\x00\x00"))
 
-        def _mirror_selected_notes(self) -> None:
+        def _transform_selected_notes(self, transform, title: str) -> None:
             document_index = self._current_document_index()
             widget = self.tabs.currentWidget()
             if (
@@ -1619,11 +1638,24 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 return
             document = self.sessions[document_index].current
             try:
-                command, selection = mirror_selection(document, widget.selection)
+                command, selection = transform(document, widget.selection)
             except (ValueError, ModelInvariantError) as exc:
-                QMessageBox.critical(self, "Cannot mirror selection", str(exc))
+                QMessageBox.critical(self, f"Cannot {title.lower()}", str(exc))
                 return
             self._execute_bulk(command, selection=selection)
+
+        def _flip_horizontal_selected_notes(self) -> None:
+            self._transform_selected_notes(
+                flip_horizontal_selection, "Flip selection horizontally"
+            )
+
+        def _flip_vertical_selected_notes(self) -> None:
+            self._transform_selected_notes(
+                flip_vertical_selection, "Flip selection vertically"
+            )
+
+        def _mirror_selected_notes(self) -> None:
+            self._transform_selected_notes(mirror_selection, "Mirror selection")
 
         def _clear_selection(self) -> None:
             widget = self.tabs.currentWidget()
@@ -1646,6 +1678,24 @@ def _run(folder: Path | None, profile: str = "nxa-native") -> int:
                 f"Copied {len(self.note_clipboard.cells)} note cell(s)", 5000
             )
             self._refresh_edit_actions()
+
+        def _cut_selected_notes(self) -> None:
+            document_index = self._current_document_index()
+            widget = self.tabs.currentWidget()
+            if document_index is None or not isinstance(widget, TimelineWidget):
+                return
+            try:
+                clipboard, command = cut_selection(
+                    self.sessions[document_index].current, widget.selection
+                )
+            except (ValueError, ModelInvariantError) as exc:
+                QMessageBox.critical(self, "Cannot cut selection", str(exc))
+                return
+            self.note_clipboard = clipboard
+            self._execute_bulk(command)
+            self.statusBar().showMessage(
+                f"Cut {len(clipboard.cells)} note cell(s)", 5000
+            )
 
         def _paste_selected_notes(self) -> None:
             document_index = self._current_document_index()

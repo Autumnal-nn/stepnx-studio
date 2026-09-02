@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from dataclasses import replace
 from fractions import Fraction
 
@@ -9,7 +10,14 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QMessageBox, QToolBar
 
 from stepnx.authoring.snapshot import create_authoring_snapshot
-from stepnx.core.model import EmptyRow, LightmapRow, NoteRow, PackedNoteRow
+from stepnx.core.model import (
+    CompactRows,
+    EmptyRow,
+    LightmapRow,
+    NoteRow,
+    OverlayRows,
+    PackedNoteRow,
+)
 from stepnx.core.scalars import RawF32
 from stepnx.gui.phase10_install import _resize_split_to_reference_rows
 
@@ -205,6 +213,7 @@ def _restore_active_blocks(snapshot, previous):
 
 def _install_fast_note_feedback(window) -> None:
     original_apply_document = window._apply_document
+    original_execute_bulk = window._execute_bulk
     original_click = getattr(window, "_phase10_click", None)
     original_hold = getattr(window, "_phase10_hold", None)
     if not callable(original_click) or not callable(original_hold):
@@ -270,6 +279,44 @@ def _install_fast_note_feedback(window) -> None:
         timer.start()
 
     window._apply_document = apply_document_fast
+
+    def bulk_block_id(command) -> int | None:
+        edits = getattr(command, "edits", ())
+        row_ids = {getattr(edit, "row_id", None) for edit in edits}
+        row_ids.discard(None)
+        if not row_ids or window.workspace is None:
+            return None
+        document_index = window._current_document_index()
+        if document_index is None:
+            return None
+        document = window.sessions[document_index].current
+        containing = []
+        for split in document.splits:
+            for block in split.blocks:
+                rows = block.rows
+                base = rows.base if isinstance(rows, OverlayRows) else rows
+                if isinstance(base, CompactRows):
+                    found = True
+                    for row_id in row_ids:
+                        index = bisect_left(base._row_ids, row_id)
+                        if index >= len(base) or int(base._row_ids[index]) != row_id:
+                            found = False
+                            break
+                else:
+                    block_row_ids = {row.stable_id for row in rows}
+                    found = row_ids <= block_row_ids
+                if found:
+                    containing.append(block.stable_id)
+        return containing[0] if len(containing) == 1 else None
+
+    def execute_bulk_fast(command, *, selection=None):
+        window._phase11_fast_note_block_id = bulk_block_id(command)
+        try:
+            return original_execute_bulk(command, selection=selection)
+        finally:
+            window._phase11_fast_note_block_id = None
+
+    window._execute_bulk = execute_bulk_fast
 
     def click_fast(widget, hit):
         window._phase11_fast_note_block_id = hit[0].block.stable_id

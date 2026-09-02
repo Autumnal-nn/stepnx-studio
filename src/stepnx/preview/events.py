@@ -387,9 +387,23 @@ def _runtime_raw(raw: bytes, modifier: EffectiveModifier) -> bytes:
     if len(raw) != 4:
         return raw
     visual = apply_global_visibility_effect(raw[1], modifier.visibility)
-    if visual == raw[1]:
+    base_note_type = raw[0] & 0x03
+    low_context = raw[3] & 0x3F
+    if base_note_type == 0x03:
+        payload14 = raw[2] | (low_context << 8)
+        runtime_bank = (
+            payload14 % 3
+            if modifier.judge_bank or modifier.judge_by_note
+            else 0
+        )
+    elif base_note_type in (0x01, 0x02):
+        runtime_bank = 3
+    else:
+        runtime_bank = raw[3] >> 6
+    context = low_context | (runtime_bank << 6)
+    if visual == raw[1] and context == raw[3]:
         return raw
-    return bytes((raw[0], visual, raw[2], raw[3]))
+    return bytes((raw[0], visual, raw[2], context))
 
 
 def build_event_stream(

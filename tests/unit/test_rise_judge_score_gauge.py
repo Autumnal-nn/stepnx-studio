@@ -25,8 +25,18 @@ from stepnx.preview import (
 from tests.fixture_factory import make_normal_nx20
 
 
-def _tap_stream(*, raw: bytes = b"\x43\x03\x00\x00", metadata=()):
-    document = parse_bytes(make_normal_nx20(), source="NM.NX", row_storage="compact")
+def _tap_stream(
+    *,
+    raw: bytes = b"\x43\x03\x00\x00",
+    metadata=(),
+    profile: str = "nxa-native",
+):
+    document = parse_bytes(
+        make_normal_nx20(),
+        source="NM.NX",
+        row_storage="compact",
+        profile=profile,
+    )
     split = document.splits[0]
     block = replace(
         split.blocks[0],
@@ -98,6 +108,40 @@ class RiseJudgeTimingTests(unittest.TestCase):
 
 
 class RiseScoreTests(unittest.TestCase):
+    def test_event_stream_rebuilds_runtime_bank_from_payload_for_each_profile(
+        self,
+    ) -> None:
+        for profile, metadata_id in (
+            ("nxa-native", 64),
+            ("fiesta2", 68),
+            ("prime2", 68),
+        ):
+            with self.subTest(profile=profile):
+                stream = _tap_stream(
+                    raw=b"\x43\x03\x01\x00",
+                    metadata=((metadata_id, 1),),
+                    profile=profile,
+                )
+                event = stream.events[0]
+                session = GameplaySession(
+                    stream, parse_gameplay_command(""), autoplay=True
+                )
+
+                session.advance(event.time_ms)
+
+                self.assertEqual(event.bank, 1)
+                self.assertEqual(
+                    session.stats.judgments_by_bank[0], [0, 0, 0, 0, 0]
+                )
+                self.assertEqual(
+                    session.stats.judgments_by_bank[1], [1, 0, 0, 0, 0]
+                )
+
+    def test_event_stream_does_not_treat_source_slot_as_runtime_bank(self) -> None:
+        stream = _tap_stream(raw=b"\x43\x03\x00\x40")
+
+        self.assertEqual(stream.events[0].bank, 0)
+
     def test_getscore_table_combo_bonus_and_chord_multipliers(self) -> None:
         expected = (1000, 1000, 500, 100, -200)
         for grade, value in enumerate(expected):
@@ -136,6 +180,72 @@ class RiseScoreTests(unittest.TestCase):
         self.assertIs(session.press(0, event.time_ms), Judgment.PERFECT)
         self.assertEqual(session.stats.score, 1000)
         self.assertEqual(session.stats.combo, 1)
+
+    def test_debug_stats_keep_judgments_combo_score_and_grade_per_skin(self) -> None:
+        stream = _tap_stream()
+        first = stream.events[0]
+        second = replace(
+            first,
+            time_ms=first.time_ms + 100.0,
+            row_index=first.row_index + 1,
+            raw=bytes((first.raw[0], first.raw[1], first.raw[2], 0x40)),
+        )
+        stream = replace(stream, events=(first, second))
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+
+        session.advance(second.time_ms)
+
+        self.assertEqual(session.stats.judgments_by_bank[0], [1, 0, 0, 0, 0])
+        self.assertEqual(session.stats.judgments_by_bank[1], [1, 0, 0, 0, 0])
+        self.assertEqual(session.stats.judgments_by_bank[3], [2, 0, 0, 0, 0])
+        self.assertEqual(session.stats.combo_by_bank, [1, 1, 0, 2])
+        self.assertEqual(session.stats.max_combo_by_bank, [1, 1, 0, 2])
+        self.assertEqual(session.stats.score_by_bank, [1000, 1000, 0, 2000])
+        self.assertEqual(session.stats.grade_for_bank(3), "S")
+
+    def test_debug_stats_keep_current_and_max_miss_combo_per_skin(self) -> None:
+        stream = _tap_stream()
+        first = stream.events[0]
+        second = replace(
+            first,
+            time_ms=first.time_ms + 10.0,
+            row_index=first.row_index + 1,
+            raw=bytes((first.raw[0], first.raw[1], first.raw[2], 0x40)),
+        )
+        stream = replace(stream, events=(first, second))
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=False)
+
+        session.advance(second.time_ms + session.windows.late_limit_ms + 1.0)
+
+        self.assertEqual(session.stats.miss_combo_by_bank, [1, 1, 0, 2])
+        self.assertEqual(session.stats.max_miss_combo_by_bank, [1, 1, 0, 2])
+
+    def test_debug_stats_count_items_and_piutester_categories(self) -> None:
+        stream = _tap_stream()
+        source = stream.events[0]
+        items = tuple(
+            replace(
+                source,
+                time_ms=source.time_ms + offset,
+                row_index=source.row_index + index,
+                raw=bytes((0x01, 0x03, item_id, 0x00)),
+            )
+            for index, (offset, item_id) in enumerate(
+                ((10.0, 9), (20.0, 6), (30.0, 16), (40.0, 21), (50.0, 4)),
+                start=1,
+            )
+        )
+        stream = replace(stream, events=items)
+        session = GameplaySession(stream, parse_gameplay_command(""), autoplay=True)
+
+        session.advance(items[-1].time_ms)
+
+        self.assertEqual((session.stats.item, session.stats.item_max), (5, 5))
+        self.assertEqual((session.stats.heart, session.stats.heart_max), (1, 1))
+        self.assertEqual((session.stats.bomb, session.stats.bomb_max), (1, 1))
+        self.assertEqual((session.stats.potion, session.stats.potion_max), (1, 1))
+        self.assertEqual((session.stats.velocity, session.stats.velocity_max), (1, 1))
+        self.assertEqual((session.stats.hidden, session.stats.hidden_max), (1, 1))
 
 
 class RiseGaugeTests(unittest.TestCase):
