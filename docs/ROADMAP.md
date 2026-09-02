@@ -116,9 +116,12 @@ Implemented:
 - rectangular stable-ID selection;
 - copy, cut, paste, erase, filtered replace, horizontal/vertical flip and
   StepEdit-compatible mirror;
+- cross-Block/Split rectangular selection and bulk clipboard/transform behavior
+  on the active Timeline route, using encoded row count rather than tick density
+  as the row axis;
 - sparse bulk-note execution for responsive transforms;
-- source-backed rectangle selection reuses compact stable-row IDs instead of
-  decoding the complete Block before the operation starts;
+- source-backed selection reuses compact stable-row IDs instead of decoding
+  complete Blocks before the operation starts;
 - typed Split selection-byte editing and decoded mode/bank display;
 - Hidden, Invisible, Appear, Vanish, VanishLow and AppearLow visualization;
 - audio transport, compressed/staged waveform rendering and metronome;
@@ -126,7 +129,11 @@ Implemented:
 - keyboard-first Timeline navigation, selection, placement and transforms with
   editor-context shortcut scoping;
 - keyboard Workspace/Routes activation, structure/metadata access, pane focus,
-  chart-tab cycling, playback and shortcut help.
+  playback and shortcut help;
+- native Qt `Ctrl+Tab` / `Ctrl+Shift+Tab` chart-tab behavior without a redundant
+  StepNX `Ctrl+PageUp/PageDown` mapping;
+- three-channel `LM.NX` Toggle/Select authoring with Cut/Copy/Paste/Delete and
+  lossless preservation of the fourth raw row byte.
 
 ### Advanced NX20 authoring
 
@@ -185,9 +192,9 @@ cycles.
 
 ### 2. Performance regression suite — complete
 
-The sparse selection paths introduced/fixed for 0.9.4 are now release-gated.
-The deterministic fixture uses a 200,000-row compact/source-backed chart and
-executes 50, 500 and 5,000-cell cases for:
+The sparse selection paths introduced/fixed for 0.9.4 are release-gated. The
+deterministic fixture uses a 200,000-row compact/source-backed chart and executes
+50, 500 and 5,000-cell cases for:
 
 - copy/cut/paste;
 - horizontal/vertical flip;
@@ -210,8 +217,8 @@ See `PERFORMANCE_REGRESSION_GATE.md`.
 
 ### 3. Save/recovery torture tests — complete
 
-The save/recovery layer now has an explicit fault-injection matrix rather than
-only happy-path and ordinary rollback coverage.
+The save/recovery layer has an explicit fault-injection matrix rather than only
+happy-path and ordinary rollback coverage.
 
 Save-side torture cases cover:
 
@@ -248,14 +255,11 @@ Recovery-side torture cases cover:
 snapshot directories containing a manifest, so crash staging is never presented
 as a valid recovery point.
 
-Last confirmed validation checkpoint before the keyboard branch:
+Item-3 validation checkpoint:
 
 - Linux/glibc 2.31: 573 tests in 5.064 s, OK;
 - Windows: strict gate accepted 573 tests in 6.645 s with one expected
-  case-collision skip;
-- the confirmed Windows discovery floor at that checkpoint was 573: 551 tests
-  from the 0.9.4 release, nine selection-performance regressions, and thirteen
-  save/recovery torture tests.
+  case-collision skip.
 
 A deliberate boundary remains: ordinary filesystem renames cannot make an
 entire multi-file `Save All` physically atomic against hard power loss or an
@@ -266,51 +270,95 @@ that stronger guarantee.
 
 See `SAVE_RECOVERY_TORTURE.md`.
 
-### 4. Keyboard workflow audit — implemented, CI validation pending
+### 4. Keyboard workflow audit — automated gate green, manual re-smoke pending
 
-The audit was performed as a complete authoring workflow rather than a shortcut
-inventory.
+The audit is a complete authoring workflow rather than a shortcut inventory.
 
-Implemented behavior includes:
+The first implementation passed a 586-test Windows/Linux CI checkpoint, then
+manual Windows smoke testing found four practical defects:
+
+- repeated `Shift+Arrow` stopped growing after the second cell because every
+  movement restarted from the fixed anchor;
+- rectangular selection was unnecessarily Block-local;
+- Enter with Toggle used generic Tap placement rather than true toggle behavior;
+- StepNX attempted redundant `Ctrl+PageUp/PageDown` chart-tab shortcuts even
+  though native `Ctrl+Tab` already supplied the desired behavior.
+
+The corrected workflow now includes:
 
 - stable-ID Timeline cursor navigation with arrows and Home/End;
-- Shift-arrow rectangular selection inside one Block;
-- Ctrl navigation across non-empty timeline segments without boundary wrap;
+- a fixed selection anchor plus moving Shift-selection edge;
+- cross-Block/Split rectangle construction over the active visible row sequence;
+- row-count semantics independent of Beat Split, BPM or tick density;
+- cross-Block Cut/Copy/Paste and playable vertical transforms;
 - direct `1..0` tool selection and N/H/G note-function selection;
-- Enter placement with Toggle preserving click semantics;
+- true Enter/Toggle behavior for single and multiple selections;
 - Timeline-only Delete, Escape, Ctrl+C/X/V and X/Y/M editing commands;
 - Timeline-only Space playback, replacing the former application-wide shortcut;
-- `Alt+1..5` pane focus and `Ctrl+PageUp/PageDown` chart-tab navigation;
+- `Alt+1..5` pane focus;
+- native `Ctrl+Tab` / `Ctrl+Shift+Tab` tab switching, with no custom Ctrl+Pg
+  mapping;
 - Workspace-tree Enter activation plus tree-scoped metadata, timing, Split
   selector, insertion, removal and reorder commands;
 - Routes activation with Enter;
 - standard `Ctrl+S` Save All while retaining `Ctrl+Shift+S`;
 - `F1` Help > Keyboard shortcuts discoverability.
 
-The new keyboard paths reuse compact stable-row IDs and binary-search helpers;
-they do not introduce whole-Block row materialization. The regression suite
-includes an explicit `CompactRows.__iter__` rejection guard for keyboard
-selection movement.
+The same manual audit exposed the missing `LM.NX` authoring category. The branch
+now provides:
 
-Thirteen dedicated tests are added, raising the intended strict Windows
-discovery floor from 573 to **586**. This is not yet recorded as a green
-Windows/Linux checkpoint because the repository CI workflow runs for pull
-requests and pushes to `main`, while this hardening branch has not been opened as
-a pull request. The 573-test item-3 run remains the last confirmed platform
-checkpoint until that gate executes.
+- three visible/editable Lightmap lanes aligned to raw row bytes 0..2;
+- Toggle and Select as the only meaningful Lightmap tools;
+- Ctrl/Shift multi-selection across visible Block/Split boundaries;
+- Cut/Copy/Paste/Delete on selected light cells;
+- one-byte Lightmap clipboard cells kept separate from four-byte note cells;
+- note-specific Bank/Function/Visibility/Brain controls ignored for Lightmap;
+- all other placement tools still rejected as non-chart operations;
+- raw byte 3 preserved verbatim and intentionally not editable.
 
-See `KEYBOARD_WORKFLOW_AUDIT.md`.
+The Lightmap row model is backed by a corpus audit of **2,896,556 rows** across
+NXA, Fiesta 2 and Prime 2. The first three bytes are exclusively binary
+`00`/`01`; the fourth byte is always `00`. StepNX therefore authors the proven
+three lights and preserves the unresolved fourth byte rather than inventing a
+semantic role for it.
 
-### 5. High-DPI/scaling pass — next after keyboard CI gate
+The initial keyboard work plus manual-smoke regressions add 24 dedicated tests
+over the 573-test item-3 checkpoint. The strict Windows discovery floor is now
+**597**.
 
-Validate at 100%, 125%, 150% and 200%, with particular attention to:
+Corrected-code checkpoint:
 
-- timeline geometry and hit testing;
-- noteskin rendering;
-- dialogs and Inspector layouts;
-- Split/Block gutters;
-- external gameplay preview ownership/scaling;
-- toolbar overflow and text clipping.
+- Linux/glibc 2.31: **597 tests in 4.950 s, OK**;
+- Windows: strict gate accepted **597 tests in 7.161 s**, with one expected
+  case-collision skip.
+
+The remaining item-4 gate is a focused manual Windows re-smoke of these corrected
+input/focus behaviors. The item is not marked complete merely because the
+offscreen suite is green.
+
+See `KEYBOARD_WORKFLOW_AUDIT.md` and `LIGHTMAP_AUTHORING.md`.
+
+### 5. High-DPI/scaling pass — next after item 4 manual closure
+
+Validate the complete Windows display-scaling matrix:
+
+- 100%;
+- 125%;
+- 150%;
+- 175%;
+- 200%;
+- 225%;
+- 250%;
+- 275%;
+- 300%.
+
+The pass covers main-window composition, Timeline geometry/hit testing,
+noteskins, dialogs, Inspector/Diagnostics/Routes, Split/Block affordances,
+audio/waveform UI, and the external gameplay preview. Pixel-perfect screenshot
+comparison is not the gate; logical geometry, reachability and input/render
+agreement are.
+
+See `HIGH_DPI_SCALING_GATE.md`.
 
 ### 6. Editor UX cleanup
 
@@ -324,11 +372,11 @@ Review:
 - destructive-action confirmations;
 - diagnostics and error messages.
 
-## Remaining implementation after 0.9.5 item 4 implementation
+## Remaining implementation after item 4 manual validation
 
-Subject to the keyboard branch passing its pending platform gate, the remaining
-0.9.5 implementation backlog is high-DPI/scaling validation, editor UX cleanup,
-and low-risk maintenance found while exercising those gates. No new NX20 format
+Subject to the focused keyboard/Lightmap re-smoke passing, the remaining 0.9.5
+implementation backlog is the high-DPI/scaling matrix, editor UX cleanup, and
+low-risk maintenance found while exercising those gates. No new NX20 format
 family, legacy importer, trailer encoding, gameplay-debug subsystem,
 selection-performance subsystem, save/recovery subsystem, or keyboard authoring
 subsystem is currently required to complete the release scope.
@@ -360,7 +408,8 @@ These items remain deliberately source-gated rather than guessed:
 - challenge-mode `HPBar.Add` branch;
 - forced-judgment Division 999 consumer;
 - any Split-level modifier dispatcher if one is eventually demonstrated;
-- physical cabinet-light actuation from `LM.NX`.
+- physical cabinet-light actuation from `LM.NX`;
+- semantic meaning, if any, of a future nonzero fourth Lightmap row byte.
 
 These questions may improve runtime fidelity or historical understanding later.
 They are not reasons to fabricate editor semantics and are not 0.9.5 release
@@ -371,8 +420,8 @@ blockers.
 - World Max `mission.txt` editing. Mission files may serve as evidence for
   condition syntax, but mission topology/configuration is outside the NX/NFO
   document model.
-- A dedicated cabinet-light visualizer. `LM.NX` remains a native publication
-  document; hardware output research is separate.
+- A physical cabinet-light simulator. `LM.NX` now has native three-channel cell
+  authoring, but hardware output research is separate.
 - Redistribution of proprietary charts, executables, noteskins or game assets.
 
 ## Test strategy
@@ -391,7 +440,9 @@ blockers.
 - deterministic source-backed selection/materialization budgets;
 - save/recovery fault injection and rollback invariants;
 - keyboard cursor/selection semantics, shortcut scoping and tree dispatch;
-- no full compact-row iteration during keyboard navigation.
+- cross-Block row-order clipboard/transform semantics;
+- three-channel Lightmap authoring and fourth-byte preservation;
+- no full compact-row iteration during keyboard/Lightmap sparse editing.
 
 ### Corpus gates
 
@@ -400,14 +451,16 @@ blockers.
   domain;
 - 2,111 official successors remain recorded as semantic evidence rather than
   repository payloads;
+- 2,896,556 supplied Lightmap rows support the three-channel authoring contract;
 - large-chart parse/memory/viewport and selection-transform performance remain
   within regression budgets.
 
 ### Release gates
 
-- strict Windows test gate with an intended 586-test minimum discovery floor on
-  the keyboard hardening branch; the last confirmed platform checkpoint is 573;
+- strict Windows test gate with a **597-test minimum discovery floor**;
 - Linux full-suite/package gate on the glibc 2.31 baseline;
+- focused manual Windows keyboard/Lightmap re-smoke before item 4 closure;
 - packaged smoke tests for authoring, audio, preview, keyboard and save/recovery
   workflows;
+- high-DPI validation at every 25% increment from 100% through 300%;
 - documentation version/state consistency check before tagging.
