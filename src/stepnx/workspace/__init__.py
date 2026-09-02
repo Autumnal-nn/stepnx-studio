@@ -21,7 +21,6 @@ from stepnx.workspace.folder import (
     compare_mirror,
     create_blank_lightmap,
     discover_audio,
-    execute_save_plan,
     open_folder,
     plan_individual_save,
     plan_blank_lightmap,
@@ -32,9 +31,9 @@ from stepnx.workspace.recovery import (
     RecoveredDocument,
     RecoveryError,
     RecoverySnapshot,
-    RecoveryStore,
     default_recovery_root,
 )
+from stepnx.workspace.durability import RecoveryStore, execute_save_plan
 
 __all__ = [
     "AUDIO_SUFFIXES",
