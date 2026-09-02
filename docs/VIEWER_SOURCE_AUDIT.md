@@ -138,7 +138,7 @@ Known WebPrime issues to cut away or correct:
 - Division conditions parsed but not correctly attached/evaluated;
 - undeclared `p1`/`p2` assignments in strict code paths;
 - all non-zero `smooth_speed` values treated as one behavior;
-- incomplete Lightmap, Half Double, trailer, native-NXA, and patched-engine
+- incomplete Lightmap, Half Double, trailer, native-NXA, and later engine-family
   semantics;
 - parsing mixed with interpretation, route choice, and event generation.
 
