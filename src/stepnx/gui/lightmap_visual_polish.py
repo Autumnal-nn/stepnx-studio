@@ -7,7 +7,7 @@ from stepnx.authoring.selection import CellSelection
 from stepnx.core.model import EmptyRow, LightmapRow
 
 _LIGHT_COLORS = (QColor("#d67373"), QColor("#99dd99"), QColor("#7b7bd8"))
-_LIGHT_OFF_ALPHA = 51
+_LIGHT_OFF_ALPHA = 13
 _LIGHT_ON_ALPHA = 204
 
 
