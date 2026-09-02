@@ -1,24 +1,23 @@
 # Phase 7 Windows validation
 
-Phase 7 includes the accumulated Phase 6 work and the final per-column hold-shaft
-fix. Run the gate on a copied chart folder before committing or publishing the
-branch.
+> Historical validation snapshot. This file records the Phase 7 acceptance gate
+> and its then-current test count. It is not the current 0.9.5 gate. Use
+> `STATUS.md`, `ROADMAP.md`, and `tools/run_windows_test_gate.py` for current
+> release status and validation requirements.
+
+Phase 7 included the accumulated Phase 6 work and the final per-column hold-shaft
+fix. Run destructive validation only on copied chart folders.
 
 ## Automated suite
 
-The validation snapshot is self-contained source code but deliberately excludes
-the virtual environment. From the extracted repository root, create or refresh
-the Windows environment in PowerShell:
+The validation snapshot was self-contained source code but deliberately excluded
+the virtual environment. From an extracted repository root, the phase gate used:
 
 ```powershell
 py -3.11 -m venv .venv
 & ".venv\Scripts\python.exe" -m pip install --upgrade pip
 & ".venv\Scripts\python.exe" -m pip install -e ".[gui]"
-```
 
-Then run the suite from the same repository root:
-
-```powershell
 $Py = (Resolve-Path ".venv\Scripts\python.exe").Path
 $env:PYTHONPATH = "src"
 $env:QT_QPA_PLATFORM = "windows"
@@ -27,7 +26,7 @@ $env:QT_QPA_PLATFORM = "windows"
 Write-Host "Exit code: $LASTEXITCODE"
 ```
 
-Historical expected result for this phase snapshot:
+Historical result for this phase snapshot:
 
 ```text
 Ran 179 tests
@@ -35,8 +34,8 @@ OK (skipped=1)
 Exit code: 0
 ```
 
-The one expected skip is the case-collision test on Windows. All Qt tests must
-execute.
+The recorded skip was the case-collision test on Windows. All Qt tests belonging
+to that snapshot were required to execute rather than skip.
 
 ## Manual advanced-authoring gate
 
@@ -68,7 +67,8 @@ Validate:
    confirm no NFO changes occur merely by opening the folder.
 8. Repeat the Phase 6 audio, playback geometry, note flags, snapping, and local
    noteskin checks in [`PHASE6_VALIDATION.md`](PHASE6_VALIDATION.md), including
-   the corrected per-column hold shaft.
+   the corrected per-column hold shaft. Where Phase 6 documents an explicitly
+   historical limitation, the newer documentation takes precedence.
 9. Confirm **File → Settings** contains Engine profile and Snap, the Audio
    toolbar contains only Play/Pause, Offset, and Metronome, and the **Audio**
    menu contains source selection, metronome mode, and Follow chart.
@@ -79,6 +79,6 @@ Validate:
     blank space below the chart and the playhead remains at its configured anchor
     instead of sliding toward the bottom edge.
 
-After manual edits, reopen every saved NX/NFO and run the full suite again. Do
-not commit a screenshot-driven success claim without the exit code and exact
-test count.
+After manual edits, reopen every saved NX/NFO and run the current full suite
+again. Current test counts belong in CI/output, not in this historical phase
+record.
