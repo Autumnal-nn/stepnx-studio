@@ -3,8 +3,8 @@
 Date: 2026-09-02
 
 StepNX Studio 0.9.4 moved ordinary selection transforms and bulk note edits back
-to sparse/indexed execution. This gate makes that performance property part of
-the test contract instead of relying on one workstation's elapsed time.
+to sparse/indexed execution. The 0.9.5 gate makes that performance property part
+of the test contract instead of relying on one workstation's elapsed time.
 
 ## Failure mode being protected
 
@@ -13,10 +13,15 @@ to materialize or iterate the complete row table. In particular, copying or
 transforming roughly 40-50 notes must remain work proportional to the selected
 rows/cells, not to every row in the chart.
 
+The complete interaction path is covered. Shift-drag rectangle selection also
+must not decode every source-backed row merely to collect stable IDs before the
+bulk operation begins.
+
 The canonical compact model is intentionally lazy:
 
 - `CompactRows` materializes one row only when indexed;
 - `OverlayRows` stores only edited rows over a `CompactRows` base;
+- rectangle selection reuses the compact parser's packed row-ID array;
 - selection lookup uses indexed/binary-search paths for compact row IDs;
 - `SetNotesAt` groups edits by row and keeps the result sparse.
 
@@ -45,6 +50,7 @@ Each covered operation runs at three selection sizes:
 
 Covered operations are:
 
+- rectangle-selection row-ID acquisition;
 - copy;
 - cut;
 - paste;
@@ -54,6 +60,9 @@ Covered operations are:
 - erase;
 - filtered replace;
 - bulk placement.
+
+The row-ID acquisition check is folded into the copy regression rather than
+artificially creating a second test method for one transaction prefix.
 
 ## Deterministic materialization budget
 
@@ -86,16 +95,22 @@ Do not raise the budget to a function of total chart rows.
 50-note set/copy/paste transaction on a 200,000-row compact chart must complete
 within one second and leave only the touched rows in an `OverlayRows` layer.
 
-That absolute threshold is useful as a coarse alarm but is deliberately not the
+The actual 0.9.4 Windows release gate ran 551 tests in 5.697 seconds, and that
+50-note smoke test completed comfortably inside its one-second ceiling. The
+absolute threshold remains useful as a coarse alarm but is deliberately not the
 main performance contract because hosted CI speed is variable. The deterministic
 materialization gate is what prevents an O(selection) path from silently
 becoming O(chart) again.
 
-## Release policy
+## Discovery and release gate
 
-The selection-performance tests are ordinary `unittest` tests and therefore run
-through the existing Windows gate and Linux/full-suite discovery. A failure is
-not an optional benchmark warning. It blocks release until either:
+The selection-performance file adds nine ordinary `unittest` tests. The strict
+Windows discovery floor is therefore 560 tests: the 551 tests actually run by
+the 0.9.4 release plus these nine dedicated regressions. Losing the performance
+file must itself fail the release gate, even if every remaining test is green.
+
+The same tests are also discovered by Linux/full-suite CI. A performance failure
+is not an optional benchmark warning. It blocks release until either:
 
 - the sparse behavior is restored; or
 - a deliberate architectural change is documented with a replacement bounded
