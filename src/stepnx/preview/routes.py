@@ -148,6 +148,11 @@ def resolve_route(
     The internal snapshot field remains named ``random_at_trigger`` for API
     compatibility, but it represents the raw 0x40 bit rather than one universal
     random mode.
+
+    Route policies deliberately remain separate from runtime selector mechanics:
+    MANUAL is an explicit preview override, while ALL_PERFECT accepts a uniquely
+    matching branch before consulting selector state. SEEDED is the policy that
+    reproduces automatic selector timing and bank following.
     """
 
     policy = RoutePolicy(policy)
@@ -276,13 +281,10 @@ def resolve_route(
         )
 
         if policy is RoutePolicy.MANUAL:
-            if follower:
-                chosen = follower_choice(split)
-                if chosen is not None:
-                    reason = f"follower bank {bank} -> Block index {chosen.index}"
-            else:
-                # MANUAL deliberately lets the caller choose even a random Split.
-                chosen, reason = local_manual_choice(split, seeded=False)
+            # Manual preview is intentionally authoritative. It must be able to
+            # inspect any branch even when the serialized selector would choose
+            # or follow another one at runtime.
+            chosen, reason = local_manual_choice(split, seeded=False)
 
         elif policy is RoutePolicy.SEEDED:
             if load_random:
@@ -322,6 +324,11 @@ def resolve_route(
                         "; ".join(unsupported),
                     )
                 )
+            elif len(eligible) == 1:
+                # Conditions have already produced a unique answer. Selector
+                # state is only needed to disambiguate multiple viable branches.
+                chosen = eligible[0]
+                reason = "all-perfect conditions"
             elif follower:
                 bank_choice = follower_choice(split)
                 if bank_choice is not None:
@@ -340,9 +347,6 @@ def resolve_route(
                         reason = (
                             f"all-perfect follower bank {bank} -> Block index {chosen.index}"
                         )
-            elif len(eligible) == 1:
-                chosen = eligible[0]
-                reason = "all-perfect conditions"
             elif len(eligible) > 1 and (load_random or block_start_random):
                 if seed is None:
                     diagnostics.append(
