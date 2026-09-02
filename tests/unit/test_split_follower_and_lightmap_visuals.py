@@ -34,6 +34,10 @@ class SplitFollowerSemanticsTests(unittest.TestCase):
         self.assertTrue(unbanked.random_at_block_start)
         self.assertEqual(unbanked.mode_label, "random at block start")
         self.assertEqual(unbanked.raw, 0x40)
+        self.assertIn(
+            "Follower block without a set bank defaults to random at split start",
+            unbanked.warnings(block_count=4),
+        )
 
         banked = SplitSelectionByte.from_raw(0x41)
         self.assertTrue(banked.has_bank)
@@ -116,8 +120,8 @@ class SplitFollowerSemanticsTests(unittest.TestCase):
 
 
 class LightmapVisualPolishTests(unittest.TestCase):
-    def test_lightmap_opacity_is_fixed_at_twenty_and_eighty_percent(self) -> None:
-        self.assertEqual(lightmap_alpha(0), 51)
+    def test_lightmap_opacity_is_fixed_at_five_and_eighty_percent(self) -> None:
+        self.assertEqual(lightmap_alpha(0), 13)
         self.assertEqual(lightmap_alpha(1), 204)
         self.assertEqual(lightmap_alpha(255), 204)
 
