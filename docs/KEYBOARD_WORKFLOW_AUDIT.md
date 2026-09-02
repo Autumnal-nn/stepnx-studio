@@ -290,8 +290,9 @@ The corrected code checkpoint passed repository CI:
 - Windows: **597 tests in 7.161 s, OK**, with the one expected
   case-insensitive-filesystem skip.
 
-Documentation-only follow-up commits still receive the same PR CI before the
-manual re-smoke is considered authoritative for closure.
+The PR remains Draft until the corrected behaviors receive a real Windows manual
+re-smoke. Later documentation-only commits are still required to pass the same
+597-test PR CI before item 4 can close.
 
 ## Deliberate boundaries
 
