@@ -63,7 +63,7 @@ Complete for the supplied corpus:
 - raw scalar/source-span preservation;
 - immutable commands and stable-ID allocation;
 - structural validator and structural diff;
-- atomic saves and parser/command mutation testing;
+- atomic single-file and staged multi-file saves with stale-target checks;
 - Lightmap identification and publication handling.
 
 Ongoing hardening, rather than missing format support, remains appropriate for
@@ -95,11 +95,12 @@ Implemented:
 
 - non-recursive folder discovery with isolated failures;
 - individual Save and guarded `Save All` planning;
-- staged writes, stale-target detection and rollback;
+- staged writes, stale-target detection and catchable-failure rollback;
+- rollback-failure preservation of the original backup;
 - valid `LM.NX` publication gate and explicit blank Lightmap creation;
 - NX file create/duplicate/delete tools;
 - explicit NX10 materialization instead of implicit overwrite;
-- recovery snapshots outside chart folders;
+- recovery snapshots outside chart folders with hidden pre-publication staging;
 - NX/NFO mirror compare/export;
 - automatic and manual audio discovery.
 
@@ -201,29 +202,66 @@ The audit also found and removed one transaction-prefix O(chart) path: Shift-dra
 selection previously decoded every row in the active Block merely to collect
 stable IDs. The installed timeline path now reuses the compact row-ID array.
 
-Validation checkpoint:
-
-- Linux/glibc 2.31: 560 tests in 3.803 s, OK;
-- Windows: strict gate accepted 560 tests in 6.352 s with one expected
-  case-collision skip;
-- the Windows discovery floor is 560, derived from the actual 551-test 0.9.4
-  release run plus the nine dedicated regression methods.
-
 See `PERFORMANCE_REGRESSION_GATE.md`.
 
-### 3. Save/recovery torture tests — next
+### 3. Save/recovery torture tests — complete
 
-Add fault injection around:
+The save/recovery layer now has an explicit fault-injection matrix rather than
+only happy-path and ordinary rollback coverage.
 
-- temporary-file creation;
-- replacement/rename;
-- multi-file staged writes;
-- external modification between preflight and commit;
-- partial/corrupt recovery payloads;
-- permission failures and insufficient disk space where practical;
-- interrupted save/recovery sequences.
+Save-side torture cases cover:
 
-### 4. Keyboard workflow audit
+- temporary stage creation failure;
+- `ENOSPC`/`fsync` failure while staging a payload;
+- original-backup copy failure;
+- Python-level interruption after an earlier file has already been replaced;
+- later replacement failure and rollback of earlier commits;
+- rollback of a newly created target;
+- rollback replacement failure;
+- successful transaction cleanup.
+
+The resulting durability rules are:
+
+- stage and backup paths are registered before I/O that may fail;
+- catchable interruptions run rollback before propagating;
+- successful rollback restores prior targets and removes transaction debris;
+- if rollback itself cannot restore an existing target, the
+  `.stepnx-original` backup is retained and its filename is surfaced in the
+  error rather than being deleted by cleanup.
+
+Recovery-side torture cases cover:
+
+- recovery staging creation failure;
+- payload/manifest write and `fsync` failure;
+- interruption during manifest publication;
+- final staging-to-snapshot rename failure;
+- orphan hidden staging after an uncatchable crash;
+- SHA/path/provenance rejection from the existing recovery suite;
+- structurally corrupt NX20 whose manifest hash nevertheless matches the bad
+  bytes.
+
+`RecoveryStore.list()` exposes only finalized 32-character lowercase-hex
+snapshot directories containing a manifest, so crash staging is never presented
+as a valid recovery point.
+
+Validation checkpoint for the combined 0.9.5 gates:
+
+- Linux/glibc 2.31: 573 tests in 5.064 s, OK;
+- Windows: strict gate accepted 573 tests in 6.645 s with one expected
+  case-collision skip;
+- the Windows discovery floor is 573: 551 tests from the 0.9.4 release, nine
+  selection-performance regressions, and thirteen save/recovery torture tests.
+
+A deliberate boundary remains: ordinary filesystem renames cannot make an
+entire multi-file `Save All` physically atomic against hard power loss or an
+uncatchable process kill between target renames. Catchable failures are rolled
+back, but ACID-like restart recovery across that boundary would require a
+persistent transaction journal and startup reconciliation. 0.9.5 does not claim
+that stronger guarantee.
+
+See `SAVE_RECOVERY_TORTURE.md`.
+
+### 4. Keyboard workflow audit — next
 
 Frequent authoring operations should be practical without a mouse. Audit
 navigation, selection, placement, transform, structure, metadata and preview
@@ -252,18 +290,19 @@ Review:
 - destructive-action confirmations;
 - diagnostics and error messages.
 
-## Remaining implementation after completed 0.9.5 items 1-2
+## Remaining implementation after completed 0.9.5 items 1-3
 
-The remaining implementation backlog is save/recovery torture testing,
-keyboard/high-DPI validation, editor UX cleanup, and low-risk maintenance found
-while exercising those gates. No new NX20 format family, legacy importer,
-trailer encoding, gameplay-debug subsystem, or selection-performance subsystem
-is currently required to complete the 0.9.5 scope.
+The remaining implementation backlog is keyboard/high-DPI validation, editor UX
+cleanup, and low-risk maintenance found while exercising those gates. No new
+NX20 format family, legacy importer, trailer encoding, gameplay-debug subsystem,
+selection-performance subsystem, or catchable-failure save/recovery subsystem is
+currently required to complete the 0.9.5 scope.
 
 A later 1.0 hardening phase should continue:
 
 - deeper parser/writer/importer/command fuzzing;
-- crash-recovery and interrupted-save coverage beyond the 0.9.5 fault matrix;
+- crash-recovery coverage beyond the 0.9.5 fault matrix, including evaluating a
+  persistent multi-file transaction journal and restart-time reconciliation;
 - broader corpus performance regression budgets outside ordinary selection
   transforms;
 - reproducible packaging/update policy;
@@ -314,7 +353,8 @@ blockers.
 - structural diff paths;
 - timing/profile rules;
 - importer conversion reports;
-- deterministic source-backed selection/materialization budgets.
+- deterministic source-backed selection/materialization budgets;
+- save/recovery fault injection and rollback invariants.
 
 ### Corpus gates
 
@@ -328,7 +368,7 @@ blockers.
 
 ### Release gates
 
-- strict Windows test gate with a 560-test minimum discovery floor;
+- strict Windows test gate with a 573-test minimum discovery floor;
 - Linux full-suite/package gate on the glibc 2.31 baseline;
 - packaged smoke tests for authoring, audio, preview and save/recovery workflows;
 - documentation version/state consistency check before tagging.
