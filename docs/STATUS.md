@@ -10,8 +10,10 @@ StepNX Studio is in a polish and hardening cycle. The canonical NX20/NFO model,
 practical authoring workflow, legacy import layer, folder publication workflow,
 and native gameplay preview are implemented. The documentation truth pass,
 selection-performance regression gate, and save/recovery durability torture pass
-are complete. Remaining 0.9.5 work is primarily keyboard/high-DPI validation and
-editor UX cleanup rather than additional NX20 format discovery.
+are complete. The keyboard workflow audit is implemented on its hardening branch
+and awaiting pull-request CI validation. Remaining 0.9.5 implementation work is
+primarily high-DPI/scaling validation and editor UX cleanup rather than additional
+NX20 format discovery.
 
 ## Delivered
 
@@ -152,15 +154,47 @@ See `PERFORMANCE_REGRESSION_GATE.md` for the contract and rationale.
   even when their manifest SHA-256 has been changed to match the corrupt bytes;
 - the dedicated torture matrix adds 13 save/recovery fault-injection cases on
   top of the existing stale-target, rollback, hash, path, provenance and normal
-  recovery tests;
-- the strict Windows discovery floor is now 573 tests.
+  recovery tests.
 
-Validation checkpoint for the combined 0.9.5 hardening gates:
+Last confirmed combined hardening checkpoint before the keyboard branch:
 
 - Linux/glibc 2.31: 573 tests in 5.064 s, OK;
 - Windows: 573 tests in 6.645 s, OK with the one expected case-collision skip.
 
 See `SAVE_RECOVERY_TORTURE.md` for the failure matrix and durability boundary.
+
+### Keyboard workflow hardening
+
+Implemented on `hardening-0.9.5-keyboard-workflow`:
+
+- stable-ID Timeline cursor navigation with arrows, Home/End and Block/Split
+  boundary jumps;
+- Shift-arrow rectangular selection without whole-Block `CompactRows` or
+  `OverlayRows` iteration;
+- Timeline-only note editing shortcuts, so `X`, `Y`, `M`, Delete, Escape and
+  Ctrl+C/X/V no longer leak into unrelated editor controls;
+- Timeline-only Space playback, replacing the previous application-wide
+  shortcut;
+- direct `1..0` tool selection and N/H/G note-function selection;
+- keyboard focus access to Tool, Bank/ID, Function and Visibility controls;
+- `Alt+1..5` focus navigation for Workspace, Timeline, Inspector, Diagnostics
+  and Routes;
+- `Ctrl+PageUp/PageDown` chart-tab switching;
+- Enter activation for Workspace and Routes trees;
+- tree-scoped keyboard access to metadata, Block timing, Split selector,
+  insert/remove and reorder operations;
+- standard `Ctrl+S` Save All while retaining `Ctrl+Shift+S`;
+- `F1` Help > Keyboard shortcuts map;
+- 13 dedicated keyboard regression tests, including a guard against accidental
+  full `CompactRows` iteration.
+
+The strict Windows discovery floor is changed to **586** on this branch. That is
+an intended release gate, not yet a recorded validation result: repository CI
+runs on pull requests or pushes to `main`, and this branch has not been opened as
+a pull request. The authoritative last green Windows/Linux checkpoint therefore
+remains 573 until the keyboard branch is exercised by CI.
+
+See `KEYBOARD_WORKFLOW_AUDIT.md` for the context rules and complete mapping.
 
 ## Corpus metrics
 
@@ -186,8 +220,9 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
 2. **Complete:** performance regression suite for sparse bulk transforms and
    source-backed selection acquisition;
 3. **Complete:** save/recovery fault-injection and interrupted-write hardening;
-4. **Next:** keyboard workflow audit;
-5. high-DPI/scaling validation at 100%, 125%, 150%, and 200%;
+4. **Implemented, CI validation pending:** keyboard workflow audit;
+5. **Next after the keyboard gate:** high-DPI/scaling validation at 100%, 125%,
+   150%, and 200%;
 6. editor UX cleanup covering menus, selection, Inspector state, disabled
    actions, and error messages.
 
@@ -198,6 +233,7 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
 - a multi-file `Save All` is not physically atomic against hard process/machine
   termination between target renames. Catchable failures roll back, but true
   restart-time transaction reconciliation would require a persistent journal;
+- cross-Block rectangular note selection remains intentionally unsupported;
 - inputs outside a legacy importer's proven source domain are guarded with
   approximation/unsupported diagnostics rather than generalized from guesses;
 - cross-Split Block moves are not exposed by the current structural UI;
