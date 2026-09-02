@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from dataclasses import replace
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offscreen")
@@ -21,10 +22,12 @@ try:
 
     from stepnx.authoring.snapshot import create_authoring_snapshot
     from stepnx.codecs.nx20 import parse_bytes
-    from stepnx.core.model import CompactRows
+    from stepnx.core.model import CompactRows, EmptyRow
+    from stepnx.core.scalars import RawF32, RawU8, RawU32
     from stepnx.gui.keyboard_workflow import (
         KeyboardCursor,
         _TreeKeyboardFilter,
+        _activate_current_tool,
         _cursor,
         _handle_timeline_key,
         _install_pane_shortcuts,
@@ -53,6 +56,42 @@ class KeyboardWorkflowTests(unittest.TestCase):
 
     def _timeline(self, parent=None) -> TimelineWidget:
         document = parse_bytes(make_normal_nx20(), row_storage="compact")
+        return TimelineWidget(create_authoring_snapshot(document), parent)
+
+    def _two_segment_timeline(self, parent=None) -> TimelineWidget:
+        document = parse_bytes(make_normal_nx20(), row_storage="compact")
+        first_split = document.splits[0]
+        first_block = first_split.blocks[0]
+        next_id = document.next_stable_id
+        second_rows = tuple(
+            EmptyRow(next_id + index, b"\x80\x00\x00\x00", None)
+            for index in range(8)
+        )
+        next_id += len(second_rows)
+        second_block = replace(
+            first_block,
+            stable_id=next_id,
+            start_time=RawF32.from_value(1000.0),
+            beat_split=RawU8.from_value(32),
+            row_count=RawU32.from_value(len(second_rows)),
+            rows=second_rows,
+            span=None,
+        )
+        next_id += 1
+        second_split = replace(
+            first_split,
+            stable_id=next_id,
+            blocks=(second_block,),
+            block_count=RawU32.from_value(1),
+            span=None,
+        )
+        next_id += 1
+        document = replace(
+            document,
+            splits=(first_split, second_split),
+            split_count=RawU32.from_value(2),
+            next_stable_id=next_id,
+        )
         return TimelineWidget(create_authoring_snapshot(document), parent)
 
     def test_arrow_navigation_and_shift_extension_use_stable_cell_selection(self) -> None:
@@ -109,7 +148,7 @@ class KeyboardWorkflowTests(unittest.TestCase):
             last,
         )
 
-    def test_timeline_key_handler_moves_cursor_without_mouse_input(self) -> None:
+    def test_timeline_key_handler_keeps_a_moving_shift_edge(self) -> None:
         window = QMainWindow()
         widget = self._timeline(window)
         window.setCentralWidget(widget)
@@ -117,13 +156,39 @@ class KeyboardWorkflowTests(unittest.TestCase):
         first_row = int(segment.block.rows._row_ids[0])
         widget.set_selected_cell(first_row, 0)
 
-        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.NoModifier)
-        self.assertTrue(_handle_timeline_key(widget, event))
-        self.assertEqual(widget.selection.anchor.lane, 1)
-
-        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.ShiftModifier)
-        self.assertTrue(_handle_timeline_key(widget, event))
+        shift_right = QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.ShiftModifier
+        )
+        self.assertTrue(_handle_timeline_key(widget, shift_right))
         self.assertEqual(len(widget.selection.targets), 2)
+        self.assertTrue(_handle_timeline_key(widget, shift_right))
+        self.assertEqual(len(widget.selection.targets), 3)
+
+        shift_down = QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.ShiftModifier
+        )
+        self.assertTrue(_handle_timeline_key(widget, shift_down))
+        self.assertEqual(len(widget.selection.targets), 6)
+        self.assertEqual({target.lane for target in widget.selection.targets}, {0, 1, 2})
+
+    def test_shift_selection_crosses_segment_boundary_by_encoded_row_count(self) -> None:
+        window = QMainWindow()
+        widget = self._two_segment_timeline(window)
+        window.setCentralWidget(widget)
+        first, second = widget._layout.segments
+        last_first = int(first.block.rows._row_ids[-1])
+        widget.set_selected_cell(last_first, 1)
+
+        down = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.ShiftModifier)
+        self.assertTrue(_handle_timeline_key(widget, down))
+        selected_rows = {target.row_id for target in widget.selection.targets}
+        self.assertEqual(
+            selected_rows,
+            {last_first, int(second.block.rows[0].stable_id)},
+        )
+        self.assertEqual(len(widget.selection.targets), 2)
+        self.assertEqual(int(first.block.beat_split), 4)
+        self.assertEqual(int(second.block.beat_split), 32)
 
     def test_compact_keyboard_selection_never_iterates_the_row_table(self) -> None:
         widget = self._timeline()
@@ -179,6 +244,24 @@ class KeyboardWorkflowTests(unittest.TestCase):
         self.assertTrue(_select_function(window, Qt.Key.Key_N))
         self.assertEqual(combo.currentText(), "Normal")
 
+    def test_enter_toggle_uses_toggle_callback_instead_of_bulk_tap_apply(self) -> None:
+        window = QMainWindow()
+        widget = self._timeline(window)
+        window.setCentralWidget(widget)
+        segment = widget._layout.segments[0]
+        widget.set_selected_cell(int(segment.block.rows._row_ids[0]), 0)
+        combo = QComboBox(window)
+        combo.addItem("Toggle")
+        window.tool_combo = combo
+        toggled = []
+        applied = []
+        window._stepnx_toggle_selection = lambda current: toggled.append(current) or True
+        window._apply_tool_to_selection = lambda: applied.append(True)
+
+        self.assertTrue(_activate_current_tool(window, widget))
+        self.assertEqual(toggled, [widget])
+        self.assertEqual(applied, [])
+
     def test_chart_edit_shortcuts_are_removed_from_window_scope(self) -> None:
         window = QMainWindow()
         names = (
@@ -224,7 +307,7 @@ class KeyboardWorkflowTests(unittest.TestCase):
             [QKeySequence("Ctrl+S"), QKeySequence("Ctrl+Shift+S")],
         )
 
-    def test_alt_number_and_ctrl_page_shortcuts_cover_panes_and_chart_tabs(self) -> None:
+    def test_alt_number_shortcuts_cover_panes_without_overriding_native_tab_keys(self) -> None:
         window = QMainWindow()
         window.tree = QTreeWidget(window)
         window.tabs = QTabWidget(window)
@@ -248,8 +331,6 @@ class KeyboardWorkflowTests(unittest.TestCase):
                 QKeySequence("Alt+3"),
                 QKeySequence("Alt+4"),
                 QKeySequence("Alt+5"),
-                QKeySequence("Ctrl+PageUp"),
-                QKeySequence("Ctrl+PageDown"),
             ],
         )
         self.assertTrue(
@@ -257,6 +338,14 @@ class KeyboardWorkflowTests(unittest.TestCase):
                 shortcut.context() == Qt.ShortcutContext.WindowShortcut
                 for shortcut in window.keyboard_pane_shortcuts
             )
+        )
+        self.assertNotIn(
+            QKeySequence("Ctrl+PageUp"),
+            [shortcut.key() for shortcut in window.keyboard_pane_shortcuts],
+        )
+        self.assertNotIn(
+            QKeySequence("Ctrl+PageDown"),
+            [shortcut.key() for shortcut in window.keyboard_pane_shortcuts],
         )
 
     def test_tree_enter_metadata_and_structure_keys_call_existing_actions(self) -> None:
