@@ -208,7 +208,11 @@ def _install_selection_feedback(window) -> None:
 
     def update_selection_status(widget) -> None:
         selection = getattr(widget, "selection", None)
-        if selection is None or len(selection.targets) <= 1:
+        if selection is None or not selection.targets:
+            if callable(previous):
+                previous(widget)
+            return
+        if len(selection.targets) == 1 and not widget.snapshot.effective_lightmap:
             if callable(previous):
                 previous(widget)
             return
