@@ -22,7 +22,9 @@ class SplitSelectionByte:
     - ``0x41..0x5F`` are genuine followers for banks ``1..31``;
     - a banked Split such as ``0x01`` may establish its bank state through a
       condition/active candidate, which a later ``0x41`` then reuses;
-    - ``0x20`` retains the independently observed force/select behavior.
+    - ``0x20`` requests a block-condition recalculation at Split start. G/W/A/B/C
+      Division arrows already force their own block verification; other Division
+      Metadata requires this bit for Split-start runtime re-evaluation.
 
     The raw byte remains authoritative, including combinations such as ``0xC0``.
     ``random_at_trigger`` is retained as the internal field name for API
@@ -100,6 +102,10 @@ class SplitSelectionByte:
             )
         # A non-zero bank without 0x80/0x40 is valid. Conditions or an explicit
         # active candidate can establish the bank state for a later follower.
+        if self.random_at_trigger and not self.has_bank and not self.random_at_start:
+            warnings.append(
+                "Follower block without a set bank defaults to random at split start"
+            )
         if self.random_at_start and self.random_at_trigger:
             warnings.append(
                 "Both 0x80 and 0x40 are encoded. Runtime validation shows that 0x80 takes precedence; "
