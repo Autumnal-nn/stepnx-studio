@@ -7,9 +7,9 @@ from pathlib import Path
 
 # The 0.9.4 release Windows gate ran 551 tests. The 0.9.5 selection-performance
 # suite added nine dedicated tests (560 total), save/recovery added thirteen
-# (573), and the keyboard-workflow audit adds nine more. Losing any hardening
+# (573), and the keyboard-workflow audit adds twelve more. Losing any hardening
 # regression file must not leave a superficially green release.
-MINIMUM_TEST_COUNT = 582
+MINIMUM_TEST_COUNT = 585
 EXPECTED_SKIP_ID = (
     "unit.test_folder_workspace.FolderWorkspaceTests."
     "test_case_collisions_block_publication"
