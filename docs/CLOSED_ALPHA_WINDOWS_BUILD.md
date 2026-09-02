@@ -1,19 +1,25 @@
 # Windows standalone build
 
-This procedure builds the current StepNX Studio Windows package with the repository's strict test gate and canonical PyInstaller spec.
+This procedure builds a current StepNX Studio Windows package with the
+repository's strict test gate and canonical PyInstaller spec. Release-version
+numbers belong to the tagged release workflow; this document intentionally does
+not hard-code an old artifact version.
 
 ## Requirements
 
 - Windows 10 or Windows 11, 64-bit;
 - Python 3.11 or newer available through the `py` launcher;
 - Git;
-- internet access for the first dependency installation (`PySide6` and `PyInstaller`).
+- internet access for the first dependency installation (`PySide6` and
+  `PyInstaller`).
 
-The project pins the GUI/build families to `PySide6>=6.7,<7` and `PyInstaller>=6.11,<7` through `pyproject.toml`.
+The project pins the GUI/build families through `pyproject.toml`; use that file
+as the dependency authority rather than copying version constraints into this
+guide.
 
-## 1. Get the release source
+## 1. Get the source
 
-From Command Prompt or PowerShell:
+For the current default branch:
 
 ```powershell
 git clone https://github.com/Autumnal-nn/stepnx-studio.git
@@ -22,19 +28,18 @@ git switch main
 git pull --ff-only
 ```
 
-Record the exact source commit before building:
+For release/review work, switch to the exact tag or branch being validated
+instead of assuming `main` is the intended source.
+
+Record the exact source commit:
 
 ```powershell
 git rev-parse HEAD
-```
-
-The build should be produced from a clean checkout:
-
-```powershell
 git status --short
 ```
 
-The command should print nothing.
+A release build should come from a clean checkout; `git status --short` should
+print nothing.
 
 ## 2. Recommended isolated environment
 
@@ -81,11 +86,13 @@ $env:QT_QPA_PLATFORM = "offscreen"
 python tools\run_windows_test_gate.py
 ```
 
-The gate rejects failing tests, an unexpectedly low discovered-test count, and unexpected skips.
+The gate rejects failing tests, an unexpectedly low discovered-test count, and
+unexpected skips. The test count evolves with the repository and should not be
+frozen in this guide.
 
-## 4. Output
+## 4. Local output
 
-A successful build produces:
+A successful local build produces:
 
 ```text
 dist\StepNX-Studio-Windows\
@@ -95,40 +102,59 @@ dist\StepNX-Studio-Windows\
 dist\StepNX-Studio-Windows.zip
 ```
 
-The distribution is intentionally one-folder. Distribute the entire folder or the generated ZIP; do not copy only the executable out of its runtime directory.
+The distribution is intentionally one-folder. Distribute the entire folder or
+the generated ZIP; do not copy only the executable out of its runtime directory.
 
-## 5. Public release profile set
+Tagged release workflows rename/package this output with the release version and
+platform. For example, the published 0.9.4 workflow produced a versioned Windows
+x86_64 archive and a Linux x86_64 archive. Future tags should derive their names
+from the release workflow rather than this document.
 
-The standard release executable exposes the public engine-family profiles:
+## 5. Public profile set
+
+The standard release exposes the public engine-family profiles:
 
 - NXA;
 - Fiesta;
 - Prime+.
 
-Experimental or private capability gates are not part of the public release procedure.
+Documentation and release smoke tests should not depend on private or
+experimental capability gates.
 
 ## 6. Manual smoke test before distributing
 
-Run the packaged executable, not the editable Python checkout. At minimum verify:
+Run the packaged executable, not the editable Python checkout. At minimum
+verify:
 
-1. the standard executable exposes the expected public profiles;
-2. representative NXA, Fiesta-family, and Prime+-family folders/files open correctly;
-3. Header, Split, and Division metadata remain inspectable and unknown/raw entries remain preserved;
-4. a disposable edit can be saved, reopened, and round-tripped as expected;
-5. waveform/playback works with WAV, MP3, and a real uppercase `.AUD` song through both audio-picker paths;
-6. staged `.AUD` playback uses the generic ENC1/ENC2 decoder path;
-7. after the `.AUD` waveform is ready, switching audio or closing the app leaves no persistent `stepnx-audio-*` temporary directory;
-8. one NX10/legacy import and one Save All workflow succeed;
-9. persisted local rendering preferences survive restart without altering chart data.
+1. the expected public engine families are available;
+2. representative NXA, Fiesta-family and Prime+-family folders/files open;
+3. Header, Split and Division metadata remain inspectable and unknown/raw entries
+   remain preserved;
+4. a disposable edit can be saved, reopened and round-tripped;
+5. waveform/playback works with WAV, MP3, and supported `.AUD` / `.A` input;
+6. staged encrypted-audio playback/waveform uses the generic ENC1/ENC2 decoder
+   path documented in `AUD_SUPPORT.md`;
+7. switching audio or closing the app does not leave persistent temporary audio
+   staging directories;
+8. one NX10 import, one legacy import and one guarded Save All workflow succeed;
+9. persisted local rendering preferences survive restart without altering chart
+   data;
+10. gameplay preview opens from the packaged executable and F6/runtime input do
+    not dirty the source chart.
 
-Do not perform release smoke tests on irreplaceable corpus files. Use disposable copies.
+Do not perform release smoke tests on irreplaceable corpus files. Use disposable
+copies.
 
-## 7. Release naming
+## 7. Release evidence
 
-The 0.9.1 Windows artifact is published as:
+For every distributed build, record:
 
-```text
-StepNX-Studio-0.9.1-Windows-x86_64.zip
-```
+- release/tag name;
+- exact source commit;
+- strict Windows gate result;
+- artifact filename generated by the release workflow;
+- SHA-256;
+- manual smoke-test result.
 
-Record its SHA-256 together with the source commit used for the release.
+The current development target is 0.9.5 hardening, but this guide remains
+version-neutral so it does not become stale at the next tag.
