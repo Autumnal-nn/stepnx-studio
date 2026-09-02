@@ -5,19 +5,41 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget
 
 from stepnx.authoring.snapshot import create_authoring_snapshot
 from stepnx.authoring.timeline import TimelineGeometry, TimelineLayout
 from stepnx.codecs.nx20 import parse_bytes
 from stepnx.gui.editor_field_zoom import (
     EDITOR_ZOOM_PRESETS,
+    install_editor_field_zoom,
     scale_editor_geometry,
     set_timeline_editor_zoom,
+    step_editor_zoom,
 )
 from stepnx.gui.lightmap_visual_polish import lightmap_rect
 from stepnx.gui.timeline_widget import TimelineWidget
 from tests.fixture_factory import make_normal_nx20
+
+
+class _FakeWheelEvent:
+    def __init__(self, modifiers, delta: int) -> None:
+        self._modifiers = modifiers
+        self._delta = delta
+        self.accepted = False
+
+    def type(self):
+        return QEvent.Type.Wheel
+
+    def modifiers(self):
+        return self._modifiers
+
+    def angleDelta(self):
+        return QPoint(0, self._delta)
+
+    def accept(self) -> None:
+        self.accepted = True
 
 
 class EditorFieldZoomTests(unittest.TestCase):
@@ -85,6 +107,56 @@ class EditorFieldZoomTests(unittest.TestCase):
                     previous_lane_width = widget._geometry.lane_width
         finally:
             widget.deleteLater()
+
+    def test_wheel_steps_one_preset_and_clamps_at_bounds(self) -> None:
+        self.assertEqual(step_editor_zoom(100, 120), 125)
+        self.assertEqual(step_editor_zoom(125, -120), 100)
+        self.assertEqual(step_editor_zoom(300, 120), 300)
+        self.assertEqual(step_editor_zoom(100, -120), 100)
+        self.assertEqual(step_editor_zoom(175, 0), 175)
+
+    def test_preview_menu_becomes_view_with_preview_first_and_zoom_below(self) -> None:
+        window = QMainWindow()
+        try:
+            preview_menu = window.menuBar().addMenu("&Preview")
+            window.open_preview_action = preview_menu.addAction("Open gameplay preview…")
+            window.tabs = QTabWidget(window)
+            window.setCentralWidget(window.tabs)
+            install_editor_field_zoom(window)
+
+            self.assertEqual(preview_menu.title().replace("&", ""), "View")
+            actions = preview_menu.actions()
+            self.assertIs(actions[0], window.open_preview_action)
+            self.assertIs(actions[1].menu(), window.editor_zoom_menu)
+            self.assertEqual(window.editor_zoom_menu.title(), "Editor zoom")
+        finally:
+            window.deleteLater()
+
+    def test_alt_wheel_changes_editor_zoom_but_ctrl_wheel_is_not_intercepted(self) -> None:
+        window = QMainWindow()
+        widget = TimelineWidget(self.snapshot)
+        try:
+            preview_menu = window.menuBar().addMenu("&Preview")
+            window.open_preview_action = preview_menu.addAction("Open gameplay preview…")
+            window.tabs = QTabWidget(window)
+            window.setCentralWidget(window.tabs)
+            window.tabs.addTab(widget, "Chart")
+            install_editor_field_zoom(window)
+
+            filter_object = widget._stepnx_editor_zoom_wheel_filter
+            alt_event = _FakeWheelEvent(Qt.KeyboardModifier.AltModifier, 120)
+            self.assertTrue(filter_object.eventFilter(widget.viewport(), alt_event))
+            self.assertTrue(alt_event.accepted)
+            self.assertEqual(window._stepnx_editor_zoom_percent, 125)
+            self.assertEqual(widget._stepnx_editor_zoom_percent, 125)
+            self.assertTrue(window.editor_zoom_actions[125].isChecked())
+
+            ctrl_event = _FakeWheelEvent(Qt.KeyboardModifier.ControlModifier, 120)
+            self.assertFalse(filter_object.eventFilter(widget.viewport(), ctrl_event))
+            self.assertFalse(ctrl_event.accepted)
+            self.assertEqual(window._stepnx_editor_zoom_percent, 125)
+        finally:
+            window.deleteLater()
 
 
 if __name__ == "__main__":
