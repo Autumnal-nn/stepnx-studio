@@ -122,7 +122,11 @@ Implemented:
 - typed Split selection-byte editing and decoded mode/bank display;
 - Hidden, Invisible, Appear, Vanish, VanishLow and AppearLow visualization;
 - audio transport, compressed/staged waveform rendering and metronome;
-- guarded `Save All` with validation and structural-diff preview.
+- guarded `Save All` with validation and structural-diff preview;
+- keyboard-first Timeline navigation, selection, placement and transforms with
+  editor-context shortcut scoping;
+- keyboard Workspace/Routes activation, structure/metadata access, pane focus,
+  chart-tab cycling, playback and shortcut help.
 
 ### Advanced NX20 authoring
 
@@ -244,13 +248,14 @@ Recovery-side torture cases cover:
 snapshot directories containing a manifest, so crash staging is never presented
 as a valid recovery point.
 
-Validation checkpoint for the combined 0.9.5 gates:
+Last confirmed validation checkpoint before the keyboard branch:
 
 - Linux/glibc 2.31: 573 tests in 5.064 s, OK;
 - Windows: strict gate accepted 573 tests in 6.645 s with one expected
   case-collision skip;
-- the Windows discovery floor is 573: 551 tests from the 0.9.4 release, nine
-  selection-performance regressions, and thirteen save/recovery torture tests.
+- the confirmed Windows discovery floor at that checkpoint was 573: 551 tests
+  from the 0.9.4 release, nine selection-performance regressions, and thirteen
+  save/recovery torture tests.
 
 A deliberate boundary remains: ordinary filesystem renames cannot make an
 entire multi-file `Save All` physically atomic against hard power loss or an
@@ -261,13 +266,42 @@ that stronger guarantee.
 
 See `SAVE_RECOVERY_TORTURE.md`.
 
-### 4. Keyboard workflow audit — next
+### 4. Keyboard workflow audit — implemented, CI validation pending
 
-Frequent authoring operations should be practical without a mouse. Audit
-navigation, selection, placement, transform, structure, metadata and preview
-controls rather than merely counting how many shortcuts exist.
+The audit was performed as a complete authoring workflow rather than a shortcut
+inventory.
 
-### 5. High-DPI/scaling pass
+Implemented behavior includes:
+
+- stable-ID Timeline cursor navigation with arrows and Home/End;
+- Shift-arrow rectangular selection inside one Block;
+- Ctrl navigation across non-empty timeline segments without boundary wrap;
+- direct `1..0` tool selection and N/H/G note-function selection;
+- Enter placement with Toggle preserving click semantics;
+- Timeline-only Delete, Escape, Ctrl+C/X/V and X/Y/M editing commands;
+- Timeline-only Space playback, replacing the former application-wide shortcut;
+- `Alt+1..5` pane focus and `Ctrl+PageUp/PageDown` chart-tab navigation;
+- Workspace-tree Enter activation plus tree-scoped metadata, timing, Split
+  selector, insertion, removal and reorder commands;
+- Routes activation with Enter;
+- standard `Ctrl+S` Save All while retaining `Ctrl+Shift+S`;
+- `F1` Help > Keyboard shortcuts discoverability.
+
+The new keyboard paths reuse compact stable-row IDs and binary-search helpers;
+they do not introduce whole-Block row materialization. The regression suite
+includes an explicit `CompactRows.__iter__` rejection guard for keyboard
+selection movement.
+
+Thirteen dedicated tests are added, raising the intended strict Windows
+discovery floor from 573 to **586**. This is not yet recorded as a green
+Windows/Linux checkpoint because the repository CI workflow runs for pull
+requests and pushes to `main`, while this hardening branch has not been opened as
+a pull request. The 573-test item-3 run remains the last confirmed platform
+checkpoint until that gate executes.
+
+See `KEYBOARD_WORKFLOW_AUDIT.md`.
+
+### 5. High-DPI/scaling pass — next after keyboard CI gate
 
 Validate at 100%, 125%, 150% and 200%, with particular attention to:
 
@@ -290,13 +324,14 @@ Review:
 - destructive-action confirmations;
 - diagnostics and error messages.
 
-## Remaining implementation after completed 0.9.5 items 1-3
+## Remaining implementation after 0.9.5 item 4 implementation
 
-The remaining implementation backlog is keyboard/high-DPI validation, editor UX
-cleanup, and low-risk maintenance found while exercising those gates. No new
-NX20 format family, legacy importer, trailer encoding, gameplay-debug subsystem,
-selection-performance subsystem, or catchable-failure save/recovery subsystem is
-currently required to complete the 0.9.5 scope.
+Subject to the keyboard branch passing its pending platform gate, the remaining
+0.9.5 implementation backlog is high-DPI/scaling validation, editor UX cleanup,
+and low-risk maintenance found while exercising those gates. No new NX20 format
+family, legacy importer, trailer encoding, gameplay-debug subsystem,
+selection-performance subsystem, save/recovery subsystem, or keyboard authoring
+subsystem is currently required to complete the release scope.
 
 A later 1.0 hardening phase should continue:
 
@@ -306,7 +341,7 @@ A later 1.0 hardening phase should continue:
 - broader corpus performance regression budgets outside ordinary selection
   transforms;
 - reproducible packaging/update policy;
-- accessibility and keyboard-only workflows;
+- broader accessibility and assistive-technology validation;
 - high-DPI and localization infrastructure;
 - documentation, original example files and release checklist.
 
@@ -354,7 +389,9 @@ blockers.
 - timing/profile rules;
 - importer conversion reports;
 - deterministic source-backed selection/materialization budgets;
-- save/recovery fault injection and rollback invariants.
+- save/recovery fault injection and rollback invariants;
+- keyboard cursor/selection semantics, shortcut scoping and tree dispatch;
+- no full compact-row iteration during keyboard navigation.
 
 ### Corpus gates
 
@@ -368,7 +405,9 @@ blockers.
 
 ### Release gates
 
-- strict Windows test gate with a 573-test minimum discovery floor;
+- strict Windows test gate with an intended 586-test minimum discovery floor on
+  the keyboard hardening branch; the last confirmed platform checkpoint is 573;
 - Linux full-suite/package gate on the glibc 2.31 baseline;
-- packaged smoke tests for authoring, audio, preview and save/recovery workflows;
+- packaged smoke tests for authoring, audio, preview, keyboard and save/recovery
+  workflows;
 - documentation version/state consistency check before tagging.
