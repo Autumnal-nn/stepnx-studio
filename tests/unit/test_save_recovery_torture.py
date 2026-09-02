@@ -144,6 +144,7 @@ class SaveTortureTests(unittest.TestCase):
             plan = plan_save_all(workspace)
             first, second = plan.operations
             first_original = first.target.read_bytes()
+            second_original = second.target.read_bytes()
             real_replace = os.replace
             calls = 0
 
@@ -162,12 +163,14 @@ class SaveTortureTests(unittest.TestCase):
                     execute_save_plan(plan, replace_file=fail_second_commit)
 
             self.assertNotEqual(first.target.read_bytes(), first_original)
-            self.assertEqual(second.target.read_bytes(), second.target.read_bytes())
+            self.assertEqual(second.target.read_bytes(), second_original)
             backups = tuple(root.glob(f".{first.target.name}.*.stepnx-original"))
             self.assertEqual(len(backups), 1)
             self.assertEqual(backups[0].read_bytes(), first_original)
-            self.assertIn(str(backups[0]), str(raised.exception))
-            self.assertFalse(any(root.glob("*.stepnx-stage")))
+            self.assertIn(backups[0].name, str(raised.exception))
+            self.assertFalse(
+                any(path.name.endswith(".stepnx-stage") for path in root.iterdir())
+            )
 
     def test_new_target_is_removed_when_a_later_commit_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -308,7 +311,10 @@ class RecoveryTortureTests(unittest.TestCase):
 
             store = RecoveryStore(root)
 
-            self.assertEqual(store.list(), (final,))
+            self.assertEqual(
+                tuple(path.name for path in store.list()),
+                (final.name,),
+            )
 
     def test_matching_hash_invalid_nx20_payload_is_reported_as_recovery_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
