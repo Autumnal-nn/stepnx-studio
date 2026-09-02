@@ -28,6 +28,7 @@ def main(argv=None) -> int:
     import stepnx.gui.timeline_widget as timeline_module
     import stepnx.gui.timing_dialog as timing_module
     import stepnx.gui.preview_widget as preview_module
+    from stepnx.gui.editor_field_zoom import install_editor_field_zoom
     from stepnx.gui.keyboard_workflow import install_keyboard_workflow
     from stepnx.gui.lightmap_visual_polish import install_lightmap_visual_polish
     from stepnx.gui.phase10_install import install_phase10
@@ -99,6 +100,10 @@ def main(argv=None) -> int:
             # exact light bounds and off/on opacity is fixed at 5%/80%.
             install_lightmap_visual_polish(self)
             install_split_follower_ui(self)
+            # Editor-field zoom deliberately runs after authoring/render patches.
+            # It scales only Timeline geometry; menus, toolbars, sidebars and
+            # dialogs remain at the application's ordinary UI scale.
+            install_editor_field_zoom(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10
