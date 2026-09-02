@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 
 
-# The R!SE parity checkpoint reached 491 tests before the 0.9.5 performance
-# regression suite. Keep the floor high enough that losing the nine dedicated
-# selection-performance tests cannot produce a superficially green release.
-MINIMUM_TEST_COUNT = 500
+# The 0.9.4 release Windows gate ran 551 tests. The 0.9.5 selection-performance
+# suite adds nine dedicated tests, so losing that file must not leave a
+# superficially green release.
+MINIMUM_TEST_COUNT = 560
 EXPECTED_SKIP_ID = (
     "unit.test_folder_workspace.FolderWorkspaceTests."
     "test_case_collisions_block_publication"
