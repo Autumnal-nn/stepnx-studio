@@ -11,11 +11,23 @@ from stepnx.core.scalars import RawU8
 class SplitSelectionByte:
     """Typed projection of the first NX20 Split header byte.
 
-    Runtime validation on official NXA charts shows that 0x80 and 0x40 are
-    selector modes with precedence rather than two composable behaviors:
-    whenever both bits are present, 0x80 wins. The lower five bits are a
-    selection bank/group. The raw byte remains authoritative so malformed or
-    historical combinations such as 0xC0 still round-trip exactly.
+    The selector byte is stateful rather than two variants of random selection:
+
+    - ``0x80`` performs a random selection when the Split is entered;
+    - ``0x40`` is a follower flag: for a non-zero bank it reuses the most recent
+      Block index selected for that bank;
+    - the lower five bits identify the selection bank/group;
+    - ``0x20`` retains the independently observed force/select behavior.
+
+    A bank may therefore be meaningful even when neither ``0x80`` nor ``0x40``
+    is set on the current Split. A conditioned/manual selector such as ``0x01``
+    records its chosen Block index for bank 1, and a following ``0x41`` reuses
+    that selection. The raw byte remains authoritative so every value, including
+    historical combinations such as ``0xC0``, still round-trips exactly.
+
+    ``random_at_trigger`` is retained as the internal field name for API
+    compatibility with existing snapshot/tests, but its semantic projection is
+    exposed as :attr:`follower` and it must not be presented as a random mode.
     """
 
     random_at_start: bool = False
@@ -35,12 +47,18 @@ class SplitSelectionByte:
         )
 
     @property
+    def follower(self) -> bool:
+        """Whether this Split follows the latest selection for its bank."""
+
+        return bool(self.random_at_trigger)
+
+    @property
     def raw(self) -> int:
         if not 0 <= self.bank <= 0x1F:
-            raise ValueError("Split random bank must be between 0 and 31")
+            raise ValueError("Split selection bank must be between 0 and 31")
         return (
             (0x80 if self.random_at_start else 0)
-            | (0x40 if self.random_at_trigger else 0)
+            | (0x40 if self.follower else 0)
             | (0x20 if self.force_select else 0)
             | self.bank
         )
@@ -50,10 +68,10 @@ class SplitSelectionByte:
         modes: list[str] = []
         if self.random_at_start:
             modes.append("random at start")
-            if self.random_at_trigger:
-                modes.append("0x40 also set (overridden)")
-        elif self.random_at_trigger:
-            modes.append("random at trigger")
+            if self.follower:
+                modes.append("follower flag also set (0x80 precedence)")
+        elif self.follower:
+            modes.append("follower block")
         if self.force_select:
             modes.append("force select")
         if not modes:
@@ -67,14 +85,13 @@ class SplitSelectionByte:
             warnings.append(
                 "This Split has only one Block, so selector flags/banking are normally redundant."
             )
-        if self.bank and not (self.random_at_start or self.random_at_trigger):
+        # A non-zero bank without 0x80/0x40 is valid and meaningful. Conditions
+        # or an explicit active candidate may make the selection, and later
+        # follower Splits reuse that Block index for the same bank.
+        if self.random_at_start and self.follower:
             warnings.append(
-                "A non-zero selection bank without either selector mode is unusual in the audited corpus."
-            )
-        if self.random_at_start and self.random_at_trigger:
-            warnings.append(
-                "Both 0x80 and 0x40 are encoded. Runtime validation shows that 0x80 overrides 0x40; "
-                "official charts containing this combination include known broken implementations."
+                "Both 0x80 and 0x40 are encoded. Runtime validation shows that 0x80 takes precedence; "
+                "the raw combination is preserved without normalization."
             )
         return tuple(warnings)
 
