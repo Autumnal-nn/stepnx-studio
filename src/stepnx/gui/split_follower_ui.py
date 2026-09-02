@@ -4,7 +4,12 @@ from __future__ import annotations
 def _rewrite_route_labels(item) -> None:
     text = item.text(1)
     if text:
-        text = text.replace("random trigger", "follower block")
+        text = text.replace("random start", "random at chart load")
+        if "random trigger" in text:
+            if "group " in text:
+                text = text.replace("random trigger", "follower block")
+            else:
+                text = text.replace("random trigger", "random at block start")
         text = text.replace("group ", "bank ")
         item.setText(1, text)
     for index in range(item.childCount()):
@@ -12,7 +17,7 @@ def _rewrite_route_labels(item) -> None:
 
 
 def install_split_follower_ui(window) -> None:
-    """Keep the Routes pane terminology aligned with the 0x40 follower model."""
+    """Keep Routes terminology aligned with selector timing/bank semantics."""
 
     if getattr(window, "_stepnx_split_follower_ui", False):
         return
