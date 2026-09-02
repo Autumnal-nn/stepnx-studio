@@ -2,6 +2,14 @@
 
 Date: 2026-08-13
 
+> **2026-09-02 status correction:** this document remains the behavioral/source-
+> boundary record for PIUTESTER controls and presentation observations. It is no
+> longer the authority for StepNX runtime-fidelity status. Later source-primary
+> work against native game executables established judgment timing, score, combo,
+> grade, normal-mode gauge, multiple modifier paths, and field transforms. See
+> `RISE_RUNTIME_PARITY_AUDIT.md` and `STATUS.md` for the current implementation
+> state.
+
 ## Scope and boundary
 
 PIUTESTER was inspected solely as a private interoperability and behavioral
@@ -13,14 +21,14 @@ The inspected 32-bit Windows executable has SHA-256:
 
 `2fea7e2ffb89bddbcfd75d8d19726a658a33d55a61d739e2ae79bf0d313c4fd0`
 
-StepNX implements the documented interactions independently. It reads the
-canonical StepNX preview snapshot and may reference only a user-selected local
-visual pack in place. It does not load PIUTESTER DAT or Lua resources.
+StepNX implements documented interactions independently. It reads the canonical
+StepNX preview snapshot and may reference only redistributable bundled artwork
+or a user-selected local visual pack. It does not load PIUTESTER DAT or Lua
+resources.
 
 ## Confirmed interactions
 
-The supplied PIUTESTER package and its embedded help establish these runtime
-controls:
+The supplied PIUTESTER package and its embedded help establish these controls:
 
 | Control | Behavior |
 | --- | --- |
@@ -38,94 +46,90 @@ The top-row `5` and numeric-keypad `5` are different controls. The first changes
 speed; the second is the P2 center pad.
 
 StepNX selects the chart directly by its `.NX` filename; the chart itself
-determines its field layout. One initialization dialog also selects 1x through
-9x and accepts an auxiliary COMMAND. Random-route seeds remain internal.
+determines field layout. The preview launch flow also selects speed and supported
+COMMAND modifiers. Random-route seeds remain internal session state.
 
-Confirmed flags are Vanish (`V`), Non-Step (`N`), Flash (`W`), Freedom (`F`),
-Mirror (`M`), Random (`R`), vertical inversion (`U`), Judge Reverse (`J`),
-Deceleration (`D`), Acceleration (`A`), Exceed (`X`), Random Velocity (`S`), and
-Earthworm (`E`). Digits in COMMAND are cumulative and each contributes one
-quarter of its numeric value.
+Confirmed PIUTESTER COMMAND flags include Vanish (`V`), Non-Step (`N`), Flash
+(`W`), Freedom (`F`), Mirror (`M`), Random (`R`), vertical inversion (`U`), Judge
+Reverse (`J`), Deceleration (`D`), Acceleration (`A`), Exceed (`X`), Random
+Velocity (`S`), and Earthworm (`E`). Digits are cumulative speed contributions
+in the audited PIUTESTER grammar.
 
-The display behavior is not one undifferentiated modifier bit. Static StepEdit
-evidence names these NX20 combinations explicitly:
+## Note visibility/function distinction
 
-| Function bits | Visibility | StepEdit label | Preview behavior |
+Static StepEdit evidence and runtime observations require function and visibility
+to remain distinct:
+
+| Function bits | Visibility | StepEdit label | Preview role |
 | --- | --- | --- | --- |
 | Normal | Visible | `__: Normal` | Visible and judged |
-| Normal | Appear | `_v: Appear` | Fades in toward the sequence zone |
-| Normal | Vanish | `_^: Vanish` | Fades out toward the sequence zone |
-| Normal | Invisible | `_X: Invisible` | Not drawn but still judged |
-| H family | Visible | `H_: Bonus` | Visible bonus/treasure note |
-| H family | Appear | `Hv: Bonus(Appear)` | Bonus note with Appear visibility |
-| H family | Vanish | `H^: Hidden(Vanish)` | Registering hidden/vanishing note |
-| H family | Invisible | `HX: Hidden` | Registering hidden note |
-| Ghost family | Visible | `G_: Ghost` | Ghost artwork; does not register |
-| Ghost family | Appear | `Gv: Ghost(Appear)` | Ghost artwork with Appear visibility |
-| Ghost family | Vanish | `G^: Ghost(Vanish)` | Ghost artwork with Vanish visibility |
+| Normal | Appear | `_v: Appear` | Appear presentation |
+| Normal | Vanish | `_^: Vanish` | Vanish presentation |
+| Normal | Invisible | `_X: Invisible` | Hidden visually, still registering |
+| H family | Visible | `H_: Bonus` | Bonus/treasure family |
+| H family | Appear | `Hv: Bonus(Appear)` | Bonus + Appear |
+| H family | Vanish | `H^: Hidden(Vanish)` | Hidden/vanishing family |
+| H family | Invisible | `HX: Hidden` | Hidden registering family |
+| Ghost family | Visible | `G_: Ghost` | Ghost, non-registering |
+| Ghost family | Appear | `Gv: Ghost(Appear)` | Ghost + Appear |
+| Ghost family | Vanish | `G^: Ghost(Vanish)` | Ghost + Vanish |
 
-This distinction is required before Ghostbuster or Treasure Hunter semantics
-can be implemented honestly. StepNX now preserves and renders the Ghost versus
-Bonus/Hidden families, but mission scoring rules for those named modes remain a
-separate runtime-capture gate.
+StepNX preserves these families independently. Mission scoring semantics for
+named historical modes such as Ghostbuster/Treasure Hunter remain separate from
+ordinary preview judgment behavior unless source evidence establishes them.
 
-Fiesta 2 embeds separate command objects for `display_vanish`,
-`display_appear`, `display_nonstep`, `display_freedom`, and `display_flash`.
-The independently documented game behavior confirms that Non-Step hides moving
-notes, Freedom hides the stationary sequence zone, Vanish hides notes near the
-zone, and Flash phase-gates moving-note visibility. StepNX composes these global
-effects with each note's own visibility instead of replacing the raw flag.
+Fiesta 2 contains separate display-command objects for Vanish, Appear, Non-Step,
+Freedom, and Flash. StepNX composes supported global display state with each
+note's own raw visibility instead of rewriting the canonical note bytes.
 
 ## Sequence-zone and STEPFX geometry
 
-The StepEdit-compatible noteskin `BASE.png` is a `480×192` atlas row whose
-central `384` pixels contain the functional five-lane strip; both 48 px sides
-are empty padding. Prime's mode-specific render path draws `BASE` twice with a
-translation for Double. Its separate Half Double branch draws `HD1`, translates,
-then draws `HD2`; treating the Double calls as two independent Versus fields is
-therefore incorrect. StepNX maps each central 384 px strip to exactly five lane
-pitches and places the two Double strips edge-to-edge. Notes, input, hold
-shafts, and STEPFX use those same lane centres.
+The audited StepEdit-compatible `BASE.png` layout uses a central five-pitch strip
+with side padding. Historical Prime rendering evidence supports adjacent five-
+lane strips for Double rather than two visually independent Versus fields.
+StepNX therefore keeps receptor, note, hold, input and STEPFX lane centres on one
+shared field geometry.
 
-The inspected STEPFX PNG frames are opaque RGB images: their alpha is always
-255 and roughly 93–96% of their pixels are black or nearly black. PIUTESTER
-imports `glBlendFunc`; the available static evidence does not prove the exact
-blend factors at the STEPFX draw call. StepNX therefore uses additive
-composition for these frames, where black contributes no color, instead of
-incorrect source-over composition that produces a black square.
+The inspected PIUTESTER STEPFX frames are opaque RGB images with black as the
+near-neutral background. Static evidence did not prove the exact OpenGL blend
+function at the draw call, so StepNX's black-neutral additive handling is an
+independent compatibility choice rather than copied PIUTESTER rendering code.
 
-STEPFX records physical/autoplay pad presses separately from judgments. Hold
-body/tail ticks and misses therefore cannot retrigger it. Autoplay timestamps
-the initial tap/head press at its chart time and discards stale feedback after
-a delayed audio update. Optional STEPFX PNGs are decoded before playback, and
-painting visits only the bounded recent press history.
+STEPFX represents physical/autoplay pad presses separately from judgments. Hold
+body/tail resolution and misses do not retrigger the initial press effect. Recent
+feedback is bounded so delayed audio updates cannot replay an unbounded history.
 
-Normal judgment is row-based: a chord produces one visible result and combo
-increment. Hold head, body, and tail rows still resolve separately. Per-cell
-visible judgment remains specific to JN rather than the default preview.
+## Current evidence status
 
-## Implementation evidence levels
+PIUTESTER remains useful for controls, launch behavior, visual distinctions, and
+historical comparison. It is **not** the current source of truth for claims that
+were subsequently established from native runtime code.
 
-The keyboard layout, toggle keys, initialization flow, COMMAND grammar, and
-cumulative speed rule are treated as confirmed behavior. Exact judgment
-windows, grade math, score increments, gauge changes, modifier curves, and
-later-engine presentation are not yet established by independent measurements.
+Later audits have superseded the old 2026-08-13 limitations in these areas:
 
-Until those measurements exist:
+- judgment windows and difficulty decoding;
+- ordinary score increments, combo behavior and grade projection;
+- normal-mode gauge/life behavior;
+- Acceleration/Deceleration generation-specific curves;
+- Earthworm and Random Velocity cadence/state;
+- historical Snake/ZigZag/Throw compatibility projection;
+- Under Attack / vertical field transforms;
+- expanded F6 statistics, including per-bank judgment/combo/score data and item
+  counters.
 
-- F6 labels StepNX counters as `LOCAL` and reports live FPS/paint cost;
-- local counters never participate in route or chart serialization;
-- Exceed, acceleration/deceleration, random-velocity, Earthworm, and Vanish
-  curves remain approximate until synchronized captures calibrate them;
-- Under Attack/vertical inversion remains parsed but intentionally unprojected;
-- unsupported or approximate behavior is not described as arcade-accurate;
-- NXA, Fiesta 2, and Prime comparisons remain runtime validation gates;
-- no value inferred from PIUTESTER is promoted into an engine profile merely
-  because it looks plausible.
+The F6 panel is therefore no longer accurately described as a small set of
+`LOCAL` placeholder counters. It is a real diagnostic surface, while still
+remaining read-only session state that never participates in chart
+serialization.
 
-## Required follow-up evidence
+## Remaining source-gated work
 
-Record synchronized captures using small original test charts for NXA, Fiesta
-2, and Prime. Each capture should isolate one BPM, Beat Split, Scroll, freeze,
-warp, hold, visibility flag, COMMAND modifier, and judgment offset at a time.
-Record the executable identity and exact chart hash with every observation.
+Current unresolved runtime-fidelity work is tracked centrally in
+`RISE_RUNTIME_PARITY_AUDIT.md` and `STATUS.md`. The remaining items are narrow
+source/asset questions, such as exact asset-driven presentation paths or runtime
+producers not yet demonstrated. They should not be re-expanded here into the
+older blanket claim that score, gauge, judgment and modifiers are all
+unmeasured.
+
+Any future capture used as evidence should record executable identity, exact
+chart hash, engine generation, and the isolated variable being tested.
