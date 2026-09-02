@@ -27,7 +27,7 @@ $env:QT_QPA_PLATFORM = "windows"
 Write-Host "Exit code: $LASTEXITCODE"
 ```
 
-Expected:
+Historical expected result for this phase snapshot:
 
 ```text
 Ran 179 tests
@@ -35,16 +35,15 @@ OK (skipped=1)
 Exit code: 0
 ```
 
-The one expected skip is the case-collision test on Windows. All twelve Qt tests
-must execute.
+The one expected skip is the case-collision test on Windows. All Qt tests must
+execute.
 
 ## Manual advanced-authoring gate
 
-Launch one copy with native semantics and one with the patched profile:
+Launch with native NXA semantics:
 
 ```powershell
 & ".venv\Scripts\stepnx-studio.exe" --profile nxa-native "C:\path\to\native-copy"
-& ".venv\Scripts\stepnx-studio.exe" --profile nxa-step5-patched "C:\path\to\patched-copy"
 ```
 
 Validate:
@@ -60,29 +59,25 @@ Validate:
 4. Inspect the Routes tab. Confirm Split flags, Block condition ranges, and
    Division triggers. Double-click a branch and verify it activates the matching
    Block without dirtying the document.
-5. Under the patched profile, confirm Header ID 65 and Division IDs 111 and 120
-   receive patched labels. Confirm ID 120 uses `mode/weight`, accepts `0/-1`
-   and `1/-2`, and rejects `0/-2`. Under the native profile, they must remain
-   unknown rather than silently borrowing patched semantics.
-6. Run both folder batches. Review the affected-file preview, confirm `LM.NX` is
+5. Run both folder batches. Review the affected-file preview, confirm `LM.NX` is
    excluded, Undo an affected chart, then use guarded **Save All** on the copy.
-7. For a sized-trailer fixture, inspect typed trailer strings. A same-byte-length
-   UTF-8 replacement must work; a shorter, longer, invalid-offset, or non-UTF-8
-   target must be refused or remain raw-only.
-8. Use **Compare / export NFO mirror**. Inspect the structural comparison and
+6. For a sized-trailer fixture, inspect typed trailer strings. Safe replacements
+   must preserve offset/pool invariants; invalid offsets, unterminated strings,
+   non-UTF-8 data, or ambiguous relocation targets must remain blocked/raw-only.
+7. Use **Compare / export NFO mirror**. Inspect the structural comparison and
    confirm no NFO changes occur merely by opening the folder.
-9. Repeat the Phase 6 audio, playback geometry, note flags, snapping, and private
+8. Repeat the Phase 6 audio, playback geometry, note flags, snapping, and local
    noteskin checks in [`PHASE6_VALIDATION.md`](PHASE6_VALIDATION.md), including
    the corrected per-column hold shaft.
-10. Confirm **File → Settings** contains Engine profile and Snap, the Audio
-    toolbar contains only Play/Pause, Offset, and Metronome, and the **Audio**
-    menu contains source selection, metronome mode, and Follow chart.
-11. Ctrl-wheel to the maximum zoom and confirm fixed Beat Split rows can reach
-    the new `6144 px/row` ceiling. Play and Pause must preserve that selected
-    zoom; only the Block's explicit `Scroll` may scale playback rows.
-12. Follow playback through the final chart timing. Confirm the viewport shows
-    blank space below the chart and the playhead remains at its 7% anchor instead
-    of sliding toward the bottom edge.
+9. Confirm **File → Settings** contains Engine profile and Snap, the Audio
+   toolbar contains only Play/Pause, Offset, and Metronome, and the **Audio**
+   menu contains source selection, metronome mode, and Follow chart.
+10. Ctrl-wheel to maximum zoom and confirm fixed Beat Split rows retain usable
+    hit targets. Play and Pause must preserve the selected zoom; only the Block's
+    explicit `Scroll` may scale playback rows.
+11. Follow playback through the final chart timing. Confirm the viewport shows
+    blank space below the chart and the playhead remains at its configured anchor
+    instead of sliding toward the bottom edge.
 
 After manual edits, reopen every saved NX/NFO and run the full suite again. Do
 not commit a screenshot-driven success claim without the exit code and exact
