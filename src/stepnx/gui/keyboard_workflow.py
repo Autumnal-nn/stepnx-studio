@@ -33,11 +33,12 @@ class KeyboardCursor:
 
 def _row_id_at(rows, index: int) -> int:
     if isinstance(rows, OverlayRows):
-        base = rows.base
-        promoted = rows.overlay.get(index)
-        if promoted is not None:
-            return int(promoted.stable_id)
-        return int(base._row_ids[index])
+        for replacement_index, row in rows.replacements:
+            if replacement_index == index:
+                return int(row.stable_id)
+            if replacement_index > index:
+                break
+        return int(rows.base._row_ids[index])
     if isinstance(rows, CompactRows):
         return int(rows._row_ids[index])
     return int(rows[index].stable_id)
@@ -62,10 +63,7 @@ def _default_cursor(widget) -> KeyboardCursor | None:
     segments = widget._layout.segments
     if not segments or int(widget.snapshot.columns) <= 0:
         return None
-    content_y = (
-        widget.verticalScrollBar().value()
-        + widget.viewport().height() * 0.07
-    )
+    content_y = widget.verticalScrollBar().value() + widget.viewport().height() * 0.07
     hit = widget._layout.row_at_y(content_y)
     if hit is not None:
         segment, row_index = hit
@@ -159,9 +157,6 @@ def _selection_to_cursor(widget, cursor: KeyboardCursor, *, extend: bool) -> Cel
     anchor = selection.anchor
     anchor_index = _row_index(segment.block.rows, int(anchor.row_id))
     if anchor_index is None:
-        # Rectangular authoring selections are intentionally confined to one
-        # Block. Crossing a Split/Block boundary therefore starts a new cursor
-        # instead of fabricating a cross-Block rectangle.
         return selection.replace(target)
 
     row_start, row_end = sorted((int(anchor_index), cursor.row_index))
@@ -245,8 +240,8 @@ def _activate_current_tool(window, widget) -> bool:
             return False
         widget.set_selection(_selection_to_cursor(widget, cursor, extend=False))
     if len(widget.selection.targets) == 1:
-        mode = getattr(window, "tool_combo", None)
-        if mode is not None and mode.currentText().strip().casefold() == "toggle":
+        combo = getattr(window, "tool_combo", None)
+        if combo is not None and combo.currentText().strip().casefold() == "toggle":
             cursor = _cursor(widget)
             click = getattr(window, "_phase10_click", None)
             if cursor is not None and callable(click):
@@ -284,8 +279,13 @@ def _handle_timeline_key(widget, event) -> bool:
         if cursor is None:
             return False
         moved = _move_cursor(widget, cursor, key, modifiers)
-        extend = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-        widget.set_selection(_selection_to_cursor(widget, moved, extend=extend))
+        widget.set_selection(
+            _selection_to_cursor(
+                widget,
+                moved,
+                extend=bool(modifiers & Qt.KeyboardModifier.ShiftModifier),
+            )
+        )
         _ensure_cursor_visible(widget, moved)
         return True
 
@@ -425,10 +425,6 @@ def _install_pane_shortcuts(window) -> None:
 
 
 def _scope_selection_shortcuts(window) -> None:
-    # These commands conceptually belong to the chart canvas. Keeping them as
-    # QMainWindow shortcuts makes single-letter X/Y/M and editing standards such
-    # as Ctrl+C leak into toolbar/tree widgets. The timeline key handler retains
-    # the same keys, but only while the authoring canvas owns focus.
     for name in (
         "apply_selection_action",
         "clear_selection_notes_action",
@@ -460,6 +456,10 @@ def install_keyboard_workflow(window) -> None:
     _scope_selection_shortcuts(window)
     _install_save_shortcuts(window)
     _install_pane_shortcuts(window)
+
+    space = getattr(window, "phase10_space_shortcut", None)
+    if space is not None:
+        space.setContext(Qt.ShortcutContext.WindowShortcut)
 
     tree_filter = _TreeKeyboardFilter(window)
     window.tree.installEventFilter(tree_filter)
