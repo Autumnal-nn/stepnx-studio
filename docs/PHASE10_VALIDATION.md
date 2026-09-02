@@ -1,5 +1,10 @@
 # Phase 10 validation
 
+> Historical validation snapshot. This file records the Phase 10 acceptance
+> surface, not the current 0.9.5 release gate. Later releases expanded audio
+> discovery, waveform decoding, metadata semantics, gameplay runtime parity and
+> selection transforms. Current behavior belongs in `STATUS.md` and `ROADMAP.md`.
+
 ## Authoring and input
 
 - Toggle is the default note tool: empty click places a Tap, vertical drag
@@ -52,8 +57,9 @@ Temporary `stepnx-aud-*` staging is created lazily only when AUD decoding is
 actually required.
 
 Automatic audio loading is deliberately conservative and has subsequently been
-expanded beyond the original Phase 10 behavior; current lookup rules are
-maintained in README/STATUS rather than frozen here.
+expanded beyond the original Phase 10 behavior. Current lookup rules are
+maintained in README/STATUS rather than frozen here. Likewise, current AUD/ENC1/
+ENC2 support is documented in `AUD_SUPPORT.md`.
 
 ## Manual acceptance
 
@@ -65,5 +71,5 @@ The historical Windows validation included:
 - preview scroll-speed comparison;
 - sibling audio auto-load behavior.
 
-Later releases supersede this snapshot where README, STATUS or ROADMAP document
-newer behavior.
+Later releases supersede this snapshot where README, STATUS, ROADMAP or a
+source-primary audit document newer behavior.
