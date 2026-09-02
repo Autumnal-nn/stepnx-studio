@@ -116,6 +116,8 @@ Implemented:
 - copy, cut, paste, erase, filtered replace, horizontal/vertical flip and
   StepEdit-compatible mirror;
 - sparse bulk-note execution for responsive transforms;
+- source-backed rectangle selection reuses compact stable-row IDs instead of
+  decoding the complete Block before the operation starts;
 - typed Split selection-byte editing and decoded mode/bank display;
 - Hidden, Invisible, Appear, Vanish, VanishLow and AppearLow visualization;
 - audio transport, compressed/staged waveform rendering and metronome;
@@ -167,31 +169,49 @@ product requirement when the corresponding official assets are unavailable.
 The current release scope is deliberately narrower than the preceding feature
 cycles.
 
-### 1. Documentation truth pass
+### 1. Documentation truth pass — complete
 
-- keep README, STATUS and ROADMAP synchronized with the actual tree;
-- remove stale "not implemented" claims for completed import/trailer work;
-- remove obsolete Phase 11 active-branch language;
-- describe the gameplay preview as implemented rather than pending;
-- separate remaining implementation from open reverse-engineering research;
-- remove obsolete documentation for unsupported/non-public engine variants.
+- README, STATUS and ROADMAP synchronized with the implemented tree;
+- stale "not implemented" claims removed for completed import/trailer work;
+- obsolete Phase 11 active-branch language converted to historical records;
+- gameplay preview documented as implemented rather than pending;
+- remaining implementation separated from open reverse-engineering research;
+- old validation documents marked as historical snapshots where appropriate.
 
-### 2. Performance regression suite
+### 2. Performance regression suite — complete
 
-Especially protect the sparse selection paths introduced for 0.9.4:
+The sparse selection paths introduced/fixed for 0.9.4 are now release-gated.
+The deterministic fixture uses a 200,000-row compact/source-backed chart and
+executes 50, 500 and 5,000-cell cases for:
 
 - copy/cut/paste;
 - horizontal/vertical flip;
-- mirror;
+- StepEdit-compatible mirror;
 - erase;
 - filtered replace;
 - bulk placement;
-- selections spanning large source-backed charts.
+- source-backed rectangle-selection row-ID acquisition.
 
-Regression gates should detect accidental full-row/full-document
-materialization, not only catastrophic wall-clock slowdowns.
+The primary contract rejects full `CompactRows`/`OverlayRows` iteration and caps
+indexed row materialization as a function of selected work, not total chart
+size. The existing 50-note / 200,000-row one-second test remains a secondary
+wall-clock alarm.
 
-### 3. Save/recovery torture tests
+The audit also found and removed one transaction-prefix O(chart) path: Shift-drag
+selection previously decoded every row in the active Block merely to collect
+stable IDs. The installed timeline path now reuses the compact row-ID array.
+
+Validation checkpoint:
+
+- Linux/glibc 2.31: 560 tests in 3.803 s, OK;
+- Windows: strict gate accepted 560 tests in 6.352 s with one expected
+  case-collision skip;
+- the Windows discovery floor is 560, derived from the actual 551-test 0.9.4
+  release run plus the nine dedicated regression methods.
+
+See `PERFORMANCE_REGRESSION_GATE.md`.
+
+### 3. Save/recovery torture tests — next
 
 Add fault injection around:
 
@@ -232,18 +252,20 @@ Review:
 - destructive-action confirmations;
 - diagnostics and error messages.
 
-## Remaining implementation after the 0.9.5 truth pass
+## Remaining implementation after completed 0.9.5 items 1-2
 
-The remaining implementation backlog is the hardening work above plus ongoing
-low-risk maintenance discovered during testing. No new NX20 format family,
-legacy importer, trailer encoding, or gameplay-debug subsystem is currently
-required to complete the 0.9.5 scope.
+The remaining implementation backlog is save/recovery torture testing,
+keyboard/high-DPI validation, editor UX cleanup, and low-risk maintenance found
+while exercising those gates. No new NX20 format family, legacy importer,
+trailer encoding, gameplay-debug subsystem, or selection-performance subsystem
+is currently required to complete the 0.9.5 scope.
 
 A later 1.0 hardening phase should continue:
 
 - deeper parser/writer/importer/command fuzzing;
-- crash-recovery and interrupted-save coverage;
-- corpus performance regression budgets;
+- crash-recovery and interrupted-save coverage beyond the 0.9.5 fault matrix;
+- broader corpus performance regression budgets outside ordinary selection
+  transforms;
 - reproducible packaging/update policy;
 - accessibility and keyboard-only workflows;
 - high-DPI and localization infrastructure;
@@ -291,7 +313,8 @@ blockers.
 - validator issue codes and paths;
 - structural diff paths;
 - timing/profile rules;
-- importer conversion reports.
+- importer conversion reports;
+- deterministic source-backed selection/materialization budgets.
 
 ### Corpus gates
 
@@ -305,7 +328,7 @@ blockers.
 
 ### Release gates
 
-- strict Windows test gate;
-- Linux test/package gate;
+- strict Windows test gate with a 560-test minimum discovery floor;
+- Linux full-suite/package gate on the glibc 2.31 baseline;
 - packaged smoke tests for authoring, audio, preview and save/recovery workflows;
 - documentation version/state consistency check before tagging.
