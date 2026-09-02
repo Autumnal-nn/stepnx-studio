@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QActionGroup
 
 from stepnx.authoring.timeline import TimelineGeometry, TimelineLayout
@@ -14,6 +15,18 @@ def _validate_percent(percent: int) -> int:
             f"editor zoom must be one of {', '.join(map(str, EDITOR_ZOOM_PRESETS))}%"
         )
     return percent
+
+
+def step_editor_zoom(percent: int, wheel_delta: int) -> int:
+    """Move one 25% editor-zoom preset in the wheel direction."""
+
+    percent = _validate_percent(percent)
+    if wheel_delta == 0:
+        return percent
+    index = EDITOR_ZOOM_PRESETS.index(percent)
+    index += 1 if wheel_delta > 0 else -1
+    index = max(0, min(len(EDITOR_ZOOM_PRESETS) - 1, index))
+    return EDITOR_ZOOM_PRESETS[index]
 
 
 def scale_editor_geometry(
@@ -77,6 +90,14 @@ def set_timeline_editor_zoom(widget, percent: int) -> None:
 
 
 def _view_menu(window):
+    preview_action = getattr(window, "open_preview_action", None)
+    if preview_action is not None:
+        menu = preview_action.parent()
+        if menu is not None and hasattr(menu, "setTitle"):
+            menu.setTitle("&View")
+            menu.menuAction().setText("&View")
+            return menu
+
     for action in window.menuBar().actions():
         menu = action.menu()
         if menu is not None and action.text().replace("&", "").strip().lower() == "view":
@@ -91,6 +112,37 @@ def _timeline_widgets(window):
         widget = window.tabs.widget(index)
         if isinstance(widget, timeline_module.TimelineWidget):
             yield widget
+
+
+class _EditorZoomWheelFilter(QObject):
+    def __init__(self, widget) -> None:
+        super().__init__(widget)
+        self.widget = widget
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() != QEvent.Type.Wheel:
+            return False
+        if not (event.modifiers() & Qt.KeyboardModifier.AltModifier):
+            return False
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return False
+        window = self.widget.window()
+        apply_zoom = getattr(window, "set_editor_zoom", None)
+        if not callable(apply_zoom):
+            return False
+        current = int(getattr(window, "_stepnx_editor_zoom_percent", 100))
+        apply_zoom(step_editor_zoom(current, delta))
+        event.accept()
+        return True
+
+
+def _install_alt_wheel(widget) -> None:
+    if getattr(widget, "_stepnx_editor_zoom_wheel_filter", None) is not None:
+        return
+    filter_object = _EditorZoomWheelFilter(widget)
+    widget.viewport().installEventFilter(filter_object)
+    widget._stepnx_editor_zoom_wheel_filter = filter_object
 
 
 def install_editor_field_zoom(window) -> None:
@@ -108,7 +160,11 @@ def install_editor_field_zoom(window) -> None:
     def apply_zoom(percent: int) -> None:
         percent = _validate_percent(percent)
         window._stepnx_editor_zoom_percent = percent
+        action = actions.get(percent)
+        if action is not None and not action.isChecked():
+            action.setChecked(True)
         for widget in _timeline_widgets(window):
+            _install_alt_wheel(widget)
             set_timeline_editor_zoom(widget, percent)
         window.statusBar().showMessage(f"Editor zoom: {percent}%", 2500)
 
@@ -129,8 +185,11 @@ def install_editor_field_zoom(window) -> None:
         import stepnx.gui.timeline_widget as timeline_module
 
         if isinstance(widget, timeline_module.TimelineWidget):
+            _install_alt_wheel(widget)
             set_timeline_editor_zoom(widget, window._stepnx_editor_zoom_percent)
 
+    for widget in _timeline_widgets(window):
+        _install_alt_wheel(widget)
     window.tabs.currentChanged.connect(sync_current_tab)
     window.editor_zoom_menu = zoom_menu
     window.editor_zoom_actions = actions
