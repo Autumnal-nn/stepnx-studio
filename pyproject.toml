@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stepnx-studio"
-version = "0.9.3"
+version = "0.9.4"
 description = "Lossless NX20 chart core for StepNX Studio"
 readme = "README.md"
 requires-python = ">=3.11"
