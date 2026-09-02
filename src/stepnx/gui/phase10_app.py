@@ -29,6 +29,7 @@ def main(argv=None) -> int:
     import stepnx.gui.timing_dialog as timing_module
     import stepnx.gui.preview_widget as preview_module
     from stepnx.gui.editor_field_zoom import install_editor_field_zoom
+    from stepnx.gui.editor_ux_cleanup import install_editor_ux_cleanup
     from stepnx.gui.keyboard_workflow import install_keyboard_workflow
     from stepnx.gui.lightmap_visual_polish import install_lightmap_visual_polish
     from stepnx.gui.phase10_install import install_phase10
@@ -104,6 +105,9 @@ def main(argv=None) -> int:
             # It scales only Timeline geometry; menus, toolbars, sidebars and
             # dialogs remain at the application's ordinary UI scale.
             install_editor_field_zoom(self)
+            # UX cleanup is intentionally last: it consumes the final QAction,
+            # Lightmap and route surfaces rather than creating parallel state.
+            install_editor_ux_cleanup(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10
