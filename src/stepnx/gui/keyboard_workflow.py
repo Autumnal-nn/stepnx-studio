@@ -38,25 +38,30 @@ Ctrl+S        Save All
 Ctrl+Shift+S  Save All (legacy shortcut)
 Ctrl+Z / Ctrl+Y  Undo / Redo
 Ctrl+Shift+P  Open gameplay preview
-Ctrl+PageUp / Ctrl+PageDown  Previous / next chart tab
+Ctrl+Tab / Ctrl+Shift+Tab  Next / previous chart tab (native Qt behavior)
 Alt+1..5      Workspace / Timeline / Inspector / Diagnostics / Routes
 F1            This keyboard map
 
 Timeline focus
 Arrows        Move cell cursor
-Shift+Arrows  Extend rectangular selection inside one Block
+Shift+Arrows  Extend rectangular selection across visible Blocks/Splits
 Home / End    First / last lane
 Ctrl+Home / Ctrl+End  First / last row in current Block
 Ctrl+Up / Ctrl+Down  Previous / next Split segment
-Enter         Apply current tool; Toggle behaves like a click
+Enter         Apply current tool; Toggle toggles every selected cell
 Space         Play / pause
 1..0          Toggle, Select, Roll, Tap, Hold head/body/tail, Item, Division, Erase
 N / H / G     Normal, Bonus/Hidden, Ghost function
 T / B / F / V Focus Tool, Bank/ID, Function, Visibility controls
-Delete        Erase selected notes
+Delete        Erase selected cells
 Esc           Clear selection
-Ctrl+C/X/V    Copy / Cut / Paste notes
-X / Y / M     Flip horizontal / Flip vertical / Mirror
+Ctrl+C/X/V    Copy / Cut / Paste cells
+X / Y / M     Flip horizontal / Flip vertical / Mirror (playable charts)
+
+Lightmap
+Only Toggle and Select author cells. The three visible lanes map to the three
+binary light bytes. Select supports Ctrl/Shift selection plus Cut/Copy/Paste/Delete.
+The fourth raw Lightmap byte is preserved but is not authorable.
 
 Workspace tree focus
 Enter         Open / inspect selected item
@@ -94,19 +99,27 @@ def _row_id_at(rows, index: int) -> int:
     return int(rows[index].stable_id)
 
 
-def _cursor_for_anchor(widget) -> KeyboardCursor | None:
-    anchor = widget.selection.anchor
-    if anchor is None or int(widget.snapshot.columns) <= 0:
+def _target_for_cursor(widget, cursor: KeyboardCursor) -> CellTarget:
+    segment = widget._layout.segments[cursor.segment_index]
+    return CellTarget(_row_id_at(segment.block.rows, cursor.row_index), cursor.lane)
+
+
+def _cursor_for_target(widget, target: CellTarget | None) -> KeyboardCursor | None:
+    if target is None or int(widget.snapshot.columns) <= 0:
         return None
     for segment_index, segment in enumerate(widget._layout.segments):
-        row_index = _row_index(segment.block.rows, int(anchor.row_id))
+        row_index = _row_index(segment.block.rows, int(target.row_id))
         if row_index is not None:
             return KeyboardCursor(
                 segment_index,
                 int(row_index),
-                max(0, min(int(anchor.lane), int(widget.snapshot.columns) - 1)),
+                max(0, min(int(target.lane), int(widget.snapshot.columns) - 1)),
             )
     return None
+
+
+def _cursor_for_anchor(widget) -> KeyboardCursor | None:
+    return _cursor_for_target(widget, widget.selection.anchor)
 
 
 def _default_cursor(widget) -> KeyboardCursor | None:
@@ -130,6 +143,17 @@ def _default_cursor(widget) -> KeyboardCursor | None:
 
 
 def _cursor(widget) -> KeyboardCursor | None:
+    # Selection.anchor is intentionally the fixed origin of a Shift rectangle,
+    # not its moving edge. Keep the last keyboard edge separately so repeated
+    # Shift+Arrow continues from the second/third/etc. cell instead of jumping
+    # back to the original anchor on every key press. Object identity makes any
+    # mouse/other selection replacement invalidate the cached edge naturally.
+    if getattr(widget, "_stepnx_keyboard_selection", None) is widget.selection:
+        cursor = _cursor_for_target(
+            widget, getattr(widget, "_stepnx_keyboard_edge", None)
+        )
+        if cursor is not None:
+            return cursor
     return _cursor_for_anchor(widget) or _default_cursor(widget)
 
 
@@ -194,26 +218,14 @@ def _move_cursor(widget, cursor: KeyboardCursor, key: int, modifiers) -> Keyboar
 
 
 def _selection_to_cursor(widget, cursor: KeyboardCursor, *, extend: bool) -> CellSelection:
-    segment = widget._layout.segments[cursor.segment_index]
-    row_id = _row_id_at(segment.block.rows, cursor.row_index)
-    target = CellTarget(row_id, cursor.lane)
+    target = _target_for_cursor(widget, cursor)
     selection = widget.selection
     if not extend or selection.anchor is None:
         return selection.replace(target)
 
-    anchor = selection.anchor
-    anchor_index = _row_index(segment.block.rows, int(anchor.row_id))
-    if anchor_index is None:
-        return selection.replace(target)
+    from stepnx.gui.selection_lightmap_workflow import _selection_between
 
-    row_start, row_end = sorted((int(anchor_index), cursor.row_index))
-    lane_start, lane_end = sorted((int(anchor.lane), cursor.lane))
-    targets = frozenset(
-        CellTarget(_row_id_at(segment.block.rows, row_index), lane)
-        for row_index in range(row_start, row_end + 1)
-        for lane in range(lane_start, lane_end + 1)
-    )
-    return CellSelection(targets, anchor)
+    return _selection_between(widget, target)
 
 
 def _ensure_cursor_visible(widget, cursor: KeyboardCursor) -> None:
@@ -294,16 +306,24 @@ def _activate_current_tool(window, widget) -> bool:
         cursor = _cursor(widget)
         if cursor is None:
             return False
-        widget.set_selection(_selection_to_cursor(widget, cursor, extend=False))
-    if len(widget.selection.targets) == 1:
-        combo = getattr(window, "tool_combo", None)
-        if combo is not None and combo.currentText().strip().casefold() == "toggle":
+        selection = _selection_to_cursor(widget, cursor, extend=False)
+        widget.set_selection(selection)
+        widget._stepnx_keyboard_selection = selection
+        widget._stepnx_keyboard_edge = _target_for_cursor(widget, cursor)
+
+    combo = getattr(window, "tool_combo", None)
+    if combo is not None and combo.currentText().strip().casefold() == "toggle":
+        toggle = getattr(window, "_stepnx_toggle_selection", None)
+        if callable(toggle):
+            return bool(toggle(widget))
+        if len(widget.selection.targets) == 1:
             cursor = _cursor(widget)
             click = getattr(window, "_phase10_click", None)
             if cursor is not None and callable(click):
                 segment = widget._layout.segments[cursor.segment_index]
                 click(widget, (segment, cursor.row_index, cursor.lane))
                 return True
+
     apply_tool = getattr(window, "_apply_tool_to_selection", None)
     if callable(apply_tool):
         apply_tool()
@@ -347,13 +367,14 @@ def _handle_timeline_key(widget, event) -> bool:
         if cursor is None:
             return False
         moved = _move_cursor(widget, cursor, key, modifiers)
-        widget.set_selection(
-            _selection_to_cursor(
-                widget,
-                moved,
-                extend=bool(modifiers & Qt.KeyboardModifier.ShiftModifier),
-            )
+        selection = _selection_to_cursor(
+            widget,
+            moved,
+            extend=bool(modifiers & Qt.KeyboardModifier.ShiftModifier),
         )
+        widget.set_selection(selection)
+        widget._stepnx_keyboard_selection = selection
+        widget._stepnx_keyboard_edge = _target_for_cursor(widget, moved)
         _ensure_cursor_visible(widget, moved)
         return True
 
@@ -482,14 +503,6 @@ def _focus_side_tab(window, index: int, widget) -> None:
     widget.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
 
-def _cycle_chart_tab(window, delta: int) -> None:
-    count = window.tabs.count()
-    if count <= 1:
-        return
-    window.tabs.setCurrentIndex((window.tabs.currentIndex() + delta) % count)
-    _focus_timeline(window)
-
-
 def _install_pane_shortcuts(window) -> None:
     shortcuts = []
 
@@ -504,8 +517,6 @@ def _install_pane_shortcuts(window) -> None:
     add("Alt+3", lambda: _focus_side_tab(window, 1, window.inspector))
     add("Alt+4", lambda: _focus_side_tab(window, 0, window.diagnostics))
     add("Alt+5", lambda: _focus_side_tab(window, 2, window.routes))
-    add("Ctrl+PageUp", lambda: _cycle_chart_tab(window, -1))
-    add("Ctrl+PageDown", lambda: _cycle_chart_tab(window, 1))
     window.keyboard_pane_shortcuts = tuple(shortcuts)
 
 
@@ -576,6 +587,14 @@ def install_keyboard_workflow(window) -> None:
     _scope_transport_shortcut(window)
     _install_pane_shortcuts(window)
     _install_keyboard_help(window)
+
+    # Installed last so it can safely wrap the final Phase-10/11 mouse and
+    # QAction handlers, including fast-note feedback and sparse-row adapters.
+    from stepnx.gui.selection_lightmap_workflow import (
+        install_selection_lightmap_workflow,
+    )
+
+    install_selection_lightmap_workflow(window)
 
     tree_filter = _TreeKeyboardFilter(window)
     window.tree.installEventFilter(tree_filter)
