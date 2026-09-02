@@ -28,36 +28,42 @@ class SplitSelectionDialog(QDialog):
 
         layout = QVBoxLayout(self)
         explanation = QLabel(
-            "NX20 stores Split selection in one byte. 0x80 makes a random "
-            "selection when the Split is entered; 0x40 is a follower that "
-            "reuses the latest Block index selected for the same bank. A bank "
-            "is therefore also meaningful on conditioned/explicit selector "
-            "Splits such as 0x01, whose choice can later be reused by 0x41. "
-            "Runtime validation shows 0x80 takes precedence when both bits are "
-            "present. The raw field remains authoritative and can represent "
-            "every byte from 0x00 through 0xFF.",
+            "NX20 stores Split selection in one byte. 0x80 chooses a random "
+            "Block when the chart is loaded. 0x40 first looks for the encoded "
+            "selection bank: with bank 1..31 it follows the latest Block index "
+            "selected for that bank; with no bank (raw 0x40) the lookup has "
+            "nothing to follow and falls back to a fresh random choice when the "
+            "Split is reached. A bank is also meaningful on conditioned/explicit "
+            "selector Splits such as 0x01, whose choice can later be reused by "
+            "0x41. Runtime validation shows 0x80 takes precedence when both "
+            "selector bits are present. The raw field remains authoritative and "
+            "can represent every byte from 0x00 through 0xFF.",
             self,
         )
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
 
         form = QFormLayout()
-        self.random_start = QCheckBox("0x80  Random at Split start", self)
+        self.random_start = QCheckBox("0x80  Random at chart load", self)
         # Attribute name retained for compatibility with the original typed
-        # projection; user-facing terminology is deliberately follower-only.
-        self.random_trigger = QCheckBox("0x40  Follower block", self)
+        # projection. Its meaning depends on whether a real bank (1..31) exists.
+        self.random_trigger = QCheckBox(
+            "0x40  Follow bank / random at block start if unbanked", self
+        )
         self.random_trigger.setToolTip(
-            "Reuse the most recent Block index selected for this bank. The "
-            "preceding selection may come from 0x80 random selection or from "
-            "conditions / an explicit candidate in a banked Split such as 0x01."
+            "With bank 1..31, reuse the most recent Block index selected for "
+            "that bank. With bank 0 (no bank), the lookup cannot resolve and "
+            "the runtime falls back to a fresh random selection when this Split "
+            "is reached."
         )
         self.force_select = QCheckBox("0x20  Force/select behavior", self)
         self.bank = QSpinBox(self)
         self.bank.setRange(0, 31)
         self.bank.setToolTip(
-            "Selection bank. A non-zero bank is meaningful even without 0x80 or "
-            "0x40 on this Split: the selected candidate becomes the state that "
-            "later follower Splits for the same bank reuse."
+            "0 means no bank. Banks 1..31 retain a selected Block index. A "
+            "banked Split remains meaningful even without 0x80/0x40: conditions "
+            "or an explicit active candidate can establish the state that a "
+            "later follower reuses."
         )
         self.raw_edit = QLineEdit(self)
         self.raw_edit.setMaxLength(4)
@@ -69,10 +75,10 @@ class SplitSelectionDialog(QDialog):
         self.warning_label = QLabel(self)
         self.warning_label.setWordWrap(True)
 
-        form.addRow("Random at start:", self.random_start)
-        form.addRow("Follower:", self.random_trigger)
+        form.addRow("Random at load:", self.random_start)
+        form.addRow("0x40 behavior:", self.random_trigger)
         form.addRow("Force select:", self.force_select)
-        form.addRow("Selection bank (0..31):", self.bank)
+        form.addRow("Selection bank (0 = none):", self.bank)
         form.addRow("Raw byte:", self.raw_edit)
         form.addRow("Decoded:", self.raw_label)
         layout.addLayout(form)
@@ -100,7 +106,7 @@ class SplitSelectionDialog(QDialog):
         self._syncing = True
         try:
             self.random_start.setChecked(selection.random_at_start)
-            self.random_trigger.setChecked(selection.follower)
+            self.random_trigger.setChecked(selection.random_at_trigger)
             self.force_select.setChecked(selection.force_select)
             self.bank.setValue(selection.bank)
         finally:
@@ -297,7 +303,7 @@ def install_phase12_split_header(window) -> None:
 
     action = QAction("Edit Split selection…", window)
     action.setToolTip(
-        "Edit the complete NX20 Split selector byte: random selector, follower flag, force-select flag, and bank."
+        "Edit the complete NX20 Split selector byte: load-time random, 0x40 follower/fallback behavior, force-select flag, and bank."
     )
     action.triggered.connect(lambda *_args: _edit_split_selection(window))
     window.structure_menu.addAction(action)
