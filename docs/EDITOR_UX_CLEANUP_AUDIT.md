@@ -61,8 +61,13 @@ same:
 - Merge Splits is disabled on the final Split;
 - Split Here is disabled at the first row.
 
+Timeline Remove Block now uses the same `Remove Block` title, explanatory text,
+Yes/Cancel buttons and default Cancel behavior as the canonical Structure
+operation. The specialized viewport entry point still executes the same
+`remove_block` command and ordinary undo/document-refresh path.
+
 This preserves the specialized Timeline workflow without maintaining misleading
-states.
+states or destructive wording drift.
 
 ## Selection feedback and action state
 
@@ -152,9 +157,14 @@ at the currently visible tab.
 F1 help now documents both independent Timeline zoom controls:
 
 - Ctrl+wheel: vertical timing precision zoom;
-- Alt+wheel: Editor field zoom in 25% preset steps.
+- Shift+wheel: Editor field zoom in 25% preset steps.
 
-`View > Editor zoom` also advertises this distinction in its tooltip.
+`View > Editor zoom` advertises the same distinction in its tooltip.
+
+The initial Alt+wheel binding was removed after real Windows use showed that Qt
+could route it to native horizontal scrolling instead of StepNX. Exact
+Shift+wheel is now intercepted only over the Timeline viewport; Ctrl+wheel is
+left untouched for precision zoom and Alt+wheel is left to the platform.
 
 ## Destructive operations
 
@@ -168,12 +178,13 @@ The audit retained the existing guarded destructive flows:
   blocked for `LM.NX`;
 - Save All still goes through validation and structural-diff preview.
 
-The Timeline Remove Block affordance is now disabled before invocation when the
-last-Block invariant would reject it.
+The Timeline Remove Block affordance is disabled before invocation when the
+last-Block invariant would reject it, and its confirmation now matches the
+canonical Structure wording/buttons.
 
 ## Automated regressions
 
-Item 6 adds 21 focused regressions over the item-5 610-test checkpoint. They
+Item 6 adds 22 focused regressions over the item-5 610-test checkpoint. They
 cover:
 
 - direct Routes selector terminology;
@@ -186,9 +197,11 @@ cover:
 - Timeline structure-menu enable states;
 - chart-field target selection;
 - stale Division-metadata context rejection;
-- F1 zoom-help truth.
+- F1 zoom-help truth;
+- Shift+wheel ownership with Ctrl/Alt left unintercepted;
+- canonical Timeline Remove Block confirmation wording.
 
-The strict Windows discovery floor is therefore **631 tests**.
+The strict Windows discovery floor is therefore **632 tests**.
 
 ## Focused manual smoke
 
@@ -199,7 +212,8 @@ Before item 6 is closed, verify on Windows:
 2. Right-click `LM.NX` in Workspace. `Edit chart scope / field…`, Duplicate and
    Delete must be disabled.
 3. On a Split with one Block, Timeline right-click > Block > Remove Block… must
-   be disabled. On a multi-Block Split it must be enabled.
+   be disabled. On a multi-Block Split it must be enabled, and its confirmation
+   must say `Remove Block` with Cancel as the safe default.
 4. Make a rectangular multi-row selection and then a sparse Ctrl selection.
    Status text and Flip/Mirror enabled state must follow the actual shape.
 5. Copy from a playable chart, switch to LM.NX and select a light cell. Paste
@@ -213,7 +227,10 @@ Before item 6 is closed, verify on Windows:
    does not target the old chart.
 9. Open Routes on charts using `0x40`, `0x41` and `0x80`; no `random trigger` or
    `group` terminology should remain.
-10. Press F1 and confirm Ctrl+wheel and Alt+wheel are both documented.
+10. Press F1 and confirm Ctrl+wheel and Shift+wheel are documented. Over the
+    Timeline, Shift+wheel must step Editor zoom; Ctrl+wheel must retain vertical
+    precision zoom; Alt+wheel must not be claimed by StepNX.
 
-Any stale target, enabled impossible action, or context menu that executes a
-different command from its matching canonical action is blocking for item 6.
+Any stale target, enabled impossible action, context menu that executes a
+different command from its matching canonical action, or input shortcut whose
+visible behavior contradicts Help is blocking for item 6.
