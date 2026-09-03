@@ -129,10 +129,12 @@ class EditorFieldZoomTests(unittest.TestCase):
             self.assertIs(actions[0], window.open_preview_action)
             self.assertIs(actions[1].menu(), window.editor_zoom_menu)
             self.assertEqual(window.editor_zoom_menu.title(), "Editor zoom")
+            self.assertIn("Shift+wheel", window.editor_zoom_menu.menuAction().toolTip())
+            self.assertIn("Ctrl+wheel", window.editor_zoom_menu.menuAction().toolTip())
         finally:
             window.deleteLater()
 
-    def test_alt_wheel_changes_editor_zoom_but_ctrl_wheel_is_not_intercepted(self) -> None:
+    def test_shift_wheel_changes_editor_zoom_without_intercepting_ctrl_or_alt(self) -> None:
         window = QMainWindow()
         widget = TimelineWidget(self.snapshot)
         try:
@@ -144,9 +146,9 @@ class EditorFieldZoomTests(unittest.TestCase):
             install_editor_field_zoom(window)
 
             filter_object = widget._stepnx_editor_zoom_wheel_filter
-            alt_event = _FakeWheelEvent(Qt.KeyboardModifier.AltModifier, 120)
-            self.assertTrue(filter_object.eventFilter(widget.viewport(), alt_event))
-            self.assertTrue(alt_event.accepted)
+            shift_event = _FakeWheelEvent(Qt.KeyboardModifier.ShiftModifier, 120)
+            self.assertTrue(filter_object.eventFilter(widget.viewport(), shift_event))
+            self.assertTrue(shift_event.accepted)
             self.assertEqual(window._stepnx_editor_zoom_percent, 125)
             self.assertEqual(widget._stepnx_editor_zoom_percent, 125)
             self.assertTrue(window.editor_zoom_actions[125].isChecked())
@@ -154,6 +156,19 @@ class EditorFieldZoomTests(unittest.TestCase):
             ctrl_event = _FakeWheelEvent(Qt.KeyboardModifier.ControlModifier, 120)
             self.assertFalse(filter_object.eventFilter(widget.viewport(), ctrl_event))
             self.assertFalse(ctrl_event.accepted)
+            self.assertEqual(window._stepnx_editor_zoom_percent, 125)
+
+            alt_event = _FakeWheelEvent(Qt.KeyboardModifier.AltModifier, 120)
+            self.assertFalse(filter_object.eventFilter(widget.viewport(), alt_event))
+            self.assertFalse(alt_event.accepted)
+            self.assertEqual(window._stepnx_editor_zoom_percent, 125)
+
+            mixed_event = _FakeWheelEvent(
+                Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier,
+                120,
+            )
+            self.assertFalse(filter_object.eventFilter(widget.viewport(), mixed_event))
+            self.assertFalse(mixed_event.accepted)
             self.assertEqual(window._stepnx_editor_zoom_percent, 125)
         finally:
             window.deleteLater()
