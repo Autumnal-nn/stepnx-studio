@@ -41,8 +41,15 @@ in 25% increments.
 The selection is shared across currently open authoring Timeline tabs and is
 applied to a newly activated Timeline tab as well.
 
-- **Alt+wheel** steps Editor zoom by one 25% preset and clamps at 100%/300%.
+- **Shift+wheel** steps Editor zoom by one 25% preset and clamps at 100%/300%.
 - **Ctrl+wheel** remains the independent vertical precision/timing zoom.
+- **Alt+wheel** is deliberately not intercepted. Qt/Windows may use it for
+  native horizontal scrolling, so StepNX does not compete with that behavior.
+
+The initial item-5 implementation used Alt+wheel, but real Windows validation in
+the item-6 UX pass showed that the native horizontal-scroll behavior can win the
+input path. The shortcut was therefore moved to exact Shift+wheel, which StepNX
+owns only while the pointer is over the Timeline viewport.
 
 Changing Editor zoom scales the *current* row geometry and its vertical-zoom
 bounds by the same ratio, so an existing Ctrl+wheel precision level is preserved
@@ -98,8 +105,8 @@ The item-5 regression suite verifies:
 - row/lane hit testing at every preset;
 - Timeline widget size remaining unchanged while internal field geometry grows;
 - Lightmap light rectangles following the same scaled lane geometry;
-- `Alt+wheel` changing exactly one preset at a time and respecting bounds;
-- `Ctrl+wheel` not being intercepted by the Editor-zoom shortcut;
+- Shift+wheel changing exactly one preset at a time and respecting bounds;
+- Ctrl+wheel and Alt+wheel not being intercepted by the Editor-zoom shortcut;
 - `View` containing `Open gameplay preview…` before `Editor zoom`.
 
 Final item-5 CI checkpoint, PR #24 / run 49:
