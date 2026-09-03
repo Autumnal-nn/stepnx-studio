@@ -38,10 +38,12 @@ def selection_summary(widget) -> str:
     lanes = {int(target.lane) for target in selection.targets}
     rectangular = count == len(rows) * len(lanes)
     noun = "light cells" if widget.snapshot.effective_lightmap else "cells"
+    row_label = f"{len(rows)} {'row' if len(rows) == 1 else 'rows'}"
+    lane_label = f"{len(lanes)} {'lane' if len(lanes) == 1 else 'lanes'}"
     if rectangular:
-        detail = f"{len(rows)} rows × {len(lanes)} lanes"
+        detail = f"{row_label} × {lane_label}"
     else:
-        detail = f"{len(rows)} rows · {len(lanes)} lanes"
+        detail = f"{row_label} · {lane_label}"
 
     block_ids = set()
     try:
@@ -327,7 +329,6 @@ def _install_inspector_state(window) -> None:
         tree_selection=None,
     ) -> None:
         context = getattr(self, "_stepnx_inspector_context", None)
-        old_document = None
         before = None
         if (
             context is not None
