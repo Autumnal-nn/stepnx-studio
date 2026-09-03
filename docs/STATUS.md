@@ -6,15 +6,16 @@ Version: 0.9.5 pre-alpha
 
 ## Current state
 
-StepNX Studio is in the final polish and hardening portion of the 0.9.5 cycle.
-The canonical NX20/NFO model, practical authoring workflow, legacy import layer,
-folder publication workflow, native gameplay preview, keyboard workflow,
-three-channel Lightmap authoring and editor-field zoom are implemented.
+StepNX Studio has completed the six-item 0.9.5 hardening cycle. The canonical
+NX20/NFO model, practical authoring workflow, legacy import layer, folder
+publication workflow, native gameplay preview, keyboard workflow, three-channel
+Lightmap authoring, editor-field zoom and final editor UX consistency pass are
+implemented and validated.
 
-Hardening items 1 through 5 are complete. Item 6, editor UX cleanup, is
-implemented on `hardening-0.9.5-editor-ux-cleanup` and its automated gate is
-green. Only the focused Windows GUI smoke remains before item 6 is marked
-complete. The item-6 discovery floor is **632 tests**.
+All six hardening items are complete. The final item-6 automated gate is green at
+**632 tests** on both Windows and the Linux/glibc-2.31 baseline, and the focused
+Windows GUI smoke passed. The branch is ready for final integration and release
+preparation.
 
 ## Delivered
 
@@ -256,7 +257,7 @@ See `HIGH_DPI_SCALING_GATE.md`.
 
 ### Editor UX cleanup
 
-Item 6 implementation now covers:
+Item 6 is complete and covers:
 
 - Workspace context menus reusing canonical actions where semantics match;
 - Timeline-specialized structure commands retaining their row/viewport-specific
@@ -282,7 +283,10 @@ Final automated item-6 checkpoint on functional/test head
 - Windows: **632 tests in 7.190 s, OK**, with one expected skip;
 - Linux/glibc 2.31: **632 tests in 5.253 s, OK**.
 
-Only the focused Windows GUI smoke remains before item 6 is closed.
+The focused Windows GUI smoke also passed, including Shift+wheel editor zoom on a
+Timeline with horizontal scrolling available, control-state/context-menu checks,
+selection/clipboard applicability, Inspector lifetime, Routes wording and F1
+shortcut truth.
 
 See `EDITOR_UX_CLEANUP_AUDIT.md`.
 
@@ -315,9 +319,9 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
    Lightmap authoring;
 5. **Complete:** editor-field scaling at every 25% increment from 100% through
    300%;
-6. **Automated gate green, manual smoke pending:** editor UX cleanup covering
-   menus, selection, Inspector state, action availability, destructive prompts,
-   shortcut/help truth and user-facing error paths.
+6. **Complete:** editor UX cleanup covering menus, selection, Inspector state,
+   action availability, destructive prompts, shortcut/help truth and user-facing
+   error paths.
 
 ## Current implementation limitations
 
