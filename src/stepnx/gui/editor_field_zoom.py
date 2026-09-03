@@ -122,7 +122,11 @@ class _EditorZoomWheelFilter(QObject):
     def eventFilter(self, watched, event) -> bool:
         if event.type() != QEvent.Type.Wheel:
             return False
-        if not (event.modifiers() & Qt.KeyboardModifier.AltModifier):
+        # Qt/Windows commonly reserves Alt+wheel for native horizontal scrolling.
+        # StepNX instead owns exact Shift+wheel while the pointer is over the
+        # Timeline viewport. Ctrl+wheel remains the independent vertical-precision
+        # zoom path implemented by TimelineWidget itself.
+        if event.modifiers() != Qt.KeyboardModifier.ShiftModifier:
             return False
         delta = event.angleDelta().y()
         if delta == 0:
@@ -137,7 +141,7 @@ class _EditorZoomWheelFilter(QObject):
         return True
 
 
-def _install_alt_wheel(widget) -> None:
+def _install_shift_wheel(widget) -> None:
     if getattr(widget, "_stepnx_editor_zoom_wheel_filter", None) is not None:
         return
     filter_object = _EditorZoomWheelFilter(widget)
@@ -153,6 +157,10 @@ def install_editor_field_zoom(window) -> None:
 
     view_menu = _view_menu(window)
     zoom_menu = view_menu.addMenu("Editor zoom")
+    zoom_menu.menuAction().setToolTip(
+        "Shift+wheel changes editor field zoom in 25% steps; "
+        "Ctrl+wheel changes vertical timing precision"
+    )
     group = QActionGroup(window)
     group.setExclusive(True)
     actions = {}
@@ -164,7 +172,7 @@ def install_editor_field_zoom(window) -> None:
         if action is not None and not action.isChecked():
             action.setChecked(True)
         for widget in _timeline_widgets(window):
-            _install_alt_wheel(widget)
+            _install_shift_wheel(widget)
             set_timeline_editor_zoom(widget, percent)
         window.statusBar().showMessage(f"Editor zoom: {percent}%", 2500)
 
@@ -185,11 +193,11 @@ def install_editor_field_zoom(window) -> None:
         import stepnx.gui.timeline_widget as timeline_module
 
         if isinstance(widget, timeline_module.TimelineWidget):
-            _install_alt_wheel(widget)
+            _install_shift_wheel(widget)
             set_timeline_editor_zoom(widget, window._stepnx_editor_zoom_percent)
 
     for widget in _timeline_widgets(window):
-        _install_alt_wheel(widget)
+        _install_shift_wheel(widget)
     window.tabs.currentChanged.connect(sync_current_tab)
     window.editor_zoom_menu = zoom_menu
     window.editor_zoom_actions = actions
