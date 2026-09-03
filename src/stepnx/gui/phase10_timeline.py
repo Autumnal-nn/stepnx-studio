@@ -8,6 +8,27 @@ from stepnx.authoring.selection import CellSelection
 from stepnx.gui.timeline_widget import TimelineWidget as _BaseTimelineWidget
 
 
+def context_menu_capabilities(snapshot, split_id: int, row_index: int | None):
+    """Return stable enable-state facts for the specialized Timeline menu."""
+
+    split_index = next(
+        (i for i, item in enumerate(snapshot.splits) if item.stable_id == split_id),
+        None,
+    )
+    if split_index is None:
+        return {
+            "split_here": False,
+            "merge_splits": False,
+            "remove_block": False,
+        }
+    split = snapshot.splits[split_index]
+    return {
+        "split_here": row_index is not None and row_index > 0,
+        "merge_splits": split_index + 1 < len(snapshot.splits),
+        "remove_block": len(split.blocks) > 1,
+    }
+
+
 class Phase10TimelineWidget(_BaseTimelineWidget):
     """StepEdit-style Toggle/edit gestures layered over the native viewport."""
 
@@ -49,25 +70,23 @@ class Phase10TimelineWidget(_BaseTimelineWidget):
             host = self.window()
             row_hit = self._phase10_row_hit(event)
             row_index = None if row_hit is None else row_hit[1]
+            capabilities = context_menu_capabilities(
+                self._snapshot, segment.split_id, row_index
+            )
+
             menu = QMenu(self)
             split_menu = menu.addMenu("Split")
             a_split_here = split_menu.addAction("Split here")
             a_merge = split_menu.addAction("Merge Splits…")
             a_resize = split_menu.addAction("Resize Split…")
-            a_split_here.setEnabled(row_index is not None and row_index > 0)
-            try:
-                split_index = next(
-                    i for i, item in enumerate(self._snapshot.splits)
-                    if item.stable_id == segment.split_id
-                )
-                a_merge.setEnabled(split_index + 1 < len(self._snapshot.splits))
-            except StopIteration:
-                a_merge.setEnabled(False)
+            a_split_here.setEnabled(capabilities["split_here"])
+            a_merge.setEnabled(capabilities["merge_splits"])
 
             block_menu = menu.addMenu("Block")
-            a_create_block = block_menu.addAction("Create Block after")
+            a_create_block = block_menu.addAction("Insert empty Block after")
             a_duplicate_block = block_menu.addAction("Duplicate Block")
-            a_delete_block = block_menu.addAction("Delete Block…")
+            a_delete_block = block_menu.addAction("Remove Block…")
+            a_delete_block.setEnabled(capabilities["remove_block"])
 
             chosen = menu.exec(event.globalPosition().toPoint())
             action_map = {
@@ -244,6 +263,7 @@ class Phase10TimelineWidget(_BaseTimelineWidget):
                 painter.drawRoundedRect(tail_rect, 5, 5)
         finally:
             painter.end()
+
     @staticmethod
     def _phase10_special_tile(atlas, cell: int):
         if cell < 0:
