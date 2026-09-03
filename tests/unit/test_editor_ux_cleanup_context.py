@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 from stepnx.codecs.nx20 import parse_bytes
 from stepnx.gui.editor_ux_cleanup import (
+    REMOVE_BLOCK_MESSAGE,
+    REMOVE_BLOCK_TITLE,
     _install_help_truth,
     division_metadata_action_enabled,
 )
@@ -46,12 +48,22 @@ class EditorUxCleanupContextTests(unittest.TestCase):
                 "Ctrl+wheel    Vertical timing zoom\n", ""
             ).replace(
                 "Alt+wheel     Editor field zoom (25% step)\n", ""
+            ).replace(
+                "Shift+wheel   Editor field zoom (25% step)\n", ""
             )
             _install_help_truth(SimpleNamespace(editor_zoom_menu=None))
             self.assertIn("Ctrl+wheel    Vertical timing zoom", keyboard_module._SHORTCUT_HELP)
-            self.assertIn("Alt+wheel     Editor field zoom (25% step)", keyboard_module._SHORTCUT_HELP)
+            self.assertIn("Shift+wheel   Editor field zoom (25% step)", keyboard_module._SHORTCUT_HELP)
+            self.assertNotIn("Alt+wheel     Editor field zoom", keyboard_module._SHORTCUT_HELP)
         finally:
             keyboard_module._SHORTCUT_HELP = original
+
+    def test_timeline_remove_confirmation_matches_canonical_structure_wording(self) -> None:
+        self.assertEqual(REMOVE_BLOCK_TITLE, "Remove Block")
+        self.assertEqual(
+            REMOVE_BLOCK_MESSAGE,
+            "Remove the selected Block and every note it contains?",
+        )
 
 
 if __name__ == "__main__":
