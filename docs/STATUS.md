@@ -6,18 +6,15 @@ Version: 0.9.5 pre-alpha
 
 ## Current state
 
-StepNX Studio is in a polish and hardening cycle. The canonical NX20/NFO model,
-practical authoring workflow, legacy import layer, folder publication workflow,
-and native gameplay preview are implemented. The documentation truth pass,
-selection-performance regression gate, and save/recovery durability torture pass
-are complete.
+StepNX Studio is in the final polish and hardening portion of the 0.9.5 cycle.
+The canonical NX20/NFO model, practical authoring workflow, legacy import layer,
+folder publication workflow, native gameplay preview, keyboard workflow,
+three-channel Lightmap authoring and editor-field zoom are implemented.
 
-The keyboard workflow audit has passed its automated 597-test Windows/Linux gate.
-Manual Windows smoke testing found and drove fixes for repeated Shift selection,
-cross-Block selection semantics, Enter/Toggle dispatch, redundant chart-tab
-shortcuts, and previously missing `LM.NX` cell authoring. Item 4 is therefore
-**awaiting manual re-smoke**, not yet closed. High-DPI/scaling validation and
-editor UX cleanup follow after that manual gate.
+Hardening items 1 through 5 are complete. Item 6, editor UX cleanup, is
+implemented on `hardening-0.9.5-editor-ux-cleanup` and awaiting its final focused
+Windows smoke plus full automated gate. The item-6 discovery floor is **632
+tests**.
 
 ## Delivered
 
@@ -80,11 +77,14 @@ editor UX cleanup follow after that manual gate.
 - persistent local visual/noteskin preferences outside chart folders;
 - compressed/staged waveform decoding and multiresolution stereo min/max
   rendering;
-- shared monotonic audio transport and metronome voice pool.
+- shared monotonic audio transport and metronome voice pool;
+- editor-field zoom presets from 100% through 300% in 25% increments;
+- Shift+wheel steps Editor zoom over the Timeline, while Ctrl+wheel remains the
+  independent vertical timing-precision zoom.
 
 ### Lightmap authoring
 
-`LM.NX` now has a deliberately narrow native authoring path rather than being
+`LM.NX` has a deliberately narrow native authoring path rather than being
 publication-only:
 
 - exactly three editable lanes, aligned one-to-one with raw Lightmap bytes 0..2;
@@ -199,45 +199,83 @@ See `SAVE_RECOVERY_TORTURE.md`.
 
 ### Keyboard workflow hardening
 
-Implemented on `hardening-0.9.5-keyboard-workflow`:
+The keyboard workflow is complete and includes:
 
 - stable-ID Timeline cursor navigation with arrows, Home/End and Block/Split
   boundary jumps;
-- repeated Shift-arrow selection tracks a moving edge while retaining the fixed
-  original anchor;
-- rectangular selection may cross visible Block/Split boundaries and counts
-  encoded rows independent of Beat Split/tick density;
+- repeated Shift-arrow selection with a fixed anchor and moving edge;
+- rectangular selection across visible Block/Split boundaries, using encoded
+  rows independent of Beat Split/tick density;
 - Timeline-only note editing shortcuts, so `X`, `Y`, `M`, Delete, Escape and
-  Ctrl+C/X/V no longer leak into unrelated editor controls;
-- Timeline-only Space playback, replacing the previous application-wide
-  shortcut;
+  Ctrl+C/X/V do not leak into unrelated editor controls;
+- Timeline-only Space playback;
 - direct `1..0` tool selection and N/H/G note-function selection;
 - keyboard focus access to Tool, Bank/ID, Function and Visibility controls;
 - `Alt+1..5` focus navigation for Workspace, Timeline, Inspector, Diagnostics
   and Routes;
-- native Qt `Ctrl+Tab` / `Ctrl+Shift+Tab` chart-tab behavior retained, with no
-  StepNX `Ctrl+PageUp/PageDown` override;
+- native Qt `Ctrl+Tab` / `Ctrl+Shift+Tab` chart-tab behavior, with no redundant
+  StepNX Ctrl+PageUp/PageDown mapping;
 - true Enter/Toggle dispatch for single and multiple selected cells;
 - Enter activation for Workspace and Routes trees;
 - tree-scoped keyboard access to metadata, Block timing, Split selector,
   insert/remove and reorder operations;
 - standard `Ctrl+S` Save All while retaining `Ctrl+Shift+S`;
 - `F1` Help > Keyboard shortcuts map;
-- Lightmap Toggle/Select keyboard and clipboard workflow;
-- 24 dedicated keyboard/selection/Lightmap regressions over the 573-test
-  item-3 checkpoint.
+- Lightmap Toggle/Select keyboard and clipboard workflow.
 
-Automated corrected-code checkpoint:
+Automated item-4 checkpoint:
 
 - Linux/glibc 2.31: **597 tests in 4.950 s, OK**;
 - Windows: **597 tests in 7.161 s, OK**, with the one expected
   case-insensitive-filesystem skip.
 
-The strict Windows discovery floor is therefore **597**. Item 4 remains open only
-for manual Windows re-smoke of the corrected behaviors; a green offscreen suite
-is not treated as a substitute for real focus/input ergonomics.
+The subsequent real Windows authoring work used the corrected keyboard/Lightmap
+workflow as the baseline for item 5, closing the manual re-smoke requirement.
 
 See `KEYBOARD_WORKFLOW_AUDIT.md`.
+
+### Editor-field zoom hardening
+
+Item 5 is complete:
+
+- `View > Editor zoom` exposes 100%..300% in 25% increments;
+- scaling applies only to Timeline/editor-field geometry, not application chrome;
+- notes, waveform, selection, hit testing and Lightmap lanes share the same
+  scaled geometry;
+- Ctrl+wheel remains vertical precision zoom;
+- Shift+wheel now steps the editor-field preset. The initial Alt+wheel binding
+  was retired after real Windows use showed native horizontal scrolling could
+  consume it.
+
+Item-5 CI checkpoint:
+
+- Windows: **610 tests in 6.240 s, OK**, with one expected skip;
+- Linux/glibc 2.31: full suite, OK.
+
+See `HIGH_DPI_SCALING_GATE.md`.
+
+### Editor UX cleanup
+
+Item 6 implementation now covers:
+
+- Workspace context menus reusing canonical actions where semantics match;
+- Timeline-specialized structure commands retaining their row/viewport-specific
+  behavior while sharing consistent labels and destructive wording;
+- richer selection topology feedback;
+- Flip/Mirror/Paste enabled state reflecting actual applicability;
+- note-only controls disabled on Lightmap;
+- direct Routes selector terminology without post-render string replacement;
+- Inspector refresh/clear behavior for edited or removed scopes;
+- stale Division-metadata target rejection after chart switches;
+- chart-field action state following the Workspace-selected document;
+- F1 and `View > Editor zoom` shortcut truth;
+- Timeline Remove Block confirmation aligned to the canonical Structure prompt.
+
+The item adds **22 focused regressions** over the 610-test item-5 checkpoint. The
+strict Windows discovery floor is therefore **632**. Final automated and manual
+item-6 validation is still pending.
+
+See `EDITOR_UX_CLEANUP_AUDIT.md`.
 
 ## Corpus metrics
 
@@ -264,12 +302,13 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
 2. **Complete:** performance regression suite for sparse bulk transforms and
    source-backed selection acquisition;
 3. **Complete:** save/recovery fault-injection and interrupted-write hardening;
-4. **Automated gate green, manual re-smoke pending:** keyboard workflow audit,
-   cross-Block selection corrections and Lightmap authoring;
-5. **Next after item 4 manual closure:** high-DPI/scaling validation at 100%,
-   125%, 150%, 175%, 200%, 225%, 250%, 275% and 300%;
-6. editor UX cleanup covering menus, selection, Inspector state, disabled
-   actions, and error messages.
+4. **Complete:** keyboard workflow audit, cross-Block selection corrections and
+   Lightmap authoring;
+5. **Complete:** editor-field scaling at every 25% increment from 100% through
+   300%;
+6. **Implementation complete, final gate pending:** editor UX cleanup covering
+   menus, selection, Inspector state, action availability, destructive prompts,
+   shortcut/help truth and user-facing error paths.
 
 ## Current implementation limitations
 
