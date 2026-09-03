@@ -55,6 +55,27 @@ def selection_summary(widget) -> str:
     return f"{count} {noun} selected · {detail}{crossing}"
 
 
+def inspector_context_exists(document, context) -> bool:
+    """Whether an Inspector scope still exists after a structural edit."""
+
+    if context is None:
+        return False
+    kind, _document_index, split_id, block_id = context
+    if kind in {"document", "header"}:
+        return True
+    split = next(
+        (item for item in document.splits if item.stable_id == split_id),
+        None,
+    )
+    if split is None:
+        return False
+    if kind == "split":
+        return True
+    if kind == "block":
+        return any(item.stable_id == block_id for item in split.blocks)
+    return False
+
+
 def _add_action_group(menu: QMenu, actions) -> None:
     available = [action for action in actions if action is not None]
     if not available:
@@ -226,6 +247,57 @@ def _install_selection_feedback(window) -> None:
         update_selection_status(widget)
 
 
+def _install_inspector_state(window) -> None:
+    original_inspect = window._inspect
+    original_apply = window._apply_document
+    window._stepnx_inspector_context = None
+
+    def inspect(self, kind, document_index, split_id, block_id) -> None:
+        self._stepnx_inspector_context = (
+            str(kind),
+            int(document_index),
+            split_id,
+            block_id,
+        )
+        original_inspect(kind, document_index, split_id, block_id)
+
+    def apply_document(
+        self,
+        document_index,
+        widget,
+        document,
+        *,
+        tree_selection=None,
+    ) -> None:
+        original_apply(
+            document_index,
+            widget,
+            document,
+            tree_selection=tree_selection,
+        )
+        context = getattr(self, "_stepnx_inspector_context", None)
+        if context is None or int(context[1]) != int(document_index):
+            return
+        current = self.sessions[int(document_index)].current
+        if not inspector_context_exists(current, context):
+            self._stepnx_inspector_context = None
+            self.inspector.clearContents()
+            self.inspector.setRowCount(0)
+            return
+
+        selected_side = self.side_tabs.currentWidget()
+        kind, doc_index, split_id, block_id = context
+        # Bypass the tracking wrapper: this is a refresh of the same context,
+        # not a new user inspection. Restore the previously visible side pane so
+        # an edit cannot unexpectedly drag the user away from Diagnostics/Routes.
+        original_inspect(kind, doc_index, split_id, block_id)
+        if selected_side is not self.inspector:
+            self.side_tabs.setCurrentWidget(selected_side)
+
+    window._inspect = MethodType(inspect, window)
+    window._apply_document = MethodType(apply_document, window)
+
+
 def install_editor_ux_cleanup(window) -> None:
     if getattr(window, "_stepnx_editor_ux_cleanup_installed", False):
         return
@@ -234,3 +306,4 @@ def install_editor_ux_cleanup(window) -> None:
     _install_tree_context_cleanup(window)
     _install_edit_action_state(window)
     _install_selection_feedback(window)
+    _install_inspector_state(window)
