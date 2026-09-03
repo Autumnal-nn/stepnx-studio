@@ -12,9 +12,9 @@ folder publication workflow, native gameplay preview, keyboard workflow,
 three-channel Lightmap authoring and editor-field zoom are implemented.
 
 Hardening items 1 through 5 are complete. Item 6, editor UX cleanup, is
-implemented on `hardening-0.9.5-editor-ux-cleanup` and awaiting its final focused
-Windows smoke plus full automated gate. The item-6 discovery floor is **632
-tests**.
+implemented on `hardening-0.9.5-editor-ux-cleanup` and its automated gate is
+green. Only the focused Windows GUI smoke remains before item 6 is marked
+complete. The item-6 discovery floor is **632 tests**.
 
 ## Delivered
 
@@ -269,11 +269,20 @@ Item 6 implementation now covers:
 - stale Division-metadata target rejection after chart switches;
 - chart-field action state following the Workspace-selected document;
 - F1 and `View > Editor zoom` shortcut truth;
-- Timeline Remove Block confirmation aligned to the canonical Structure prompt.
+- Timeline Remove Block confirmation aligned to the canonical Structure prompt;
+- Shift+wheel editor zoom robust to Qt delivering the modified wheel delta on
+  either axis, while Ctrl+wheel and Alt+wheel remain unclaimed by that handler.
 
 The item adds **22 focused regressions** over the 610-test item-5 checkpoint. The
-strict Windows discovery floor is therefore **632**. Final automated and manual
-item-6 validation is still pending.
+strict Windows discovery floor is **632**.
+
+Final automated item-6 checkpoint on functional/test head
+`7a5dcbe9eb3f8e5f33430f4effc4213b9114bf70`:
+
+- Windows: **632 tests in 7.190 s, OK**, with one expected skip;
+- Linux/glibc 2.31: **632 tests in 5.253 s, OK**.
+
+Only the focused Windows GUI smoke remains before item 6 is closed.
 
 See `EDITOR_UX_CLEANUP_AUDIT.md`.
 
@@ -306,7 +315,7 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
    Lightmap authoring;
 5. **Complete:** editor-field scaling at every 25% increment from 100% through
    300%;
-6. **Implementation complete, final gate pending:** editor UX cleanup covering
+6. **Automated gate green, manual smoke pending:** editor UX cleanup covering
    menus, selection, Inspector state, action availability, destructive prompts,
    shortcut/help truth and user-facing error paths.
 
