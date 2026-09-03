@@ -2,8 +2,7 @@
 
 Date: 2026-09-02
 
-Status: implementation complete enough for focused Windows smoke; automated PR
-CI has not yet run because item 6 intentionally has no pull request yet.
+Status: automated gate green; focused Windows GUI smoke pending.
 
 ## Purpose
 
@@ -66,9 +65,6 @@ Yes/Cancel buttons and default Cancel behavior as the canonical Structure
 operation. The specialized viewport entry point still executes the same
 `remove_block` command and ordinary undo/document-refresh path.
 
-This preserves the specialized Timeline workflow without maintaining misleading
-states or destructive wording drift.
-
 ## Selection feedback and action state
 
 Multi-cell selection status now reports the actual selection topology rather
@@ -90,8 +86,7 @@ Transform actions are enabled only when their selection shape is applicable:
 - playable transforms remain disabled for Lightmap.
 
 Paste is enabled only when the current clipboard kind matches the active
-document (`notes` versus `lightmap`) and a selection anchor exists. This removes
-an avoidable click-then-error path.
+document (`notes` versus `lightmap`) and a selection anchor exists.
 
 ## Lightmap control state
 
@@ -106,17 +101,12 @@ are visibly disabled:
 - Apply flags;
 - note transforms and Replace note type.
 
-The Tool control remains enabled because Toggle and Select are meaningful and the
-existing blocked-tool behavior is intentional. Cut/Copy/Paste/Delete remain
-available according to selection/clipboard state.
+The Tool control remains enabled because Toggle and Select are meaningful.
+Cut/Copy/Paste/Delete remain available according to selection/clipboard state.
 
 ## Routes terminology
 
-Routes no longer renders legacy selector wording and then patches strings in a
-second pass. It renders directly from the canonical `SplitSelectionByte`
-projection.
-
-Consequently:
+Routes now renders directly from the canonical `SplitSelectionByte` projection:
 
 - `0x80` is `random at chart load`;
 - raw `0x40` is `random at block start` because an unbanked follower lookup
@@ -126,111 +116,98 @@ Consequently:
 
 ## Inspector state
 
-The Inspector now remembers the scope it is displaying. After a mutation to that
-scope it refreshes automatically when the values visible in Inspector change.
+The Inspector remembers the scope it is displaying. After a mutation it refreshes
+when values visible in Inspector change. The refresh signature includes Header
+metadata/trailer envelope state, Split selector/Brain/metadata, and Block
+timing/flags/Division metadata.
 
-The refresh signature includes:
-
-- Header metadata/trailer envelope state;
-- Split selector, Brain byte and Split metadata;
-- Block timing/flags and Division metadata.
-
-Row/note payloads are intentionally excluded from the signature so a fast note
-gesture does not rebuild the Inspector table on every cell edit.
-
-If a structural command removes the inspected Split/Block, Inspector is cleared
-instead of displaying stale data. If the user is currently viewing Diagnostics
-or Routes, an Inspector refresh does not steal the side-panel focus.
+Row/note payloads are intentionally excluded so fast note gestures do not rebuild
+the Inspector table on every cell edit. If a structural command removes the
+inspected Split/Block, Inspector clears. If the user is viewing Diagnostics or
+Routes, an Inspector refresh does not steal side-panel focus.
 
 ## Context-sensitive metadata actions
 
-`Edit Division metadata…` is now disabled when its remembered Block belongs to a
-chart that is no longer current or when that Block no longer exists. A valid
-current metadata/tree context or currently inspected Block keeps it enabled.
+`Edit Division metadata…` is disabled when its remembered Block belongs to a
+chart that is no longer current or when that Block no longer exists.
 
 `Edit chart scope / field…` follows the document selected in the Workspace tree,
-matching the command's actual target-selection rules rather than merely looking
-at the currently visible tab.
+matching the command's actual target-selection rules.
 
 ## Shortcut/help truth
 
-F1 help now documents both independent Timeline zoom controls:
+F1 help and `View > Editor zoom` now document the independent Timeline zooms:
 
 - Ctrl+wheel: vertical timing precision zoom;
 - Shift+wheel: Editor field zoom in 25% preset steps.
 
-`View > Editor zoom` advertises the same distinction in its tooltip.
-
 The initial Alt+wheel binding was removed after real Windows use showed that Qt
-could route it to native horizontal scrolling instead of StepNX. Exact
-Shift+wheel is now intercepted only over the Timeline viewport; Ctrl+wheel is
+could route it to native horizontal scrolling. Exact Shift+wheel is intercepted
+only over the Timeline viewport. The handler accepts either vertical or
+platform-horizontalized Shift-wheel delta, so Qt converting Shift-wheel into a
+horizontal wheel event cannot steal the Editor-zoom operation. Ctrl+wheel is
 left untouched for precision zoom and Alt+wheel is left to the platform.
 
 ## Destructive operations
 
-The audit retained the existing guarded destructive flows:
+The existing guarded destructive flows remain. Remove Split and Remove Block
+name the structural/note loss and require confirmation; chart-field shrink
+reports the exact count of discarded non-empty cells; Delete NX names the file,
+states that it cannot be undone and is blocked for `LM.NX`; Save All still uses
+validation and structural-diff preview.
 
-- Remove Split names the Split-wide Block/note loss and requires confirmation;
-- Remove Block names note loss and requires confirmation;
-- chart-field shrink reports the exact number of non-empty cells that would be
-  discarded;
-- Delete NX names the file, states that the operation cannot be undone and is
-  blocked for `LM.NX`;
-- Save All still goes through validation and structural-diff preview.
+Timeline Remove Block is disabled before invocation when the last-Block invariant
+would reject it, and its confirmation matches the canonical Structure wording.
 
-The Timeline Remove Block affordance is disabled before invocation when the
-last-Block invariant would reject it, and its confirmation now matches the
-canonical Structure wording/buttons.
-
-## Automated regressions
+## Automated regressions and final checkpoint
 
 Item 6 adds 22 focused regressions over the item-5 610-test checkpoint. They
-cover:
+cover Routes terminology, selection topology, Lightmap wording and clipboard
+compatibility, canonical Workspace action reuse, Inspector lifetime/signatures,
+Flip/Mirror applicability, Timeline menu state, chart-field targeting, stale
+Division context, F1/zoom truth, Shift-wheel ownership including horizontalized
+delivery, and Timeline Remove Block wording.
 
-- direct Routes selector terminology;
-- rectangular versus sparse selection summaries;
-- Lightmap selection wording;
-- note/Lightmap clipboard compatibility;
-- canonical Workspace context-action reuse;
-- Inspector target lifetime and refresh signatures;
-- rectangle/Mirror action applicability;
-- Timeline structure-menu enable states;
-- chart-field target selection;
-- stale Division-metadata context rejection;
-- F1 zoom-help truth;
-- Shift+wheel ownership with Ctrl/Alt left unintercepted;
-- canonical Timeline Remove Block confirmation wording.
+The strict Windows discovery floor is **632 tests**.
 
-The strict Windows discovery floor is therefore **632 tests**.
+Final automated checkpoint on functional/test head
+`7a5dcbe9eb3f8e5f33430f4effc4213b9114bf70`:
+
+- Windows: **632 tests in 7.190 s, OK**, with the one expected
+  case-insensitive-filesystem skip;
+- Linux/glibc 2.31: **632 tests in 5.253 s, OK**.
+
+CI was enabled temporarily for direct pushes to the item-6 branch solely to run
+this gate without creating a pull request. The workflow was restored afterwards
+to its normal `pull_request` plus `push: main` policy.
 
 ## Focused manual smoke
 
 Before item 6 is closed, verify on Windows:
 
-1. Right-click a Workspace Split and Block. The menu text/state must match Edit >
+1. Right-click a Workspace Split and Block. Menu text/state must match Edit >
    Structure and invoke the same operations.
-2. Right-click `LM.NX` in Workspace. `Edit chart scope / field…`, Duplicate and
-   Delete must be disabled.
-3. On a Split with one Block, Timeline right-click > Block > Remove Block… must
-   be disabled. On a multi-Block Split it must be enabled, and its confirmation
-   must say `Remove Block` with Cancel as the safe default.
-4. Make a rectangular multi-row selection and then a sparse Ctrl selection.
-   Status text and Flip/Mirror enabled state must follow the actual shape.
-5. Copy from a playable chart, switch to LM.NX and select a light cell. Paste
-   must remain disabled; repeat in the opposite direction.
+2. Right-click `LM.NX`. `Edit chart scope / field…`, Duplicate and Delete must be
+   disabled.
+3. On a single-Block Split, Timeline > Block > Remove Block… must be disabled. On
+   a multi-Block Split it must be enabled, with `Remove Block` and Cancel as the
+   safe default.
+4. Compare a rectangular multi-row selection with a sparse Ctrl selection.
+   Status text and Flip/Mirror state must follow the actual shape.
+5. Copy playable chart cells, switch to LM.NX, select a light cell and confirm
+   Paste stays disabled. Repeat in the opposite direction.
 6. In LM.NX, Bank/ID, Function, Visibility and note-only advanced controls must
    be disabled while Tool remains available.
-7. Inspect a Block, edit BPM/timing or Division metadata, and confirm Inspector
-   refreshes without another click. Then remove the inspected Block and confirm
-   Inspector clears.
-8. Inspect a Block, switch to another chart, and verify Edit Division metadata…
-   does not target the old chart.
-9. Open Routes on charts using `0x40`, `0x41` and `0x80`; no `random trigger` or
-   `group` terminology should remain.
-10. Press F1 and confirm Ctrl+wheel and Shift+wheel are documented. Over the
-    Timeline, Shift+wheel must step Editor zoom; Ctrl+wheel must retain vertical
-    precision zoom; Alt+wheel must not be claimed by StepNX.
+7. Inspect a Block, edit timing or Division metadata and confirm Inspector
+   refreshes. Remove the inspected Block and confirm Inspector clears.
+8. Inspect a Block, switch charts, and verify Edit Division metadata… cannot
+   target the old chart.
+9. Open Routes on `0x40`, `0x41` and `0x80`; no `random trigger` or `group`
+   terminology should remain.
+10. Press F1. Over a Timeline with horizontal scrolling available, Shift+wheel
+    must still step Editor zoom by 25%; Ctrl+wheel must retain precision zoom;
+    Alt+wheel must remain unclaimed by StepNX.
 
 Any stale target, enabled impossible action, context menu that executes a
-different command from its matching canonical action, or input shortcut whose
-visible behavior contradicts Help is blocking for item 6.
+different command from its matching canonical action, or shortcut whose visible
+behavior contradicts Help is blocking for item 6.
