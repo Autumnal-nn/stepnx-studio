@@ -2,7 +2,7 @@
 
 Date: 2026-09-02
 
-Status: automated gate green; focused Windows GUI smoke pending.
+Status: complete; automated gate green and focused Windows GUI smoke passed.
 
 ## Purpose
 
@@ -183,31 +183,26 @@ to its normal `pull_request` plus `push: main` policy.
 
 ## Focused manual smoke
 
-Before item 6 is closed, verify on Windows:
+The focused Windows smoke passed. The validation covered:
 
-1. Right-click a Workspace Split and Block. Menu text/state must match Edit >
-   Structure and invoke the same operations.
-2. Right-click `LM.NX`. `Edit chart scope / field…`, Duplicate and Delete must be
-   disabled.
-3. On a single-Block Split, Timeline > Block > Remove Block… must be disabled. On
-   a multi-Block Split it must be enabled, with `Remove Block` and Cancel as the
-   safe default.
-4. Compare a rectangular multi-row selection with a sparse Ctrl selection.
-   Status text and Flip/Mirror state must follow the actual shape.
-5. Copy playable chart cells, switch to LM.NX, select a light cell and confirm
-   Paste stays disabled. Repeat in the opposite direction.
-6. In LM.NX, Bank/ID, Function, Visibility and note-only advanced controls must
-   be disabled while Tool remains available.
-7. Inspect a Block, edit timing or Division metadata and confirm Inspector
-   refreshes. Remove the inspected Block and confirm Inspector clears.
-8. Inspect a Block, switch charts, and verify Edit Division metadata… cannot
-   target the old chart.
-9. Open Routes on `0x40`, `0x41` and `0x80`; no `random trigger` or `group`
-   terminology should remain.
-10. Press F1. Over a Timeline with horizontal scrolling available, Shift+wheel
-    must still step Editor zoom by 25%; Ctrl+wheel must retain precision zoom;
-    Alt+wheel must remain unclaimed by StepNX.
+1. Workspace Split/Block context menus matching the canonical Edit > Structure
+   actions and state.
+2. `LM.NX` chart-field/Duplicate/Delete state and note-only control disabling.
+3. Timeline Remove Block state for single- versus multi-Block Splits, including
+   canonical wording and Cancel as the safe default.
+4. Rectangular versus sparse Ctrl selection feedback and Flip/Mirror
+   applicability.
+5. Playable-chart versus Lightmap clipboard incompatibility in both directions.
+6. Lightmap Tool availability with Bank/ID, Function, Visibility and advanced
+   note controls disabled.
+7. Inspector refresh after timing/Division edits and clearing after structural
+   removal.
+8. Stale Division-metadata target rejection after switching charts.
+9. Routes wording for `0x40`, `0x41` and `0x80` without legacy `random trigger`
+   or `group` labels.
+10. F1 shortcut truth plus Shift+wheel Editor zoom on a Timeline where horizontal
+    scrolling was available, while Ctrl+wheel retained precision zoom and
+    Alt+wheel remained unclaimed by StepNX.
 
-Any stale target, enabled impossible action, context menu that executes a
-different command from its matching canonical action, or shortcut whose visible
-behavior contradicts Help is blocking for item 6.
+Result: **PASS**. Item 6 is closed and the six-item 0.9.5 hardening cycle is
+complete.
