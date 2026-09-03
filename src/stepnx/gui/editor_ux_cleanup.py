@@ -122,6 +122,29 @@ def _selected_document(window):
     return window.workspace.documents[int(index)].document
 
 
+def division_metadata_action_enabled(window) -> bool:
+    context = window._metadata_context()
+    if context is not None and getattr(context[1], "value", None) == "division":
+        return True
+    active = getattr(window, "phase11_active_block_context", None)
+    if active is None:
+        return False
+    document_index, split_id, block_id = active
+    current = getattr(window, "_current_document_index", None)
+    current_index = current() if callable(current) else None
+    if current_index is None or int(current_index) != int(document_index):
+        return False
+    stack = window.sessions.get(int(document_index))
+    if stack is None:
+        return False
+    document = stack.current
+    split = next((item for item in document.splits if item.stable_id == split_id), None)
+    return bool(
+        split is not None
+        and any(item.stable_id == block_id for item in split.blocks)
+    )
+
+
 def inspector_context_exists(document, context) -> bool:
     if context is None:
         return False
@@ -360,6 +383,10 @@ def _install_edit_action_state(window) -> None:
                 and not selected_document.effective_lightmap
             )
 
+        division = getattr(self, "phase11_division_metadata_action", None)
+        if division is not None:
+            division.setEnabled(division_metadata_action_enabled(self))
+
     window._refresh_edit_actions = MethodType(refresh_edit_actions, window)
     window._refresh_edit_actions()
 
@@ -440,6 +467,25 @@ def _install_inspector_state(window) -> None:
     window._apply_document = MethodType(apply_document, window)
 
 
+def _install_help_truth(window) -> None:
+    import stepnx.gui.keyboard_workflow as keyboard_module
+
+    marker = "Alt+wheel"
+    if marker not in keyboard_module._SHORTCUT_HELP:
+        keyboard_module._SHORTCUT_HELP = keyboard_module._SHORTCUT_HELP.replace(
+            "Space         Play / pause\n",
+            "Space         Play / pause\n"
+            "Ctrl+wheel    Vertical timing zoom\n"
+            "Alt+wheel     Editor field zoom (25% step)\n",
+        )
+    zoom_menu = getattr(window, "editor_zoom_menu", None)
+    if zoom_menu is not None:
+        zoom_menu.menuAction().setToolTip(
+            "Scale only the Timeline/editor field. Alt+wheel steps 25%; "
+            "Ctrl+wheel remains vertical timing zoom."
+        )
+
+
 def install_editor_ux_cleanup(window) -> None:
     if getattr(window, "_stepnx_editor_ux_cleanup_installed", False):
         return
@@ -448,3 +494,4 @@ def install_editor_ux_cleanup(window) -> None:
     _install_edit_action_state(window)
     _install_selection_feedback(window)
     _install_inspector_state(window)
+    _install_help_truth(window)
