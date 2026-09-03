@@ -16,17 +16,13 @@ def _active_timeline(window):
 
 
 def _clipboard_compatible(widget, clipboard) -> bool:
-    if widget is None or clipboard is None:
-        return False
-    if not isinstance(clipboard, GridClipboard):
+    if widget is None or clipboard is None or not isinstance(clipboard, GridClipboard):
         return False
     expected = "lightmap" if widget.snapshot.effective_lightmap else "notes"
     return clipboard.kind == expected
 
 
 def selection_summary(widget) -> str:
-    """Compact status text that distinguishes rectangles from sparse selections."""
-
     selection = getattr(widget, "selection", None)
     if selection is None or not selection.targets:
         return "Ready"
@@ -40,10 +36,11 @@ def selection_summary(widget) -> str:
     noun = "light cells" if widget.snapshot.effective_lightmap else "cells"
     row_label = f"{len(rows)} {'row' if len(rows) == 1 else 'rows'}"
     lane_label = f"{len(lanes)} {'lane' if len(lanes) == 1 else 'lanes'}"
-    if rectangular:
-        detail = f"{row_label} × {lane_label}"
-    else:
-        detail = f"{row_label} · {lane_label}"
+    detail = (
+        f"{row_label} × {lane_label}"
+        if rectangular
+        else f"{row_label} · {lane_label}"
+    )
 
     block_ids = set()
     try:
@@ -86,14 +83,23 @@ def selection_transform_state(widget) -> tuple[bool, bool]:
     columns = int(widget.snapshot.columns)
     lane_tuple = tuple(lanes)
     mirror = (
-        (len(lanes) == 5 and (
-            (columns == 5 and lane_tuple == tuple(range(5)))
-            or (columns == 10 and lane_tuple in (tuple(range(5)), tuple(range(5, 10))))
-        ))
-        or (len(lanes) == 6 and (
-            (columns == 6 and lane_tuple == tuple(range(6)))
-            or (columns == 10 and lane_tuple == tuple(range(2, 8)))
-        ))
+        (
+            len(lanes) == 5
+            and (
+                (columns == 5 and lane_tuple == tuple(range(5)))
+                or (
+                    columns == 10
+                    and lane_tuple in (tuple(range(5)), tuple(range(5, 10)))
+                )
+            )
+        )
+        or (
+            len(lanes) == 6
+            and (
+                (columns == 6 and lane_tuple == tuple(range(6)))
+                or (columns == 10 and lane_tuple == tuple(range(2, 8)))
+            )
+        )
         or (columns == 10 and lane_tuple == tuple(range(10)))
     )
     return True, mirror
@@ -117,8 +123,6 @@ def _selected_document(window):
 
 
 def inspector_context_exists(document, context) -> bool:
-    """Whether an Inspector scope still exists after a structural edit."""
-
     if context is None:
         return False
     kind, _document_index, split_id, block_id = context
@@ -145,12 +149,21 @@ def inspector_context_signature(document, context):
         return None
     kind, _document_index, split_id, block_id = context
     if kind in {"document", "header"}:
-        return (kind, _metadata_signature(document.header_metadata), bytes(document.envelope.raw))
+        return (
+            kind,
+            _metadata_signature(document.header_metadata),
+            bytes(document.envelope.raw),
+        )
     split = next((item for item in document.splits if item.stable_id == split_id), None)
     if split is None:
         return None
     if kind == "split":
-        return (kind, split.raw_select.hex, split.raw_brain.hex, _metadata_signature(split.metadata))
+        return (
+            kind,
+            split.raw_select.hex,
+            split.raw_brain.hex,
+            _metadata_signature(split.metadata),
+        )
     if kind == "block":
         block = next((item for item in split.blocks if item.stable_id == block_id), None)
         if block is None:
@@ -211,6 +224,28 @@ def _structure_actions(window, kind: str):
     return ()
 
 
+def _document_context_menu(window, workspace_module, document_index: int) -> QMenu:
+    menu = QMenu(window.tree)
+    entry = window.workspace.documents[document_index]
+    menu.addAction("Open", lambda: window._open_document(document_index))
+    field_action = getattr(window, "phase11_edit_field_action", None)
+    if field_action is not None:
+        menu.addAction(field_action)
+    menu.addSeparator()
+    duplicate = menu.addAction(
+        "Duplicate NX…",
+        lambda: workspace_module._duplicate_chart(window, document_index),
+    )
+    delete = menu.addAction(
+        "Delete NX…",
+        lambda: workspace_module._delete_chart(window, document_index),
+    )
+    protected = entry.path.name.casefold() == "lm.nx"
+    duplicate.setEnabled(not protected)
+    delete.setEnabled(not protected)
+    return menu
+
+
 def _install_tree_context_cleanup(window) -> None:
     import stepnx.gui.phase11_workspace as workspace_module
 
@@ -220,17 +255,28 @@ def _install_tree_context_cleanup(window) -> None:
         item = target_window.tree.itemAt(point)
         payload = None if item is None else item.data(0, Qt.ItemDataRole.UserRole)
         kind = None if not payload else str(payload[0])
-        groups = _structure_actions(target_window, kind)
-        if not groups:
-            previous(target_window, point)
-            return
-        target_window.tree.setCurrentItem(item)
+        if item is not None:
+            target_window.tree.setCurrentItem(item)
+
         refresh = getattr(target_window, "_refresh_edit_actions", None)
         if callable(refresh):
             refresh()
         structure_refresh = getattr(target_window, "_refresh_structure_actions", None)
         if callable(structure_refresh):
             structure_refresh()
+
+        if kind == "document" and target_window.workspace is not None:
+            document_index = int(payload[1])
+            menu = _document_context_menu(
+                target_window, workspace_module, document_index
+            )
+            menu.exec(target_window.tree.viewport().mapToGlobal(point))
+            return
+
+        groups = _structure_actions(target_window, kind)
+        if not groups:
+            previous(target_window, point)
+            return
         menu = QMenu(target_window.tree)
         for group in groups:
             _add_action_group(menu, group)
@@ -249,12 +295,18 @@ def _install_edit_action_state(window) -> None:
         widget = _active_timeline(self)
         lightmap = bool(widget is not None and widget.snapshot.effective_lightmap)
         has_selection = bool(widget is not None and widget.selection.targets)
-        tool_text = self.tool_combo.currentText().strip().casefold() if hasattr(self, "tool_combo") else ""
+        tool_text = (
+            self.tool_combo.currentText().strip().casefold()
+            if hasattr(self, "tool_combo")
+            else ""
+        )
 
         apply_action = getattr(self, "apply_selection_action", None)
         if apply_action is not None:
             apply_action.setEnabled(
-                has_selection and (not lightmap or tool_text == "toggle") and tool_text != "select"
+                has_selection
+                and (not lightmap or tool_text == "toggle")
+                and tool_text != "select"
             )
 
         rectangle, mirror = selection_transform_state(widget)
@@ -304,7 +356,8 @@ def _install_edit_action_state(window) -> None:
         if edit_field is not None:
             selected_document = _selected_document(self)
             edit_field.setEnabled(
-                selected_document is not None and not selected_document.effective_lightmap
+                selected_document is not None
+                and not selected_document.effective_lightmap
             )
 
     window._refresh_edit_actions = MethodType(refresh_edit_actions, window)
@@ -340,16 +393,32 @@ def _install_inspector_state(window) -> None:
     window._stepnx_inspector_context = None
 
     def inspect(self, kind, document_index, split_id, block_id) -> None:
-        self._stepnx_inspector_context = (str(kind), int(document_index), split_id, block_id)
+        self._stepnx_inspector_context = (
+            str(kind),
+            int(document_index),
+            split_id,
+            block_id,
+        )
         original_inspect(kind, document_index, split_id, block_id)
 
-    def apply_document(self, document_index, widget, document, *, tree_selection=None) -> None:
+    def apply_document(
+        self, document_index, widget, document, *, tree_selection=None
+    ) -> None:
         context = getattr(self, "_stepnx_inspector_context", None)
         before = None
-        if context is not None and int(context[1]) == int(document_index) and self.workspace is not None:
+        if (
+            context is not None
+            and int(context[1]) == int(document_index)
+            and self.workspace is not None
+        ):
             old_document = self.workspace.documents[int(document_index)].document
             before = inspector_context_signature(old_document, context)
-        original_apply(document_index, widget, document, tree_selection=tree_selection)
+        original_apply(
+            document_index,
+            widget,
+            document,
+            tree_selection=tree_selection,
+        )
         if context is None or int(context[1]) != int(document_index):
             return
         current = self.sessions[int(document_index)].current
