@@ -282,7 +282,7 @@ Item-5 checkpoint:
 
 See `HIGH_DPI_SCALING_GATE.md`.
 
-### 6. Editor UX cleanup — implementation complete, final gate pending
+### 6. Editor UX cleanup — automated gate green, manual smoke pending
 
 The consistency pass covers:
 
@@ -299,21 +299,27 @@ The consistency pass covers:
 - F1 and View-menu shortcut truth;
 - Timeline Remove Block confirmation aligned with the canonical Structure flow;
 - Shift+wheel Editor zoom replacing the ineffective Alt+wheel binding found in
-  real Windows use.
+  real Windows use, including platform-horizontalized Shift-wheel delivery.
 
 Item 6 adds **22 focused regressions** over the 610-test item-5 checkpoint. The
-strict Windows discovery floor is now **632**.
+strict Windows discovery floor is **632**.
 
-The remaining closure work is the full 632-test automated gate plus the focused
-manual smoke in `EDITOR_UX_CLEANUP_AUDIT.md`.
+Final automated checkpoint on functional/test head
+`7a5dcbe9eb3f8e5f33430f4effc4213b9114bf70`:
+
+- Windows: **632 tests in 7.190 s, OK**, with one expected skip;
+- Linux/glibc 2.31: **632 tests in 5.253 s, OK**.
+
+The remaining closure work is only the focused manual Windows smoke in
+`EDITOR_UX_CLEANUP_AUDIT.md`.
 
 ## Remaining implementation for 0.9.5
 
 No new NX20 format family, legacy importer, trailer encoding, gameplay-debug
 subsystem, selection-performance subsystem, save/recovery subsystem, keyboard
-workflow or scaling subsystem is currently required to complete 0.9.5. The
-remaining work is validation/fix fallout from item 6 and release packaging/doc
-consistency.
+workflow or scaling subsystem is currently required to complete 0.9.5. The only
+open hardening gate is item-6 manual UX validation and any bug fallout it exposes,
+followed by release packaging/document consistency.
 
 A later 1.0 hardening phase should continue:
 
