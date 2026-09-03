@@ -1,5 +1,12 @@
 # R!SE Runtime Parity Audit — Fresh-Chat Handoff
 
+> Historical continuity handoff. The branch names and work sequencing in this
+> file describe the runtime-parity work while it was in progress. The completed
+> findings were promoted and are summarized authoritatively in
+> `RISE_RUNTIME_PARITY_AUDIT.md`; current product status belongs in `STATUS.md`
+> and `ROADMAP.md`. The technical evidence below is retained as an audit trail,
+> not as instructions to resume an old branch.
+
 This file is the continuity anchor for continuing the StepNX Studio audit against Pump It Up R!SE without depending on prior chat state.
 
 ## Working branch

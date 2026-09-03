@@ -100,8 +100,8 @@ set `0x10` while roll conversions clear it.
 
 ## Studio policy
 
-- `VanishLow` and `AppearLow` are typed options only in NXA and NXA-patched
-  profiles. Fiesta/Prime+ do not expose them.
+- `VanishLow` and `AppearLow` are typed options only in the NXA profile.
+  Fiesta/Prime+ do not expose them.
 - Visibility opacity/filter cues are drawn on Tap and Hold Head only. Hold
   Body/Tail remain 100% visible in the authoring grid; the Head communicates the
   property for the complete long.

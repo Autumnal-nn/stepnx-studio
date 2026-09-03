@@ -4,6 +4,8 @@ from dataclasses import replace
 
 from PySide6.QtGui import QPainter, QPicture
 
+from stepnx.core.model import CompactRows, OverlayRows
+
 
 _WAVEFORM_CACHE_LIMIT = 24
 
@@ -29,6 +31,36 @@ def _snapshot_block(snapshot, block_id: int):
             if int(block.stable_id) == int(block_id):
                 return split.stable_id, block
     return None, None
+
+
+def _source_backed_row_ids(rows):
+    """Return row IDs without materializing a compact Block's row objects."""
+
+    base = rows.base if isinstance(rows, OverlayRows) else rows
+    if isinstance(base, CompactRows):
+        return base._row_ids
+    return tuple(row.stable_id for row in rows)
+
+
+def _install_fast_selection_row_ids() -> None:
+    """Keep Shift-drag rectangle selection O(row-id lookup), not O(row decode)."""
+
+    import stepnx.gui.timeline_widget as timeline_module
+
+    timeline_class = timeline_module.TimelineWidget
+    if getattr(timeline_class, "_phase11_fast_selection_row_ids", False):
+        return
+
+    original_row_ids = timeline_class._row_ids
+
+    def row_ids_fast(segment):
+        return _source_backed_row_ids(segment.block.rows)
+
+    # _row_ids is a static helper on TimelineWidget. Preserve that binding so
+    # existing self._row_ids(segment) calls do not receive an extra self arg.
+    timeline_class._row_ids = staticmethod(row_ids_fast)
+    timeline_class._phase11_fast_selection_row_ids = True
+    timeline_class._phase11_original_row_ids = original_row_ids
 
 
 def _install_fast_note_snapshot_patch() -> None:
@@ -163,4 +195,5 @@ def install_phase11_render_performance(window) -> None:
     window._phase11_render_performance_installed = True
 
     _install_waveform_picture_cache()
+    _install_fast_selection_row_ids()
     _install_fast_note_snapshot_patch()

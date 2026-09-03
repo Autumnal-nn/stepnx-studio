@@ -1,5 +1,10 @@
 # Phase 10 validation
 
+> Historical validation snapshot. This file records the Phase 10 acceptance
+> surface, not the current 0.9.5 release gate. Later releases expanded audio
+> discovery, waveform decoding, metadata semantics, gameplay runtime parity and
+> selection transforms. Current behavior belongs in `STATUS.md` and `ROADMAP.md`.
+
 ## Authoring and input
 
 - Toggle is the default note tool: empty click places a Tap, vertical drag
@@ -21,30 +26,19 @@ coordinates. Absolute Start Time for later Blocks is hidden unless
 
 ## Profile-aware note authoring
 
-Profiles available in the GUI:
+Public authoring profiles are:
 
 - `nxa-native`;
 - `fiesta2`;
-- `prime2`;
-- `nxa-step5-patched`.
+- `prime2`.
 
-Item IDs 21-23 are hidden in native NXA and exposed in Fiesta 2, Prime 2, and
-patched NXA. Known names are Random Velocity, Death / Nuclear, and Hyper
-Potion.
+Item availability and labels are profile-aware. Unknown or unsupported item
+identifiers remain preserved rather than being assigned semantics from another
+engine family.
 
-The basic Brain Code selector exposes only 00, 01, 06, and 07. Source Slot
-and the remaining raw low-six-bit values are available under Advanced.
-
-## Patched-NXA SPECIAL support
-
-```text
-SPECIAL cell:  01 03 (64+cell) (SourceSlot<<6)        cell 0..96
-Number Block:  02 03 (100+n)   ((SourceSlot<<6)|01)  n 00..99
-```
-
-SPECIAL.PNG is indexed row-major. Number Blocks are rendered by composing
-the tens and units cells from the same atlas. Physical artwork is drawn only
-when the loaded atlas actually contains the referenced cell.
+The basic Brain Code selector exposes only documented common values. Source Slot
+and remaining raw low-six-bit values are available under Advanced so existing
+chart data stays lossless without pretending every value has known semantics.
 
 ## Gameplay preview
 
@@ -53,8 +47,7 @@ It is synchronized to the shared transport and remains usable without chart
 audio. Single uses one centered five-lane field at the same receptor/note pitch
 as Double instead of enlarging the five lanes to fill the viewport. Scroll
 projection uses that rendered receptor pitch rather than the source atlas tile
-size, matching PIUTESTER/arcade spacing at 4x in the validated 640x480 Double
-comparison. Event culling returns empty after the chart endpoint instead of
+size. Event culling returns empty after the chart endpoint instead of
 resurrecting final notes.
 
 ## Audio
@@ -63,17 +56,20 @@ Chart audio accepts MP3, AUD, and A. WAV remains reserved for the metronome.
 Temporary `stepnx-aud-*` staging is created lazily only when AUD decoding is
 actually required.
 
-Automatic audio loading is deliberately strict. Opening a chart folder
-`<FolderName>` checks only for the sibling `<FolderName>.mp3`. If it does not
-exist, no chart audio is loaded automatically.
+Automatic audio loading is deliberately conservative and has subsequently been
+expanded beyond the original Phase 10 behavior. Current lookup rules are
+maintained in README/STATUS rather than frozen here. Likewise, current AUD/ENC1/
+ENC2 support is documented in `AUD_SUPPORT.md`.
 
 ## Manual acceptance
 
-The final Windows validation included:
+The historical Windows validation included:
 
-- SPECIAL atlas picker and composed Number Blocks;
 - external preview fixed at 640x480;
 - advanced Source Slot/Brain raw controls;
 - Space Play/Pause with and without MP3;
-- PIUTESTER comparison for preview scroll speed;
-- exact sibling MP3 auto-load behavior.
+- preview scroll-speed comparison;
+- sibling audio auto-load behavior.
+
+Later releases supersede this snapshot where README, STATUS, ROADMAP or a
+source-primary audit document newer behavior.

@@ -1,9 +1,11 @@
 # StepNX Studio technical roadmap
 
-Revision: 2026-08-25
+Revision: 2026-09-02
 
-Target: a lossless native NX20 desktop editor, not another converter wrapped in
-a brittle GUI
+Current target: **0.9.5 pre-alpha hardening**
+
+Long-term target: a lossless native NX20 desktop editor with dependable
+publication, authoring, import and preview workflows.
 
 ## Product boundary
 
@@ -11,20 +13,21 @@ StepNX Studio uses a canonical NX20 model. NX and NFO are native documents;
 NX10 and other legacy formats are one-way imports. A folder is the workspace
 unit. No NXP sentinel or project sidecar exists.
 
-The Qt application, authoring viewport, audio system, and gameplay preview are
-consumers of the core. They do not parse or serialize charts independently.
+The Qt application, authoring viewport, audio system and gameplay preview are
+consumers of the same canonical document. They do not parse or serialize chart
+files independently.
 
 ## Non-negotiable engineering rules
 
 1. No-edit round-trip is byte-exact.
-2. Unknown means preserved, not zeroed, discarded, or guessed.
+2. Unknown means preserved, not zeroed, discarded or guessed.
 3. Metadata remains ordered and may contain duplicates.
 4. Float bits remain authoritative until explicitly edited.
-5. Semantics are contextual: global, split, and Division metadata are distinct.
-6. Engine behavior belongs to explicit profiles.
+5. Semantics are contextual: Header, Split and Division metadata are distinct.
+6. Engine behavior belongs to explicit engine-family profiles.
 7. Imports never silently replace or convert their source.
 8. The canonical document is the only source of truth.
-9. Every edit is a command with validation, undo, and structural diff support.
+9. Every edit uses the command/validation/undo infrastructure.
 10. Public documentation and contributor-facing text are English.
 
 ## Architecture
@@ -38,392 +41,370 @@ Canonical NX20 document
         +-- structural validator
         +-- command stack / undo / redo
         +-- structural diff
-        +-- engine profile semantics
+        +-- engine-family semantics
         |
         +-- AuthoringSnapshot --> Qt vertical timeline
         +-- PreviewSnapshot --> RouteResolver --> gameplay preview
 ```
 
-### Canonical model
+The canonical model retains raw scalars, source spans, stable IDs, ordered
+metadata, Splits, Blocks, rows, cells and envelope data. Compact source-backed
+row tables are the default; sparse overlays promote only edited rows.
 
-The model retains raw scalars, source spans, stable IDs, ordered metadata,
-splits, blocks, rows, cells, and envelope data. Compact source-backed row tables
-are the default. Sparse overlays promote only edited rows.
+## Completed foundation
 
-### Feature registry
+### Format laboratory and lossless core
 
-Known metadata, note types, flags, conditions, and engine extensions live in
-declarative registries keyed by scope and profile. A registry entry may add
-labels, editors, constraints, and preview behavior; it may never erase raw data.
+Complete for the supplied corpus:
 
-### Operations
+- NX20/NFO envelope classification and shared codec;
+- 12,909-file byte-exact round-trip gate;
+- compact/lazy row model and sparse overlays;
+- raw scalar/source-span preservation;
+- immutable commands and stable-ID allocation;
+- structural validator and structural diff;
+- atomic single-file and staged multi-file saves with stale-target checks;
+- Lightmap identification and publication handling.
 
-Commands address entities by stable ID and return new documents. The current
-minimum supports metadata values, block scalar fields, complete rows, note
-cells, collection edits, field geometry, guarded trailer relocation, and folder
-batch operations. New commands must define ID allocation, insertion anchors,
-selection behavior, validation, and reversible payloads.
+Ongoing hardening, rather than missing format support, remains appropriate for
+malformed-model and writer fuzzing.
 
-### Timeline
+### Importers and engine-family semantics
 
-The timeline renders only visible rows. Geometry, hit testing, selection, and
-beat/time conversion stay separate from Qt paint objects. Branches may be
-switched or compared without modifying the document. The authoring timing line
-is the exact row timestamp; note terminals and waveform projection share that
-same coordinate.
+Implemented:
 
-### Audio
+- NX10 importer with structured conversion diagnostics;
+- complete supplied NX2 NX10 source-domain validation over 2,125 charts;
+- 2,111 same-path official NXA NX20 successors used as semantic conversion
+  evidence;
+- all 110 observed nonzero NX10 note codes backed by successor evidence;
+- exact Division projection across 18,769 aligned successor Blocks;
+- one-way STF/ST2, NOT/NOT5, STX, SEE, KSF and UCS authoring imports;
+- public authoring profiles for NXA, Fiesta and Prime+;
+- scope-aware metadata registries with evidence labels;
+- finalized Fiesta-and-later Header `1000..1008` semantics;
+- guarded UTF-8 trailer-string editing and relocation for proven offset fields;
+- raw preservation for unresolved or ambiguous values.
 
-Audio playback, waveform generation, and metronome use a shared monotonic
-transport. Timing transforms are deterministic and unit-testable. Compressed
-waveform decoding uses the same source supplied to playback, including staged
-ENC2 audio. Visual waveform summaries use a high-resolution multiresolution
-min/max cache selected by visible time-per-pixel. Automatic BPM/offset analysis
-reports candidates and confidence rather than applying hidden edits.
+The NX10 full-corpus validation and SEE importer are completed work, not roadmap
+items.
 
-## Release phases
+### Folder/workspace layer
 
-### Phase 0 — Charter and scope (complete)
+Implemented:
 
-- product identity and Apache-2.0;
-- DCO contribution policy;
-- Python/PySide6 baseline;
-- native/import format policy;
-- folder workspace and no-sidecar decision;
-- proprietary-asset boundary.
+- non-recursive folder discovery with isolated failures;
+- individual Save and guarded `Save All` planning;
+- staged writes, stale-target detection and catchable-failure rollback;
+- rollback-failure preservation of the original backup;
+- valid `LM.NX` publication gate and explicit blank Lightmap creation;
+- NX file create/duplicate/delete tools;
+- explicit NX10 materialization instead of implicit overwrite;
+- recovery snapshots outside chart folders with hidden pre-publication staging;
+- NX/NFO mirror compare/export;
+- automatic and manual audio discovery.
 
-### Phase 1 — Format laboratory (complete for the known corpus)
+### Authoring viewport
 
-- audit StepEdit 5.63 and `nx_editor-v60.py` behavior;
-- classify NX20/NFO envelopes;
-- prove NFO shares the NX20 codec;
-- classify 12 NX10 files embedded in NXA folders;
-- prove implicit `columns == 3` Lightmap behavior;
-- record executable path evidence for NXA, Fiesta 2, Prime 1, and Prime 2;
-- establish the 12,909-file byte-exact gate.
+Implemented:
 
-Open research: fully type later-generation trailer fields and encodings.
+- Qt vertical timeline with visible-row culling and stable geometry;
+- note placement/deletion/drag editing;
+- Tap, Hold, Roll, Item and Division tools;
+- Split/Block insertion, removal, reordering and boundary resize;
+- typed Block timing edits and chart-wide Start Time shifting;
+- rectangular stable-ID selection;
+- copy, cut, paste, erase, filtered replace, horizontal/vertical flip and
+  StepEdit-compatible mirror;
+- cross-Block/Split rectangular selection and bulk clipboard/transform behavior
+  on the active Timeline route, using encoded row count rather than tick density
+  as the row axis;
+- sparse bulk-note execution for responsive transforms;
+- source-backed selection reuses compact stable-row IDs instead of decoding
+  complete Blocks before the operation starts;
+- typed Split selection-byte editing and decoded mode/bank display;
+- Hidden, Invisible, Appear, Vanish, VanishLow and AppearLow visualization;
+- audio transport, compressed/staged waveform rendering and metronome;
+- guarded `Save All` with validation and structural-diff preview;
+- keyboard-first Timeline navigation, selection, placement and transforms with
+  editor-context shortcut scoping;
+- keyboard Workspace/Routes activation, structure/metadata access, pane focus,
+  playback and shortcut help;
+- native Qt `Ctrl+Tab` / `Ctrl+Shift+Tab` chart-tab behavior without a redundant
+  StepNX `Ctrl+PageUp/PageDown` mapping;
+- three-channel `LM.NX` Toggle/Select authoring with Cut/Copy/Paste/Delete and
+  lossless preservation of the fourth raw row byte;
+- Timeline/editor-field zoom presets from 100% through 300% in 25% increments,
+  with Shift+wheel preset stepping and independent Ctrl+wheel precision zoom.
 
-### Phase 2 — Lossless core (current, mostly complete)
+### Advanced NX20 authoring
 
-Delivered:
+Implemented:
 
-- bounded binary reader;
-- raw scalar model and stable IDs;
-- shared NX20/NFO parser and writer;
-- exact envelope preservation;
-- compact/lazy rows and sparse overlays;
-- atomic save;
-- CLI inspection and corpus verification;
-- structural validator;
-- immutable minimum command set;
-- collection insert/remove/move commands;
-- monotonic stable-ID allocation for new entities;
-- undo/redo snapshots;
-- structural diff;
-- deterministic generated command-sequence tests and parser mutation fuzzing.
+- ordered duplicate-preserving metadata editing;
+- Brain Shower projection/editing for supported native fields;
+- Split-selection and Division-condition route projection;
+- mission-condition parser validated against supplied official NX2/NXA
+  condition material;
+- typed trailer-string editing where offsets/encoding are proven;
+- previewed folder metadata/timing batches;
+- explicit NX/NFO deployment mirror workflow.
 
-Remaining gates:
+Unknown metadata is intentionally raw-preserved. An unidentified field is not a
+missing implementation merely because no safe typed editor exists.
 
-- deeper malformed-model and writer fuzzing as an ongoing hardening gate.
+### Gameplay preview
 
-### Phase 3 — Importers and profile semantics (implemented)
+The gameplay preview is implemented and packaged. It is no longer an
+"implementation candidate".
 
-Delivered:
+Delivered behavior includes:
 
-1. NX10 importer with a conversion report, now validated against the complete
-   supplied 2,125-file NX2 NX10 corpus and 2,111 same-path official NXA NX20
-   successor conversions. The observed official NX2 conversion domain is
-   frozen; see `NX2_NXA_CONVERSION_ANALYSIS.md`.
-2. `nxa-native`, Fiesta 2, Prime 2, and patched-NXA metadata/capability
-   registries with structural versus authoring validation and complete
-   official-corpus ID coverage without guessed semantics.
-3. Startup capability gating keeps the patched NXA profile out of normal editor
-   profile choices while retaining its stable internal registry key.
-4. Typed trailer views where evidence is sufficient, including guarded
-   length-changing UTF-8 relocation for aligned proven string pools. Unknown or
-   ambiguous pointers block relocation instead of being guessed.
-5. Isolated one-way STF/ST2, NOT/NOT5, STX, SEE, KSF, and UCS authoring imports
-   with structured diagnostics and explicit materialization.
+- immutable `PreviewSnapshot` and route resolver;
+- manual and internally randomized routes;
+- synchronized external native Qt preview;
+- Single/Half Double/Double field geometry;
+- noteskin animation, STEPFX and pad input;
+- runtime timing projection for Start Time/BPM/Beat Split/Scroll/Smooth/Skip;
+- source-backed judgment timing, score, combo, grade and normal-mode gauge
+  behavior for the audited runtime path;
+- supported legacy modifier compatibility projections;
+- F6 debug overlay with per-bank judgments, combo/MissCombo maxima, score,
+  grade, gauge, clear state and item counters;
+- deterministic local RNG where matching hidden engine-global RNG state is not
+  required for authoring or diagnostic reproducibility;
+- blocking diagnostics when a route/runtime state cannot be interpreted safely.
 
-Importer acceptance requires source preservation, a deterministic NX20 result,
-and an explicit list of approximations or unsupported concepts. Inputs outside
-an importer's proven corpus domain remain guarded rather than generalized from
-unsupported assumptions.
+Pixel-perfect reproduction of asset-driven Animator/material effects is not a
+product requirement when the corresponding official assets are unavailable.
 
-### Phase 4 — Folder layer (implemented)
+## 0.9.5 hardening cycle
 
-- open all immediate NX files and isolate per-file failures (implemented);
-- individual save and `Save All` transaction planning (implemented);
-- require a valid `LM.NX` for complete-folder publication (implemented);
-- generate or reuse a StepEdit-compatible blank NX20 Lightmap through a
-  previewable, explicitly executed save plan (implemented);
-- discover/select audio without a project manifest (implemented);
-- recovery journal and crash restoration outside the chart folder (implemented);
-- NX/NFO mirror compare/export without automatic synchronization (implemented);
-- create, duplicate, and delete workspace `.NX` files with unsaved-state guards
-  and Lightmap protection (implemented);
-- choose standard or custom chart field geometry without silently discarding
-  occupied panels (implemented).
+The current release scope is deliberately narrower than the preceding feature
+cycles. All six hardening items are complete.
 
-### Phase 5 — Read-only Qt viewport (complete)
+### 1. Documentation truth pass — complete
 
-- desktop shell, tabs, document tree, and diagnostics panel;
-- vertical timeline inspired by StepEdit/STEPEdit-pixi;
-- viewport culling on the 267,264-row stress chart;
-- measure ruler, block headers, metadata/Division inspection;
-- branch switching without mutation;
-- custom redistributable glyphs and user-supplied local visual packs.
+README, STATUS and ROADMAP were synchronized with the implemented tree; stale
+"not implemented" claims and obsolete active-phase language were removed;
+historical validation records remain explicitly historical.
 
-Delivered:
+### 2. Performance regression suite — complete
 
-- immutable `AuthoringSnapshot` with contextual metadata and compact row
-  preservation;
-- Qt-independent geometry, hit testing, zoom, measure markers, active-block
-  selection, and viewport culling;
-- optional PySide6 shell with folder tree, tabs, diagnostics, inspection, and
-  read-only timeline;
-- original vector glyphs plus validated user-selected local PNG/SVG packs;
-- synthetic 267,264-row culling benchmark and conditional offscreen Qt smoke
-  test;
-- full Windows 10 test-suite validation: 95 tests discovered, 94 passed, one
-  expected case-insensitive-filesystem skip, and exit code 0;
-- packaged Qt paint/scroll/zoom validation at 175.3 fps over 300 frames on
-  Windows 10, passing both the 30 fps requirement and 60 fps target.
+The sparse selection paths introduced/fixed for 0.9.4 are release-gated. The
+deterministic fixture uses a 200,000-row compact/source-backed chart and executes
+50, 500 and 5,000-cell cases for copy/cut/paste, horizontal/vertical flip,
+StepEdit mirror, erase, filtered replace and bulk placement.
 
-Performance gate: target 60 fps and require at least 30 fps during scroll/zoom on
-the stress fixture without abandoning compact storage.
+The primary contract rejects full `CompactRows`/`OverlayRows` iteration and caps
+indexed row materialization as a function of selected work, not total chart
+size. Shift-drag selection also reuses compact row IDs rather than decoding a
+whole source-backed Block merely to build selection identity.
 
-### Phase 6 — Practical visual editing (complete)
+See `PERFORMANCE_REGRESSION_GATE.md`.
 
-- note placement, deletion, drag, and typed item editing;
-- block and split insertion/removal/move;
-- timing, BPM, scroll, stop, warp, and smooth-speed tools;
-- multi-selection and safe bulk operations;
-- command coalescing for drag gestures;
-- validation-before-save and structural diff preview;
-- audio transport, waveform, metronome, snapping, and offset tools.
+### 3. Save/recovery torture tests — complete
 
-Delivered for validation:
+The durability pass covers stage creation, ENOSPC/fsync, original-backup copy,
+partial commit interruption, later replacement failure, new-target rollback,
+rollback failure and successful cleanup. Recovery fault injection covers hidden
+staging creation/write/publish failures, catchable interruptions, orphan staging
+and structurally invalid payloads whose manifest hashes were updated to match.
 
-- stable-row note placement and deletion, including promotion and recompaction
-  of empty rows;
-- typed tap, hold, item, and Division placement presets;
-- click/drag painting with one undo step per gesture;
-- atomic bulk-note command support used by the multi-selection UI;
-- guarded Qt `Save All` with validation, target confirmation, structural diff,
-  external-change detection, and the existing rollback path;
-- bundled royalty-free static noteskin atlases and validated local overrides,
-  with gameplay-only feedback assets catalogued but not coupled to the authoring
-  renderer;
-- dense-split viewport correction: square note targets, beat-relative wheel
-  scrolling, timing-line-centered noteskin hold terminals, and a hold-head body
-  underlay that removes the terminal/shaft gap;
-- stable-ID Split/Block insertion, removal, reordering, and tree selection;
-- atomic typed editing of every native Block timing scalar, optional direct
-  Inspector editing, and chart-wide Start Time shifting including a toolbar
-  relative-delta mode across every Split/branch;
-- deterministic row/beat/millisecond projection based on explicit Block anchors;
-- rectangular stable-ID selection, musical snapping, copy/paste, erase, mirror,
-  filtered replace, and typed bulk placement;
-- session audio transport, selection-or-viewport Play seeking, explicit offset,
-  PCM-WAV plus Qt-decoded compressed/staged waveform generation, and an
-  absolute-time metronome with per-beat and per-arrow modes;
-- stereo signed min/max waveform summaries with a 16-frame base and a
-  multiresolution pyramid queried according to visible time-per-pixel;
-- monotonic live transport filtering that rejects delayed backend rewinds and a
-  bounded metronome voice pool that avoids duplicate crossings and WAV cutoff
-  clicks;
-- StepEdit-compatible note function/visibility flag editing and visible snap
-  guides;
-- StepEdit-style fixed encoded-row geometry shared exactly by editing and
-  playback, preserved viewport/zoom across Play/Pause, and non-obstructing
-  side-gutter Block labels;
-- compact Audio and Settings menus with conservative defaults.
+If rollback itself cannot restore an existing target, the `.stepnx-original`
+backup is retained and surfaced rather than deleted by cleanup.
 
-This phase is where the project finally earns the word “editor.” Shipping a
-pretty read-only timeline before commands are dependable would be a demo, not a
-product.
+Checkpoint:
 
-### Phase 7 — Advanced NX20 authoring (complete)
+- Linux/glibc 2.31: 573 tests in 5.064 s, OK;
+- Windows: 573 tests in 6.645 s, OK with one expected case-collision skip.
 
-- profile-aware Brain Shower metadata and question tooling;
-- conditional branches and route visualization;
-- patched-engine capabilities;
-- typed mission-trailer strings/conditions where safe;
-- batch operations across a folder;
-- NFO deployment mirror workflow.
+A deliberate boundary remains: ordinary filesystem renames cannot make an
+entire multi-file `Save All` physically atomic against hard power loss or an
+uncatchable process kill between target renames. A stronger guarantee would
+require a persistent transaction journal and startup reconciliation.
 
-Delivered for validation:
+See `SAVE_RECOVERY_TORTURE.md`.
 
-- declarative metadata/capability registries for native NXA and the patched
-  engine, with inheritance and explicit evidence levels;
-- separate structural and profile-aware authoring validation;
-- ordered metadata collection editing that retains duplicate order, stable IDs,
-  unknown entries, and exact untouched scalar bytes;
-- typed integer, float-bit, bitmask, enum, and packed-u16 range editors;
-- Brain Shower projection and editing for confirmed IDs 11/12, 21–26, and
-  31–34, while unidentified IDs 43–49 remain visible but raw-only;
-- Split selection and Division-condition route projection with direct Qt branch
-  navigation;
-- a non-evaluating mission-condition parser covering arithmetic, comparisons,
-  Boolean operators, rank constants, case variants, and patched variables;
-- validation against every `CONDITION_1..4` expression in the supplied official
-  NX2 and NXA mission text references;
-- safe typed views of known trailer string offsets plus guarded length-changing
-  relocation for the aligned UTF-8/NUL pool shape proven in later-engine corpus
-  evidence; unterminated strings, invalid offsets, unknown encodings, and
-  ambiguous unknown pointers remain blocked;
-- write-free folder batch plans for global metadata and Start Time shifts, with
-  explicit duplicate policy and Lightmap exclusion;
-- GUI mirror comparison/export that keeps NX and NFO deployment roles explicit.
+### 4. Keyboard workflow audit — complete
 
-### Phase 8 — Gameplay simulator (implementation candidate; packaged gate pending)
+The final workflow includes:
 
-- export a read-only `PreviewSnapshot`;
-- manual route selection;
-- deterministic seeded random routes;
-- runtime autoplay and two-player pad input on one execution surface;
-- one initialization dialog for `.NX` filename, 1x–9x, and COMMAND;
-- speed keys, debug display, guide, seek, and runtime flags;
-- unsupported-condition diagnostics;
-- compare timing against NXA behavior;
-- evaluate an independent web renderer versus a native Qt implementation;
-- ship with no official artwork/JPAK assets.
+- stable-ID Timeline cursor navigation with arrows and Home/End;
+- fixed-anchor/moving-edge Shift selection across visible Block/Split boundaries;
+- row-count semantics independent of Beat Split, BPM or tick density;
+- cross-Block Cut/Copy/Paste and playable transforms;
+- direct `1..0` tool selection and N/H/G note-function selection;
+- true Enter/Toggle behavior for single and multiple selections;
+- Timeline-only Delete, Escape, Ctrl+C/X/V, X/Y/M and Space;
+- `Alt+1..5` pane focus;
+- native `Ctrl+Tab` / `Ctrl+Shift+Tab` chart switching;
+- Workspace tree keyboard metadata/timing/Split/structure operations;
+- Routes Enter activation;
+- standard `Ctrl+S` Save All while retaining `Ctrl+Shift+S`;
+- F1 shortcut discoverability;
+- three-channel `LM.NX` Toggle/Select keyboard authoring and clipboard workflow.
 
-Delivered for validation:
+The Lightmap row model is backed by **2,896,556 audited rows** across NXA,
+Fiesta 2 and Prime 2. Bytes 0..2 are exclusively binary `00`/`01`; byte 3 is
+always `00`. StepNX authors the proven three lights and preserves the unresolved
+fourth byte.
 
-- immutable `PreviewSnapshot` projection that retains every Block branch and
-  source-backed row collection without granting mutation access;
-- explicit manual route choices, local seeded RNG, recorded route decisions,
-  and deterministic all-perfect state for proven NXA condition counters;
-- blocking diagnostics for missing choices, random ties without a seed,
-  unsupported applause state, no-match routes, Lightmaps, and invalid timing;
-- a runtime event stream anchored to each Block's explicit Start Time and BPM,
-  with conservative warnings for unproven freeze, warp, and Scroll behavior;
-- a native Qt renderer selected over a browser/WebPrime integration, avoiding a
-  second parser and all unlicensed JPAK/runtime assets;
-- synchronized audio time, continuous scroll geometry, animated supported
-  noteskin frames, native five-pitch sequence-zone strips, remapped input/STEPFX
-  feedback, Double's continuous ten-lane receptor pitch, a divider-free field,
-  bounded recent feedback projection, original fallback shapes, and read-only
-  preview tabs;
-- composed chart visibility and COMMAND display behavior for Appear, Vanish,
-  Invisible, Non-Step, Freedom, Flash, Mirror, Random, and Judge Reverse, with
-  Ghost and Bonus/Hidden kept as distinct NX20 function families;
-- the shared authoring metronome toggle and per-arrow/per-beat mode apply to the
-  immutable snapshot of the active preview tab;
-- a recorded PIUTESTER behavioral audit with a strict prohibition on copying
-  its proprietary executable, scripts, DAT archives, manual text, or artwork;
-- internally randomized route seeds, with random selection restricted to Splits
-  whose flags request it and shared only by matching nonzero lower-five-bit
-  banks; zero lower bits create independent random events;
-- additive STEPFX composition for opaque RGB sheets that use black as the
-  neutral background.
+Automated checkpoint:
 
-Exact judgment, grade, score, gauge, freeze, modifier-curve, and later-engine
-behavior are not complete until independent NXA, Fiesta 2, and Prime captures
-establish profile evidence. Local debug counters are labeled accordingly.
+- Linux/glibc 2.31: **597 tests in 4.950 s, OK**;
+- Windows: **597 tests in 7.161 s, OK**, with one expected skip.
 
-The preview comes after the authoring timeline and command model. A simulator on
-top of unstable semantics is an attractive way to debug the wrong program.
+The subsequent real Windows item-5 authoring work exercised the corrected
+keyboard/Lightmap workflow and closed the manual re-smoke requirement.
 
-### Phase 9 — Hardening and 1.0
+See `KEYBOARD_WORKFLOW_AUDIT.md` and `LIGHTMAP_AUTHORING.md`.
 
-- fuzz parser, writer, importers, and command sequences;
-- crash-recovery and interrupted-save tests;
-- corpus performance regression budgets;
-- reproducible Windows packaging and update policy;
-- accessibility, keyboard-only editing, high-DPI, and localization framework;
-- documentation, example files using original data, and release checklist.
+### 5. Editor-field scaling pass — complete
 
-### Current development branch — Phase 11 close-out
+The 0.9.5 scope is editor-field zoom, not application-wide DPI scaling.
+`View > Editor zoom` exposes the full 100%..300% matrix in 25% increments.
+Timeline row/lane/ruler/info geometry, waveform, notes, Lightmap lights,
+selection and hit testing scale from the same geometry while the surrounding Qt
+application chrome remains unchanged.
 
-The agreed implementation scope is complete. The active branch has additionally
-closed the legacy-import GUI flow, SEE/UCS authoring import, workspace NX file
-management, field geometry tools, sparse NX20 hold behavior, compressed/staged
-precision waveform rendering, persistent external rendering preferences,
-guarded trailer relocation in the Qt UI, patched-profile startup gating, timing
-Inspector polish, metronome transport jitter/cutoff fixes, complete versioned
-authoring-profile coverage, and the official NX2->NXA importer audit/corrections.
+- Ctrl+wheel remains vertical timing-precision zoom.
+- Shift+wheel steps the field zoom by one preset.
+- Alt+wheel is not intercepted. The initial Alt binding was retired after real
+  Windows use showed Qt/native horizontal scrolling could consume it.
 
-The remaining Phase 11 work is validation and integration rather than feature
-implementation: run the strict Windows gate on the final HEAD, perform the final
-manual smoke tests, record the result, and merge the branch.
+Item-5 checkpoint:
 
-### Explicit non-goals — World Max mission text and cabinet Lightmap UI
+- Windows: **610 tests in 6.240 s, OK**, with one expected skip;
+- Linux/glibc 2.31: full suite, OK;
+- manual Windows validation covered the baseline and all eight additional
+  presets through 300%.
 
-`mission.txt` is World Max game/configuration data rather than an NX/NFO chart
-document. StepNX Studio may use supplied mission files as reference evidence for
-condition syntax, but it does not own a `mission.txt` codec, document model, or
-visual mission-map editor.
+See `HIGH_DPI_SCALING_GATE.md`.
 
-Likewise, `LM.NX` remains a native NX document because it is part of folder
-publication, but a dedicated cabinet-light visualizer is not required by the
-editor. Hardware-level NXA light-output research may be useful independently;
-it is not an authoring or release blocker.
+### 6. Editor UX cleanup — complete
+
+The consistency pass covers:
+
+- Workspace context menus reusing canonical actions where semantics match;
+- specialized Timeline structure commands retaining row/viewport semantics but
+  using consistent overlapping labels and destructive wording;
+- richer rectangular/sparse/cross-Block selection feedback;
+- Flip/Mirror/Paste enabled state matching actual applicability;
+- note-only controls visibly disabled in Lightmap;
+- direct Routes selector terminology without post-render text replacement;
+- Inspector scope refresh/clear behavior after timing/metadata/structure edits;
+- stale Division-metadata target rejection after switching charts;
+- chart-field state following the actual Workspace-selected document;
+- F1 and View-menu shortcut truth;
+- Timeline Remove Block confirmation aligned with the canonical Structure flow;
+- Shift+wheel Editor zoom replacing the ineffective Alt+wheel binding found in
+  real Windows use, including platform-horizontalized Shift-wheel delivery.
+
+Item 6 adds **22 focused regressions** over the 610-test item-5 checkpoint. The
+strict Windows discovery floor is **632**.
+
+Final automated checkpoint on functional/test head
+`7a5dcbe9eb3f8e5f33430f4effc4213b9114bf70`:
+
+- Windows: **632 tests in 7.190 s, OK**, with one expected skip;
+- Linux/glibc 2.31: **632 tests in 5.253 s, OK**.
+
+The focused manual Windows smoke also passed, including the Shift+wheel case on a
+Timeline with horizontal scrolling available and the context/action/Inspector/
+Routes/Help consistency checks in `EDITOR_UX_CLEANUP_AUDIT.md`.
+
+## Remaining implementation for 0.9.5
+
+The six-item hardening scope is complete. No new NX20 format family, legacy
+importer, trailer encoding, gameplay-debug subsystem, selection-performance
+subsystem, save/recovery subsystem, keyboard workflow, scaling subsystem or UX
+cleanup item remains open for 0.9.5.
+
+The remaining release work is integration, packaging, patch-note/document
+consistency and the final packaged smoke before tagging.
+
+A later 1.0 hardening phase should continue:
+
+- deeper parser/writer/importer/command fuzzing;
+- crash-recovery coverage beyond the 0.9.5 fault matrix, including evaluating a
+  persistent multi-file transaction journal and restart-time reconciliation;
+- broader corpus performance regression budgets outside ordinary selection
+  transforms;
+- reproducible packaging/update policy;
+- broader accessibility and assistive-technology validation;
+- application-wide DPI/localization infrastructure;
+- documentation, original example files and release checklist.
+
+## Open research, not implementation blockers
+
+These items remain deliberately source-gated rather than guessed:
+
+- NXA Brain Division 43..49 individual semantics;
+- Fiesta 2 Brain Split metadata 11/12;
+- discarded Prime 2 placeholder Split/Division fields;
+- exact modern ZigZag consumer path beyond the validated historical projection;
+- exact Animator/asset movement for modern Throw;
+- exact Unity RNG stream for Random Velocity;
+- exact Animator/material curves for Appear/Vanish;
+- producer of `CommonModifier.SpeedBoost`;
+- challenge-mode `HPBar.Add` branch;
+- forced-judgment Division 999 consumer;
+- any Split-level modifier dispatcher if one is eventually demonstrated;
+- physical cabinet-light actuation from `LM.NX`;
+- semantic meaning, if any, of a future nonzero fourth Lightmap row byte.
+
+These questions may improve runtime fidelity or historical understanding later.
+They are not reasons to fabricate editor semantics and are not 0.9.5 release
+blockers.
+
+## Explicit non-goals
+
+- World Max `mission.txt` editing. Mission files may serve as evidence for
+  condition syntax, but mission topology/configuration is outside the NX/NFO
+  document model.
+- A physical cabinet-light simulator. `LM.NX` has native three-channel cell
+  authoring, but hardware output research is separate.
+- Redistribution of proprietary charts, executables, noteskins or game assets.
 
 ## Test strategy
 
-### Unit and property tests
+### Unit/property tests
 
-- every raw scalar and source-span invariant;
-- parser limits and offset diagnostics;
+- raw scalar and source-span invariants;
+- parser limits and diagnostics;
 - rich/compact identity;
 - sparse promotion and stable-ID preservation;
 - command apply/undo/redo sequences;
 - validator issue codes and paths;
 - structural diff paths;
-- timing transforms and profile rules;
-- import conversion reports.
+- timing/profile rules;
+- importer conversion reports;
+- deterministic source-backed selection/materialization budgets;
+- save/recovery fault injection and rollback invariants;
+- keyboard cursor/selection semantics, shortcut scoping and tree dispatch;
+- cross-Block row-order clipboard/transform semantics;
+- three-channel Lightmap authoring and fourth-byte preservation;
+- editor-field geometry/hit-test agreement across every zoom preset;
+- context-menu/action-state/Inspector/help consistency;
+- no full compact-row iteration during ordinary sparse editing.
 
 ### Corpus gates
 
 - 12,909 known NX20/NFO files remain byte-exact;
-- 12 NXA NX10 files remain classified outside the NX20 codec;
-- all 2,125 supplied NX2 NX10 charts remain within the frozen observed importer
-  domain, with successor evidence recorded separately from repository payloads;
-- rich mode stays available as a reference;
-- compact mode is the required performance/default gate;
-- corpus payloads never enter the repository.
+- all 2,125 supplied NX2 NX10 charts remain inside the frozen observed importer
+  domain;
+- 2,111 official successors remain recorded as semantic evidence rather than
+  repository payloads;
+- 2,896,556 supplied Lightmap rows support the three-channel authoring contract;
+- large-chart parse/memory/viewport and selection-transform performance remain
+  within regression budgets.
 
-### Runtime gates
+### Release gates
 
-- NXA validates generated/edited native charts where suitable cabinet/runtime
-  hardware is available;
-- later-engine fixtures validate sized trailers and NFO deployment;
-- patched-engine behavior is tested only under its explicit profile;
-- every runtime test records executable identity and exact input artifact;
-- physical Lightmap lamp actuation is external hardware research, not a release
-  gate for the editor's structurally validated `LM.NX` workflow.
-
-## Current priority queue
-
-P0:
-
-1. run the final strict Windows Phase 11 gate and manual smoke tests;
-2. merge Phase 11 after the close-out record is clean.
-
-P1:
-
-1. continue runtime evidence work for exact preview semantics.
-
-P2:
-
-1. deeper hardening/fuzzing and performance regression budgets;
-2. remaining typed later-generation trailer fields where evidence becomes
-   sufficient;
-3. optional reverse-engineering of NXA cabinet-light output/I/O behavior, kept
-   separate from the editor unless it yields a concrete authoring requirement;
-4. packaging, accessibility, keyboard-only editing, high-DPI, and localization
-   work on the road to 1.0.
-
-## Quality metrics
-
-- zero unexplained byte differences in no-edit round-trip;
-- no silent data loss in any command or importer;
-- deterministic validation and diff paths;
-- memory and parse-time regression budgets based on the stress chart;
-- all public documentation in English;
-- no proprietary assets or chart payloads in releases;
-- every format/architecture change captured by tests and, when required, an ADR.
+- strict Windows test gate with a **632-test minimum discovery floor**: passed;
+- Linux full-suite/package gate on the glibc 2.31 baseline: passed;
+- focused manual Windows UX smoke for item 6: passed;
+- packaged smoke tests for authoring, audio, preview, keyboard, scaling and
+  save/recovery workflows;
+- documentation/version/patch-note consistency check before tagging.

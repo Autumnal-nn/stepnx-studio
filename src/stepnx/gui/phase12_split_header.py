@@ -27,41 +27,41 @@ class SplitSelectionDialog(QDialog):
         self._syncing = False
 
         layout = QVBoxLayout(self)
-        explanation = QLabel(
-            "NX20 stores Split selection in one byte. Runtime validation shows that "
-            "0x80 takes precedence over 0x40, so the typed controls keep those two "
-            "modes mutually exclusive. The raw field remains authoritative and can "
-            "still represent every byte from 0x00 through 0xFF.",
-            self,
-        )
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
-
         form = QFormLayout()
-        self.random_start = QCheckBox("0x80  Random at Split start", self)
-        self.random_trigger = QCheckBox("0x40  Random on selection trigger", self)
-        self.force_select = QCheckBox("0x20  Force/select behavior", self)
+        self.random_start = QCheckBox("0x80  Random at chart load", self)
+        # Attribute name retained for compatibility with the original typed
+        # projection. In user-facing terms, 0x40 is the follower bit. A zero
+        # bank cannot be followed and therefore falls back to split-start random.
+        self.random_trigger = QCheckBox("0x40  Follower block", self)
+        self.random_trigger.setToolTip("Follow bank")
+        self.force_select = QCheckBox("0x20  Recalculate at split start", self)
+        self.force_select.setToolTip(
+            "Re-evaluate Division Metadata conditions when this Split starts. "
+            "G/W/A/B/C Division arrows already force block verification as part "
+            "of their own semantics; other Division Metadata needs this bit for "
+            "runtime re-evaluation at Split start."
+        )
         self.bank = QSpinBox(self)
         self.bank.setRange(0, 31)
         self.bank.setToolTip(
-            "0 = independent/unbanked random event. Non-zero values associate "
-            "matching selector events with the same bank."
+            "0 means no bank. Banks 1..31 retain a selected Block index. A "
+            "banked conditioned/explicit Split may establish state for a later "
+            "Follower block."
         )
         self.raw_edit = QLineEdit(self)
         self.raw_edit.setMaxLength(4)
         self.raw_edit.setToolTip(
             "Complete raw selector byte. Accepts 0x00..0xFF or decimal 0..255. "
-            "Raw entry may deliberately encode otherwise discouraged combinations "
-            "such as 0xC0."
+            "Raw entry may deliberately encode combinations such as 0xC0."
         )
         self.raw_label = QLabel(self)
         self.warning_label = QLabel(self)
         self.warning_label.setWordWrap(True)
 
-        form.addRow("Random at start:", self.random_start)
-        form.addRow("Random at trigger:", self.random_trigger)
-        form.addRow("Force select:", self.force_select)
-        form.addRow("Random bank (0..31):", self.bank)
+        form.addRow("Random at load:", self.random_start)
+        form.addRow("Follow bank:", self.random_trigger)
+        form.addRow("Recalculate:", self.force_select)
+        form.addRow("Selection bank (0 = none):", self.bank)
         form.addRow("Raw byte:", self.raw_edit)
         form.addRow("Decoded:", self.raw_label)
         layout.addLayout(form)
@@ -286,7 +286,7 @@ def install_phase12_split_header(window) -> None:
 
     action = QAction("Edit Split selection…", window)
     action.setToolTip(
-        "Edit the complete NX20 Split selector byte: selector mode, force-select flag, and bank."
+        "Edit the NX20 Split selector byte: load-time random, follower behavior, split-start recalculation, and selection bank."
     )
     action.triggered.connect(lambda *_args: _edit_split_selection(window))
     window.structure_menu.addAction(action)

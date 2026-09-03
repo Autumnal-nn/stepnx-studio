@@ -28,6 +28,10 @@ def main(argv=None) -> int:
     import stepnx.gui.timeline_widget as timeline_module
     import stepnx.gui.timing_dialog as timing_module
     import stepnx.gui.preview_widget as preview_module
+    from stepnx.gui.editor_field_zoom import install_editor_field_zoom
+    from stepnx.gui.editor_ux_cleanup import install_editor_ux_cleanup
+    from stepnx.gui.keyboard_workflow import install_keyboard_workflow
+    from stepnx.gui.lightmap_visual_polish import install_lightmap_visual_polish
     from stepnx.gui.phase10_install import install_phase10
     from stepnx.gui.phase10_timeline import Phase10TimelineWidget
     from stepnx.gui.phase10_timing import Phase10BlockTimingDialog
@@ -55,6 +59,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase11_workspace import install_phase11_workspace_tools
     from stepnx.gui.phase12_editor_note_visuals import install_phase12_editor_note_visuals
     from stepnx.gui.phase12_split_header import install_phase12_split_header
+    from stepnx.gui.split_follower_ui import install_split_follower_ui
 
     timeline_module.TimelineWidget = Phase10TimelineWidget
     timing_module.BlockTimingDialog = Phase10BlockTimingDialog
@@ -90,6 +95,19 @@ def main(argv=None) -> int:
             install_phase11_fast_note_index(self)
             install_phase11_render_performance(self)
             install_phase11_ui_polish(self)
+            install_keyboard_workflow(self)
+            # Keyboard workflow installs the three-lane Lightmap renderer. The
+            # final polish deliberately wraps it last so LM selection uses the
+            # exact light bounds and off/on opacity is fixed at 5%/80%.
+            install_lightmap_visual_polish(self)
+            install_split_follower_ui(self)
+            # Editor-field zoom deliberately runs after authoring/render patches.
+            # It scales only Timeline geometry; menus, toolbars, sidebars and
+            # dialogs remain at the application's ordinary UI scale.
+            install_editor_field_zoom(self)
+            # UX cleanup is intentionally last: it consumes the final QAction,
+            # Lightmap and route surfaces rather than creating parallel state.
+            install_editor_ux_cleanup(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10

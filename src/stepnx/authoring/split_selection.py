@@ -11,11 +11,25 @@ from stepnx.core.scalars import RawU8
 class SplitSelectionByte:
     """Typed projection of the first NX20 Split header byte.
 
-    Runtime validation on official NXA charts shows that 0x80 and 0x40 are
-    selector modes with precedence rather than two composable behaviors:
-    whenever both bits are present, 0x80 wins. The lower five bits are a
-    selection bank/group. The raw byte remains authoritative so malformed or
-    historical combinations such as 0xC0 still round-trip exactly.
+    Selector timing and bank semantics are distinct:
+
+    - ``0x80`` preselects a random Block when the chart is loaded;
+    - ``0x40`` attempts to reuse the latest Block index stored for the encoded
+      bank;
+    - banks are ``1..31``. Lower bits ``0`` mean *no bank*, not "bank 0";
+    - therefore raw ``0x40`` has no bank to follow and falls back to a fresh
+      random selection when that Split is reached;
+    - ``0x41..0x5F`` are genuine followers for banks ``1..31``;
+    - a banked Split such as ``0x01`` may establish its bank state through a
+      condition/active candidate, which a later ``0x41`` then reuses;
+    - ``0x20`` requests a block-condition recalculation at Split start. G/W/A/B/C
+      Division arrows already force their own block verification; other Division
+      Metadata requires this bit for Split-start runtime re-evaluation.
+
+    The raw byte remains authoritative, including combinations such as ``0xC0``.
+    ``random_at_trigger`` is retained as the internal field name for API
+    compatibility, but user-facing terminology distinguishes the unbanked
+    block-start random fallback from banked follower behavior.
     """
 
     random_at_start: bool = False
@@ -35,9 +49,25 @@ class SplitSelectionByte:
         )
 
     @property
+    def has_bank(self) -> bool:
+        return self.bank != 0
+
+    @property
+    def follower(self) -> bool:
+        """Whether 0x40 can follow an actual bank (1..31)."""
+
+        return bool(self.random_at_trigger and self.has_bank)
+
+    @property
+    def random_at_block_start(self) -> bool:
+        """Whether 0x40 has no bank and therefore uses its random fallback."""
+
+        return bool(self.random_at_trigger and not self.has_bank)
+
+    @property
     def raw(self) -> int:
         if not 0 <= self.bank <= 0x1F:
-            raise ValueError("Split random bank must be between 0 and 31")
+            raise ValueError("Split selection bank must be between 0 and 31")
         return (
             (0x80 if self.random_at_start else 0)
             | (0x40 if self.random_at_trigger else 0)
@@ -49,16 +79,19 @@ class SplitSelectionByte:
     def mode_label(self) -> str:
         modes: list[str] = []
         if self.random_at_start:
-            modes.append("random at start")
+            modes.append("random at chart load")
             if self.random_at_trigger:
-                modes.append("0x40 also set (overridden)")
-        elif self.random_at_trigger:
-            modes.append("random at trigger")
+                extra = "follower flag" if self.has_bank else "block-start random flag"
+                modes.append(f"{extra} also set (0x80 precedence)")
+        elif self.random_at_block_start:
+            modes.append("random at block start")
+        elif self.follower:
+            modes.append("follower block")
         if self.force_select:
             modes.append("force select")
         if not modes:
             modes.append("ordered")
-        suffix = "" if self.bank == 0 else f", bank {self.bank}"
+        suffix = "" if not self.has_bank else f", bank {self.bank}"
         return " + ".join(modes) + suffix
 
     def warnings(self, *, block_count: int) -> tuple[str, ...]:
@@ -67,14 +100,16 @@ class SplitSelectionByte:
             warnings.append(
                 "This Split has only one Block, so selector flags/banking are normally redundant."
             )
-        if self.bank and not (self.random_at_start or self.random_at_trigger):
+        # A non-zero bank without 0x80/0x40 is valid. Conditions or an explicit
+        # active candidate can establish the bank state for a later follower.
+        if self.random_at_trigger and not self.has_bank and not self.random_at_start:
             warnings.append(
-                "A non-zero selection bank without either selector mode is unusual in the audited corpus."
+                "Follower block without a set bank defaults to random at split start"
             )
         if self.random_at_start and self.random_at_trigger:
             warnings.append(
-                "Both 0x80 and 0x40 are encoded. Runtime validation shows that 0x80 overrides 0x40; "
-                "official charts containing this combination include known broken implementations."
+                "Both 0x80 and 0x40 are encoded. Runtime validation shows that 0x80 takes precedence; "
+                "the raw combination is preserved without normalization."
             )
         return tuple(warnings)
 

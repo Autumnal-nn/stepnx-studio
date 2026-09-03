@@ -37,8 +37,7 @@ On Division notes the low six bits can participate in a 14-bit contextual
 Division ID, so `low6` is deliberately not globally renamed to `Brain Code` in
 forensic output.
 
-
-## NXA runtime normalization (confirmed in latest patched executable)
+## NXA runtime normalization
 
 For REGISTER Tap/Hold cells, the source bits 7..6 are cleared during chart
 preparation and rebuilt as a runtime judgment/statistics group. With Multibank

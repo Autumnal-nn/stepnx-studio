@@ -5,7 +5,16 @@ import unittest
 from pathlib import Path
 
 
-MINIMUM_TEST_COUNT = 220
+# The 0.9.4 release Windows gate ran 551 tests. The 0.9.5 selection-performance
+# suite added nine dedicated tests (560 total), save/recovery added thirteen
+# (573), and the initial keyboard-workflow audit added thirteen (586). Manual
+# keyboard smoke testing then exposed eleven additional cross-Block/Toggle/
+# Lightmap regressions (597), followed by five follower-bank/Lightmap-visual
+# regressions (602), five editor-field zoom regressions (607), three final
+# View-menu/zoom-input regressions (610), and twenty-two editor-UX cleanup
+# regressions (632). Losing any hardening regression file must not leave a
+# superficially green release.
+MINIMUM_TEST_COUNT = 632
 EXPECTED_SKIP_ID = (
     "unit.test_folder_workspace.FolderWorkspaceTests."
     "test_case_collisions_block_publication"

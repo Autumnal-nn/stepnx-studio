@@ -1,9 +1,13 @@
 # Phase 6 Windows validation
 
-Phase 6 is implemented but remains unpublished until its native Windows and
-noteskin gates pass. Run every destructive test on a copied chart
-folder. `Save All` is guarded; that does not make an irreplaceable source folder
-a sensible test fixture.
+> Historical validation snapshot. This file records the Phase 6 acceptance gate
+> and its then-current test count. It is not the current release-status or test-
+> count document. For the 0.9.5 state use `STATUS.md`, `ROADMAP.md`, and
+> `tools/run_windows_test_gate.py`. Later releases added compressed/staged
+> waveform extraction and broader AUD decoding/recovery support.
+
+Run every destructive test on a copied chart folder. `Save All` is guarded; that
+does not make an irreplaceable source folder a sensible test fixture.
 
 ## Automated suite
 
@@ -20,7 +24,7 @@ $TestExitCode = $LASTEXITCODE
 Write-Host "Exit code: $TestExitCode"
 ```
 
-Expected on the validated Windows setup:
+Historical result recorded for the validated Phase 6 Windows setup:
 
 ```text
 Ran 147 tests
@@ -28,11 +32,11 @@ OK (skipped=1)
 Exit code: 0
 ```
 
-The expected skip is the case-collision test on a case-insensitive filesystem.
-All nine Qt tests must run rather than skip. One constructs the multimedia
-transport and verifies the 64-bit position/duration signal bridge used by
-PySide6 6.11 and newer; another renders a synthetic atlas to verify that the
-head shaft begins only below the opaque arrow artwork.
+The expected skip at that time was the case-collision test on a case-insensitive
+filesystem. All nine Qt tests in that snapshot had to run rather than skip. One
+constructed the multimedia transport and verified the 64-bit position/duration
+signal bridge used by PySide6 6.11 and newer; another rendered a synthetic atlas
+to verify that the head shaft begins only below the opaque arrow artwork.
 
 ## Manual editor gate
 
@@ -94,36 +98,37 @@ Validate these behaviors:
      anchor row. Clear the selection, scroll elsewhere, and confirm Play seeks
      to the beat at or immediately before the 7% playhead position.
    - **Follow chart** must be enabled by default under **Audio**. Confirm the red
-     playhead stays near 7%
-     of the viewport height while moving from the Qt audio clock at the
-     expected Block Start Time/BPM.
+     playhead stays near 7% of the viewport height while moving from the Qt audio
+     clock at the expected Block Start Time/BPM.
    - Change the session offset and confirm the waveform moves without changing
      NX20 bytes.
    - Start with the bundled `BEAT.WAV`, or override it with a file beside the
-     checkout or through **Audio → Select metronome WAV**. Enable the metronome and check
-     beat/measure continuity after seeking; the Windows system beep must never
-     be used. **Per arrow** must be the default; test it and **Per beat**. A chord must produce one
-     tick, and hold bodies/tails must remain silent.
-   - In **Per arrow**, Hidden and Invisible-registering taps/hold heads must
-     tick, while Ghost notes must not. Visibility alone does not control sound.
+     checkout or through **Audio → Select metronome WAV**. Enable the metronome
+     and check beat/measure continuity after seeking; the Windows system beep
+     must never be used. **Per arrow** must be the default; test it and **Per
+     beat**. A chord must produce one tick, and hold bodies/tails must remain
+     silent.
+   - In **Per arrow**, Hidden and Invisible-registering taps/hold heads must tick,
+     while Ghost notes must not. Visibility alone does not control sound.
    - Compare low and high Beat Split values: every encoded row must retain the
      same vertical height while the higher split makes one beat taller. Start
      Play and Pause in the middle of the chart: zoom and viewport position must
-     remain identical. Scroll and Smooth Speed belong to gameplay projection
-     and must not rescale or collapse the authoring grid.
+     remain identical. Scroll and Smooth Speed belong to gameplay projection and
+     must not rescale or collapse the authoring grid.
    - Confirm Split/Block/BPM information appears in the right-side gutter and
      never consumes a row above the chart.
-   - Select `732.AUD` and confirm it decodes to a temporary MP3 and plays.
-     `D91.AUD` and `508.AUD` must report an unsupported ENC2 key profile rather
-     than playing corrupt output.
-   - PCM WAV should show a waveform. Compressed formats use Qt playback but do
-     not yet receive waveform extraction.
+   - The Phase 6 AUD check used `732.AUD` as the supported ENC2 fixture and
+     expected `D91.AUD` / `508.AUD` to be rejected. That fixture-specific rule is
+     historical and is superseded by `AUD_SUPPORT.md`, which documents the
+     current ENC1 algorithm and deterministic ENC2 recovery paths.
+   - Phase 6 exposed waveform extraction only for PCM WAV. Current releases also
+     decode supported compressed and staged audio for waveform rendering; see
+     `STATUS.md` and `AUD_SUPPORT.md`.
 
 7. **Publication guard**
    - Save the copied folder, inspect the structural-diff confirmation, reopen
      it, and confirm every edited value remains present.
-   - Run the full suite once more after the manual save test.
+   - Run the current full suite once more after the manual save test.
 
-Record screenshots or exact error output for any failed item. “It looked odd”
-is not a diagnostic; the selected tool, Beat Split, zoom, audio type, and action
-sequence usually expose the actual fault in seconds.
+Record exact error output for any failed item. The selected tool, Beat Split,
+zoom, audio type, and action sequence should accompany any reproducible report.
