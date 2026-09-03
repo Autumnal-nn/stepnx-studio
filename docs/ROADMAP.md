@@ -86,8 +86,8 @@ Implemented:
 - guarded UTF-8 trailer-string editing and relocation for proven offset fields;
 - raw preservation for unresolved or ambiguous values.
 
-The NX10 full-corpus validation and SEE importer are therefore completed work,
-not roadmap items.
+The NX10 full-corpus validation and SEE importer are completed work, not roadmap
+items.
 
 ### Folder/workspace layer
 
@@ -133,7 +133,9 @@ Implemented:
 - native Qt `Ctrl+Tab` / `Ctrl+Shift+Tab` chart-tab behavior without a redundant
   StepNX `Ctrl+PageUp/PageDown` mapping;
 - three-channel `LM.NX` Toggle/Select authoring with Cut/Copy/Paste/Delete and
-  lossless preservation of the fourth raw row byte.
+  lossless preservation of the fourth raw row byte;
+- Timeline/editor-field zoom presets from 100% through 300% in 25% increments,
+  with Shift+wheel preset stepping and independent Ctrl+wheel precision zoom.
 
 ### Advanced NX20 authoring
 
@@ -183,203 +185,135 @@ cycles.
 
 ### 1. Documentation truth pass — complete
 
-- README, STATUS and ROADMAP synchronized with the implemented tree;
-- stale "not implemented" claims removed for completed import/trailer work;
-- obsolete Phase 11 active-branch language converted to historical records;
-- gameplay preview documented as implemented rather than pending;
-- remaining implementation separated from open reverse-engineering research;
-- old validation documents marked as historical snapshots where appropriate.
+README, STATUS and ROADMAP were synchronized with the implemented tree; stale
+"not implemented" claims and obsolete active-phase language were removed;
+historical validation records remain explicitly historical.
 
 ### 2. Performance regression suite — complete
 
 The sparse selection paths introduced/fixed for 0.9.4 are release-gated. The
 deterministic fixture uses a 200,000-row compact/source-backed chart and executes
-50, 500 and 5,000-cell cases for:
-
-- copy/cut/paste;
-- horizontal/vertical flip;
-- StepEdit-compatible mirror;
-- erase;
-- filtered replace;
-- bulk placement;
-- source-backed rectangle-selection row-ID acquisition.
+50, 500 and 5,000-cell cases for copy/cut/paste, horizontal/vertical flip,
+StepEdit mirror, erase, filtered replace and bulk placement.
 
 The primary contract rejects full `CompactRows`/`OverlayRows` iteration and caps
 indexed row materialization as a function of selected work, not total chart
-size. The existing 50-note / 200,000-row one-second test remains a secondary
-wall-clock alarm.
-
-The audit also found and removed one transaction-prefix O(chart) path: Shift-drag
-selection previously decoded every row in the active Block merely to collect
-stable IDs. The installed timeline path now reuses the compact row-ID array.
+size. Shift-drag selection also reuses compact row IDs rather than decoding a
+whole source-backed Block merely to build selection identity.
 
 See `PERFORMANCE_REGRESSION_GATE.md`.
 
 ### 3. Save/recovery torture tests — complete
 
-The save/recovery layer has an explicit fault-injection matrix rather than only
-happy-path and ordinary rollback coverage.
+The durability pass covers stage creation, ENOSPC/fsync, original-backup copy,
+partial commit interruption, later replacement failure, new-target rollback,
+rollback failure and successful cleanup. Recovery fault injection covers hidden
+staging creation/write/publish failures, catchable interruptions, orphan staging
+and structurally invalid payloads whose manifest hashes were updated to match.
 
-Save-side torture cases cover:
+If rollback itself cannot restore an existing target, the `.stepnx-original`
+backup is retained and surfaced rather than deleted by cleanup.
 
-- temporary stage creation failure;
-- `ENOSPC`/`fsync` failure while staging a payload;
-- original-backup copy failure;
-- Python-level interruption after an earlier file has already been replaced;
-- later replacement failure and rollback of earlier commits;
-- rollback of a newly created target;
-- rollback replacement failure;
-- successful transaction cleanup.
-
-The resulting durability rules are:
-
-- stage and backup paths are registered before I/O that may fail;
-- catchable interruptions run rollback before propagating;
-- successful rollback restores prior targets and removes transaction debris;
-- if rollback itself cannot restore an existing target, the
-  `.stepnx-original` backup is retained and its filename is surfaced in the
-  error rather than being deleted by cleanup.
-
-Recovery-side torture cases cover:
-
-- recovery staging creation failure;
-- payload/manifest write and `fsync` failure;
-- interruption during manifest publication;
-- final staging-to-snapshot rename failure;
-- orphan hidden staging after an uncatchable crash;
-- SHA/path/provenance rejection from the existing recovery suite;
-- structurally corrupt NX20 whose manifest hash nevertheless matches the bad
-  bytes.
-
-`RecoveryStore.list()` exposes only finalized 32-character lowercase-hex
-snapshot directories containing a manifest, so crash staging is never presented
-as a valid recovery point.
-
-Item-3 validation checkpoint:
+Checkpoint:
 
 - Linux/glibc 2.31: 573 tests in 5.064 s, OK;
-- Windows: strict gate accepted 573 tests in 6.645 s with one expected
-  case-collision skip.
+- Windows: 573 tests in 6.645 s, OK with one expected case-collision skip.
 
 A deliberate boundary remains: ordinary filesystem renames cannot make an
 entire multi-file `Save All` physically atomic against hard power loss or an
-uncatchable process kill between target renames. Catchable failures are rolled
-back, but ACID-like restart recovery across that boundary would require a
-persistent transaction journal and startup reconciliation. 0.9.5 does not claim
-that stronger guarantee.
+uncatchable process kill between target renames. A stronger guarantee would
+require a persistent transaction journal and startup reconciliation.
 
 See `SAVE_RECOVERY_TORTURE.md`.
 
-### 4. Keyboard workflow audit — automated gate green, manual re-smoke pending
+### 4. Keyboard workflow audit — complete
 
-The audit is a complete authoring workflow rather than a shortcut inventory.
-
-The first implementation passed a 586-test Windows/Linux CI checkpoint, then
-manual Windows smoke testing found four practical defects:
-
-- repeated `Shift+Arrow` stopped growing after the second cell because every
-  movement restarted from the fixed anchor;
-- rectangular selection was unnecessarily Block-local;
-- Enter with Toggle used generic Tap placement rather than true toggle behavior;
-- StepNX attempted redundant `Ctrl+PageUp/PageDown` chart-tab shortcuts even
-  though native `Ctrl+Tab` already supplied the desired behavior.
-
-The corrected workflow now includes:
+The final workflow includes:
 
 - stable-ID Timeline cursor navigation with arrows and Home/End;
-- a fixed selection anchor plus moving Shift-selection edge;
-- cross-Block/Split rectangle construction over the active visible row sequence;
+- fixed-anchor/moving-edge Shift selection across visible Block/Split boundaries;
 - row-count semantics independent of Beat Split, BPM or tick density;
-- cross-Block Cut/Copy/Paste and playable vertical transforms;
+- cross-Block Cut/Copy/Paste and playable transforms;
 - direct `1..0` tool selection and N/H/G note-function selection;
 - true Enter/Toggle behavior for single and multiple selections;
-- Timeline-only Delete, Escape, Ctrl+C/X/V and X/Y/M editing commands;
-- Timeline-only Space playback, replacing the former application-wide shortcut;
+- Timeline-only Delete, Escape, Ctrl+C/X/V, X/Y/M and Space;
 - `Alt+1..5` pane focus;
-- native `Ctrl+Tab` / `Ctrl+Shift+Tab` tab switching, with no custom Ctrl+Pg
-  mapping;
-- Workspace-tree Enter activation plus tree-scoped metadata, timing, Split
-  selector, insertion, removal and reorder commands;
-- Routes activation with Enter;
+- native `Ctrl+Tab` / `Ctrl+Shift+Tab` chart switching;
+- Workspace tree keyboard metadata/timing/Split/structure operations;
+- Routes Enter activation;
 - standard `Ctrl+S` Save All while retaining `Ctrl+Shift+S`;
-- `F1` Help > Keyboard shortcuts discoverability.
+- F1 shortcut discoverability;
+- three-channel `LM.NX` Toggle/Select keyboard authoring and clipboard workflow.
 
-The same manual audit exposed the missing `LM.NX` authoring category. The branch
-now provides:
+The Lightmap row model is backed by **2,896,556 audited rows** across NXA,
+Fiesta 2 and Prime 2. Bytes 0..2 are exclusively binary `00`/`01`; byte 3 is
+always `00`. StepNX authors the proven three lights and preserves the unresolved
+fourth byte.
 
-- three visible/editable Lightmap lanes aligned to raw row bytes 0..2;
-- Toggle and Select as the only meaningful Lightmap tools;
-- Ctrl/Shift multi-selection across visible Block/Split boundaries;
-- Cut/Copy/Paste/Delete on selected light cells;
-- one-byte Lightmap clipboard cells kept separate from four-byte note cells;
-- note-specific Bank/Function/Visibility/Brain controls ignored for Lightmap;
-- all other placement tools still rejected as non-chart operations;
-- raw byte 3 preserved verbatim and intentionally not editable.
-
-The Lightmap row model is backed by a corpus audit of **2,896,556 rows** across
-NXA, Fiesta 2 and Prime 2. The first three bytes are exclusively binary
-`00`/`01`; the fourth byte is always `00`. StepNX therefore authors the proven
-three lights and preserves the unresolved fourth byte rather than inventing a
-semantic role for it.
-
-The initial keyboard work plus manual-smoke regressions add 24 dedicated tests
-over the 573-test item-3 checkpoint. The strict Windows discovery floor is now
-**597**.
-
-Corrected-code checkpoint:
+Automated checkpoint:
 
 - Linux/glibc 2.31: **597 tests in 4.950 s, OK**;
-- Windows: strict gate accepted **597 tests in 7.161 s**, with one expected
-  case-collision skip.
+- Windows: **597 tests in 7.161 s, OK**, with one expected skip.
 
-The remaining item-4 gate is a focused manual Windows re-smoke of these corrected
-input/focus behaviors. The item is not marked complete merely because the
-offscreen suite is green.
+The subsequent real Windows item-5 authoring work exercised the corrected
+keyboard/Lightmap workflow and closed the manual re-smoke requirement.
 
 See `KEYBOARD_WORKFLOW_AUDIT.md` and `LIGHTMAP_AUTHORING.md`.
 
-### 5. High-DPI/scaling pass — next after item 4 manual closure
+### 5. Editor-field scaling pass — complete
 
-Validate the complete Windows display-scaling matrix:
+The 0.9.5 scope is editor-field zoom, not application-wide DPI scaling.
+`View > Editor zoom` exposes the full 100%..300% matrix in 25% increments.
+Timeline row/lane/ruler/info geometry, waveform, notes, Lightmap lights,
+selection and hit testing scale from the same geometry while the surrounding Qt
+application chrome remains unchanged.
 
-- 100%;
-- 125%;
-- 150%;
-- 175%;
-- 200%;
-- 225%;
-- 250%;
-- 275%;
-- 300%.
+- Ctrl+wheel remains vertical timing-precision zoom.
+- Shift+wheel steps the field zoom by one preset.
+- Alt+wheel is not intercepted. The initial Alt binding was retired after real
+  Windows use showed Qt/native horizontal scrolling could consume it.
 
-The pass covers main-window composition, Timeline geometry/hit testing,
-noteskins, dialogs, Inspector/Diagnostics/Routes, Split/Block affordances,
-audio/waveform UI, and the external gameplay preview. Pixel-perfect screenshot
-comparison is not the gate; logical geometry, reachability and input/render
-agreement are.
+Item-5 checkpoint:
+
+- Windows: **610 tests in 6.240 s, OK**, with one expected skip;
+- Linux/glibc 2.31: full suite, OK;
+- manual Windows validation covered the baseline and all eight additional
+  presets through 300%.
 
 See `HIGH_DPI_SCALING_GATE.md`.
 
-### 6. Editor UX cleanup
+### 6. Editor UX cleanup — implementation complete, final gate pending
 
-Review:
+The consistency pass covers:
 
-- context menus;
-- selection feedback;
-- Inspector state;
-- redundant actions;
-- disabled/enabled action logic;
-- destructive-action confirmations;
-- diagnostics and error messages.
+- Workspace context menus reusing canonical actions where semantics match;
+- specialized Timeline structure commands retaining row/viewport semantics but
+  using consistent overlapping labels and destructive wording;
+- richer rectangular/sparse/cross-Block selection feedback;
+- Flip/Mirror/Paste enabled state matching actual applicability;
+- note-only controls visibly disabled in Lightmap;
+- direct Routes selector terminology without post-render text replacement;
+- Inspector scope refresh/clear behavior after timing/metadata/structure edits;
+- stale Division-metadata target rejection after switching charts;
+- chart-field state following the actual Workspace-selected document;
+- F1 and View-menu shortcut truth;
+- Timeline Remove Block confirmation aligned with the canonical Structure flow;
+- Shift+wheel Editor zoom replacing the ineffective Alt+wheel binding found in
+  real Windows use.
 
-## Remaining implementation after item 4 manual validation
+Item 6 adds **22 focused regressions** over the 610-test item-5 checkpoint. The
+strict Windows discovery floor is now **632**.
 
-Subject to the focused keyboard/Lightmap re-smoke passing, the remaining 0.9.5
-implementation backlog is the high-DPI/scaling matrix, editor UX cleanup, and
-low-risk maintenance found while exercising those gates. No new NX20 format
-family, legacy importer, trailer encoding, gameplay-debug subsystem,
-selection-performance subsystem, save/recovery subsystem, or keyboard authoring
-subsystem is currently required to complete the release scope.
+The remaining closure work is the full 632-test automated gate plus the focused
+manual smoke in `EDITOR_UX_CLEANUP_AUDIT.md`.
+
+## Remaining implementation for 0.9.5
+
+No new NX20 format family, legacy importer, trailer encoding, gameplay-debug
+subsystem, selection-performance subsystem, save/recovery subsystem, keyboard
+workflow or scaling subsystem is currently required to complete 0.9.5. The
+remaining work is validation/fix fallout from item 6 and release packaging/doc
+consistency.
 
 A later 1.0 hardening phase should continue:
 
@@ -390,7 +324,7 @@ A later 1.0 hardening phase should continue:
   transforms;
 - reproducible packaging/update policy;
 - broader accessibility and assistive-technology validation;
-- high-DPI and localization infrastructure;
+- application-wide DPI/localization infrastructure;
 - documentation, original example files and release checklist.
 
 ## Open research, not implementation blockers
@@ -420,7 +354,7 @@ blockers.
 - World Max `mission.txt` editing. Mission files may serve as evidence for
   condition syntax, but mission topology/configuration is outside the NX/NFO
   document model.
-- A physical cabinet-light simulator. `LM.NX` now has native three-channel cell
+- A physical cabinet-light simulator. `LM.NX` has native three-channel cell
   authoring, but hardware output research is separate.
 - Redistribution of proprietary charts, executables, noteskins or game assets.
 
@@ -442,7 +376,9 @@ blockers.
 - keyboard cursor/selection semantics, shortcut scoping and tree dispatch;
 - cross-Block row-order clipboard/transform semantics;
 - three-channel Lightmap authoring and fourth-byte preservation;
-- no full compact-row iteration during keyboard/Lightmap sparse editing.
+- editor-field geometry/hit-test agreement across every zoom preset;
+- context-menu/action-state/Inspector/help consistency;
+- no full compact-row iteration during ordinary sparse editing.
 
 ### Corpus gates
 
@@ -457,10 +393,9 @@ blockers.
 
 ### Release gates
 
-- strict Windows test gate with a **597-test minimum discovery floor**;
+- strict Windows test gate with a **632-test minimum discovery floor**;
 - Linux full-suite/package gate on the glibc 2.31 baseline;
-- focused manual Windows keyboard/Lightmap re-smoke before item 4 closure;
-- packaged smoke tests for authoring, audio, preview, keyboard and save/recovery
-  workflows;
-- high-DPI validation at every 25% increment from 100% through 300%;
+- focused manual Windows UX smoke before item 6 closure;
+- packaged smoke tests for authoring, audio, preview, keyboard, scaling and
+  save/recovery workflows;
 - documentation version/state consistency check before tagging.
