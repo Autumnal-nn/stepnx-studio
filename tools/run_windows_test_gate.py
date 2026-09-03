@@ -11,10 +11,10 @@ from pathlib import Path
 # keyboard smoke testing then exposed eleven additional cross-Block/Toggle/
 # Lightmap regressions (597), followed by five follower-bank/Lightmap-visual
 # regressions (602), five editor-field zoom regressions (607), three final
-# View-menu/Alt-wheel zoom regressions (610), and twenty-one editor-UX cleanup
-# regressions (631). Losing any hardening regression file must not leave a
+# View-menu/zoom-input regressions (610), and twenty-two editor-UX cleanup
+# regressions (632). Losing any hardening regression file must not leave a
 # superficially green release.
-MINIMUM_TEST_COUNT = 631
+MINIMUM_TEST_COUNT = 632
 EXPECTED_SKIP_ID = (
     "unit.test_folder_workspace.FolderWorkspaceTests."
     "test_case_collisions_block_publication"
