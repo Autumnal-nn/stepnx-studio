@@ -76,6 +76,63 @@ def inspector_context_exists(document, context) -> bool:
     return False
 
 
+def _metadata_signature(entries) -> tuple[tuple[int, str], ...]:
+    return tuple((int(item.meta_id.value), item.value.hex) for item in entries)
+
+
+def inspector_context_signature(document, context):
+    """Cheap signature of exactly the model data rendered by Inspector.
+
+    Row/note edits are intentionally absent. This prevents the Inspector-state
+    hardening from turning a fast note gesture into a table rebuild on every
+    click while still refreshing timing, metadata, selector and trailer edits.
+    """
+
+    if context is None:
+        return None
+    kind, _document_index, split_id, block_id = context
+    if kind in {"document", "header"}:
+        return (
+            kind,
+            _metadata_signature(document.header_metadata),
+            bytes(document.envelope.raw),
+        )
+    split = next(
+        (item for item in document.splits if item.stable_id == split_id),
+        None,
+    )
+    if split is None:
+        return None
+    if kind == "split":
+        return (
+            kind,
+            split.raw_select.hex,
+            split.raw_brain.hex,
+            _metadata_signature(split.metadata),
+        )
+    if kind == "block":
+        block = next(
+            (item for item in split.blocks if item.stable_id == block_id),
+            None,
+        )
+        if block is None:
+            return None
+        return (
+            kind,
+            block.start_time.hex,
+            block.bpm.hex,
+            block.scroll.hex,
+            block.offset_or_delay.hex,
+            block.speed_or_freeze.hex,
+            block.beat_split.hex,
+            block.beat_measure.hex,
+            block.smooth_speed.hex,
+            block.raw_flag.hex,
+            _metadata_signature(block.divisions),
+        )
+    return None
+
+
 def _add_action_group(menu: QMenu, actions) -> None:
     available = [action for action in actions if action is not None]
     if not available:
@@ -269,13 +326,23 @@ def _install_inspector_state(window) -> None:
         *,
         tree_selection=None,
     ) -> None:
+        context = getattr(self, "_stepnx_inspector_context", None)
+        old_document = None
+        before = None
+        if (
+            context is not None
+            and int(context[1]) == int(document_index)
+            and self.workspace is not None
+        ):
+            old_document = self.workspace.documents[int(document_index)].document
+            before = inspector_context_signature(old_document, context)
+
         original_apply(
             document_index,
             widget,
             document,
             tree_selection=tree_selection,
         )
-        context = getattr(self, "_stepnx_inspector_context", None)
         if context is None or int(context[1]) != int(document_index):
             return
         current = self.sessions[int(document_index)].current
@@ -283,6 +350,10 @@ def _install_inspector_state(window) -> None:
             self._stepnx_inspector_context = None
             self.inspector.clearContents()
             self.inspector.setRowCount(0)
+            return
+
+        after = inspector_context_signature(current, context)
+        if before == after:
             return
 
         selected_side = self.side_tabs.currentWidget()
