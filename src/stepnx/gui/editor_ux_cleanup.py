@@ -3,9 +3,13 @@ from __future__ import annotations
 from types import MethodType
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu, QMessageBox
 
 from stepnx.gui.selection_lightmap_workflow import GridClipboard, VisibleRowOrder
+
+
+REMOVE_BLOCK_TITLE = "Remove Block"
+REMOVE_BLOCK_MESSAGE = "Remove the selected Block and every note it contains?"
 
 
 def _active_timeline(window):
@@ -467,21 +471,91 @@ def _install_inspector_state(window) -> None:
     window._apply_document = MethodType(apply_document, window)
 
 
+def _install_timeline_remove_confirmation(window) -> None:
+    original = getattr(window, "_phase10_context_action", None)
+    if not callable(original):
+        return
+
+    from stepnx.authoring.structure import StructureTarget, remove_block
+    from stepnx.gui.phase10_install import _active_document_index
+
+    def context_action(
+        widget,
+        action: str,
+        split_id: int,
+        block_id: int,
+        row_index: int | None = None,
+    ) -> None:
+        if action != "delete-block":
+            original(widget, action, split_id, block_id, row_index)
+            return
+
+        document_index = _active_document_index(window, widget)
+        if document_index is None:
+            return
+        document = window.sessions[document_index].current
+        split = next(
+            (item for item in document.splits if item.stable_id == split_id),
+            None,
+        )
+        if split is None or len(split.blocks) <= 1:
+            return
+        if not any(item.stable_id == block_id for item in split.blocks):
+            return
+
+        answer = QMessageBox.question(
+            window,
+            REMOVE_BLOCK_TITLE,
+            REMOVE_BLOCK_MESSAGE,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            command = remove_block(document, StructureTarget(split_id, block_id))
+            updated = window.sessions[document_index].execute(command)
+            window._apply_document(
+                document_index,
+                widget,
+                updated,
+                tree_selection=("split", document_index, split_id, None),
+            )
+        except Exception as exc:
+            QMessageBox.critical(window, "Cannot edit structure", str(exc))
+            return
+        window.statusBar().showMessage("Removed Block", 5000)
+
+    window._phase10_context_action = context_action
+
+
 def _install_help_truth(window) -> None:
     import stepnx.gui.keyboard_workflow as keyboard_module
 
-    marker = "Alt+wheel"
-    if marker not in keyboard_module._SHORTCUT_HELP:
-        keyboard_module._SHORTCUT_HELP = keyboard_module._SHORTCUT_HELP.replace(
+    help_text = keyboard_module._SHORTCUT_HELP
+    help_text = help_text.replace(
+        "Alt+wheel     Editor field zoom (25% step)\n",
+        "Shift+wheel   Editor field zoom (25% step)\n",
+    )
+    if "Ctrl+wheel    Vertical timing zoom" not in help_text:
+        help_text = help_text.replace(
             "Space         Play / pause\n",
             "Space         Play / pause\n"
-            "Ctrl+wheel    Vertical timing zoom\n"
-            "Alt+wheel     Editor field zoom (25% step)\n",
+            "Ctrl+wheel    Vertical timing zoom\n",
         )
+    if "Shift+wheel   Editor field zoom (25% step)" not in help_text:
+        help_text = help_text.replace(
+            "Ctrl+wheel    Vertical timing zoom\n",
+            "Ctrl+wheel    Vertical timing zoom\n"
+            "Shift+wheel   Editor field zoom (25% step)\n",
+        )
+    keyboard_module._SHORTCUT_HELP = help_text
+
     zoom_menu = getattr(window, "editor_zoom_menu", None)
     if zoom_menu is not None:
         zoom_menu.menuAction().setToolTip(
-            "Scale only the Timeline/editor field. Alt+wheel steps 25%; "
+            "Scale only the Timeline/editor field. Shift+wheel steps 25%; "
             "Ctrl+wheel remains vertical timing zoom."
         )
 
@@ -494,4 +568,5 @@ def install_editor_ux_cleanup(window) -> None:
     _install_edit_action_state(window)
     _install_selection_feedback(window)
     _install_inspector_state(window)
+    _install_timeline_remove_confirmation(window)
     _install_help_truth(window)
