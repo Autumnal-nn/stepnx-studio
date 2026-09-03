@@ -57,6 +57,65 @@ def selection_summary(widget) -> str:
     return f"{count} {noun} selected · {detail}{crossing}"
 
 
+def selection_transform_state(widget) -> tuple[bool, bool]:
+    """Return (rectangular-transform, mirror) applicability without reading cells."""
+
+    if widget is None or widget.snapshot.effective_lightmap or not widget.selection.targets:
+        return False, False
+    try:
+        order = VisibleRowOrder(widget)
+        positions = {
+            int(row_id): order.locate(int(row_id))[2]
+            for row_id in {target.row_id for target in widget.selection.targets}
+        }
+    except Exception:
+        return False, False
+
+    ordinals = sorted(set(positions.values()))
+    lanes = sorted({int(target.lane) for target in widget.selection.targets})
+    rectangle = (
+        bool(ordinals)
+        and bool(lanes)
+        and ordinals == list(range(ordinals[0], ordinals[-1] + 1))
+        and lanes == list(range(lanes[0], lanes[-1] + 1))
+        and len(widget.selection.targets) == len(ordinals) * len(lanes)
+    )
+    if not rectangle:
+        return False, False
+
+    columns = int(widget.snapshot.columns)
+    lane_tuple = tuple(lanes)
+    mirror = (
+        (len(lanes) == 5 and (
+            (columns == 5 and lane_tuple == tuple(range(5)))
+            or (columns == 10 and lane_tuple in (tuple(range(5)), tuple(range(5, 10))))
+        ))
+        or (len(lanes) == 6 and (
+            (columns == 6 and lane_tuple == tuple(range(6)))
+            or (columns == 10 and lane_tuple == tuple(range(2, 8)))
+        ))
+        or (columns == 10 and lane_tuple == tuple(range(10)))
+    )
+    return True, mirror
+
+
+def _selected_document(window):
+    if window.workspace is None:
+        return None
+    item = window.tree.currentItem() if hasattr(window, "tree") else None
+    if item is not None:
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if payload and len(payload) >= 2 and int(payload[1]) >= 0:
+            index = int(payload[1])
+            if 0 <= index < len(window.workspace.documents):
+                return window.workspace.documents[index].document
+    current = getattr(window, "_current_document_index", None)
+    index = current() if callable(current) else None
+    if index is None or not 0 <= int(index) < len(window.workspace.documents):
+        return None
+    return window.workspace.documents[int(index)].document
+
+
 def inspector_context_exists(document, context) -> bool:
     """Whether an Inspector scope still exists after a structural edit."""
 
@@ -65,10 +124,7 @@ def inspector_context_exists(document, context) -> bool:
     kind, _document_index, split_id, block_id = context
     if kind in {"document", "header"}:
         return True
-    split = next(
-        (item for item in document.splits if item.stable_id == split_id),
-        None,
-    )
+    split = next((item for item in document.splits if item.stable_id == split_id), None)
     if split is None:
         return False
     if kind == "split":
@@ -83,40 +139,20 @@ def _metadata_signature(entries) -> tuple[tuple[int, str], ...]:
 
 
 def inspector_context_signature(document, context):
-    """Cheap signature of exactly the model data rendered by Inspector.
-
-    Row/note edits are intentionally absent. This prevents the Inspector-state
-    hardening from turning a fast note gesture into a table rebuild on every
-    click while still refreshing timing, metadata, selector and trailer edits.
-    """
+    """Cheap signature of exactly the model data rendered by Inspector."""
 
     if context is None:
         return None
     kind, _document_index, split_id, block_id = context
     if kind in {"document", "header"}:
-        return (
-            kind,
-            _metadata_signature(document.header_metadata),
-            bytes(document.envelope.raw),
-        )
-    split = next(
-        (item for item in document.splits if item.stable_id == split_id),
-        None,
-    )
+        return (kind, _metadata_signature(document.header_metadata), bytes(document.envelope.raw))
+    split = next((item for item in document.splits if item.stable_id == split_id), None)
     if split is None:
         return None
     if kind == "split":
-        return (
-            kind,
-            split.raw_select.hex,
-            split.raw_brain.hex,
-            _metadata_signature(split.metadata),
-        )
+        return (kind, split.raw_select.hex, split.raw_brain.hex, _metadata_signature(split.metadata))
     if kind == "block":
-        block = next(
-            (item for item in split.blocks if item.stable_id == block_id),
-            None,
-        )
+        block = next((item for item in split.blocks if item.stable_id == block_id), None)
         if block is None:
             return None
         return (
@@ -146,8 +182,6 @@ def _add_action_group(menu: QMenu, actions) -> None:
 
 
 def _structure_actions(window, kind: str):
-    """Return canonical QAction groups appropriate to a tree structure target."""
-
     if kind == "split":
         return (
             (
@@ -190,7 +224,6 @@ def _install_tree_context_cleanup(window) -> None:
         if not groups:
             previous(target_window, point)
             return
-
         target_window.tree.setCurrentItem(item)
         refresh = getattr(target_window, "_refresh_edit_actions", None)
         if callable(refresh):
@@ -198,7 +231,6 @@ def _install_tree_context_cleanup(window) -> None:
         structure_refresh = getattr(target_window, "_refresh_structure_actions", None)
         if callable(structure_refresh):
             structure_refresh()
-
         menu = QMenu(target_window.tree)
         for group in groups:
             _add_action_group(menu, group)
@@ -217,31 +249,28 @@ def _install_edit_action_state(window) -> None:
         widget = _active_timeline(self)
         lightmap = bool(widget is not None and widget.snapshot.effective_lightmap)
         has_selection = bool(widget is not None and widget.selection.targets)
-        tool_text = (
-            self.tool_combo.currentText().strip().casefold()
-            if hasattr(self, "tool_combo")
-            else ""
-        )
+        tool_text = self.tool_combo.currentText().strip().casefold() if hasattr(self, "tool_combo") else ""
 
-        # Lightmap supports Toggle/Select and clipboard/delete only. Do not leave
-        # note-only actions clickable merely so they can display an avoidable
-        # "not a chart" error afterwards.
         apply_action = getattr(self, "apply_selection_action", None)
         if apply_action is not None:
             apply_action.setEnabled(
                 has_selection and (not lightmap or tool_text == "toggle") and tool_text != "select"
             )
 
-        for name in (
-            "flip_horizontal_selection_action",
-            "flip_vertical_selection_action",
-            "mirror_selection_action",
-            "replace_selection_action",
-        ):
-            action = getattr(self, name, None)
-            if action is not None and lightmap:
-                action.setEnabled(False)
+        rectangle, mirror = selection_transform_state(widget)
+        horizontal = getattr(self, "flip_horizontal_selection_action", None)
+        vertical = getattr(self, "flip_vertical_selection_action", None)
+        mirror_action = getattr(self, "mirror_selection_action", None)
+        if horizontal is not None:
+            horizontal.setEnabled(rectangle)
+        if vertical is not None:
+            vertical.setEnabled(rectangle)
+        if mirror_action is not None:
+            mirror_action.setEnabled(mirror)
 
+        replace_action = getattr(self, "replace_selection_action", None)
+        if replace_action is not None and lightmap:
+            replace_action.setEnabled(False)
         apply_flags = getattr(self, "apply_flags", None)
         if apply_flags is not None and lightmap:
             apply_flags.setEnabled(False)
@@ -255,9 +284,6 @@ def _install_edit_action_state(window) -> None:
                 and _clipboard_compatible(widget, getattr(self, "note_clipboard", None))
             )
 
-        # These controls are intentionally ignored by Lightmap edits. Disable
-        # them while LM.NX is active so the UI communicates that fact instead of
-        # accepting values that have no effect.
         for name in (
             "tool_value",
             "function_combo",
@@ -272,12 +298,14 @@ def _install_edit_action_state(window) -> None:
 
         split_selection = getattr(self, "phase12_edit_split_selection_action", None)
         if split_selection is not None:
-            selection = self._structure_selection()
-            split_selection.setEnabled(selection is not None)
+            split_selection.setEnabled(self._structure_selection() is not None)
 
         edit_field = getattr(self, "phase11_edit_field_action", None)
         if edit_field is not None:
-            edit_field.setEnabled(widget is not None and not lightmap)
+            selected_document = _selected_document(self)
+            edit_field.setEnabled(
+                selected_document is not None and not selected_document.effective_lightmap
+            )
 
     window._refresh_edit_actions = MethodType(refresh_edit_actions, window)
     window._refresh_edit_actions()
@@ -312,38 +340,16 @@ def _install_inspector_state(window) -> None:
     window._stepnx_inspector_context = None
 
     def inspect(self, kind, document_index, split_id, block_id) -> None:
-        self._stepnx_inspector_context = (
-            str(kind),
-            int(document_index),
-            split_id,
-            block_id,
-        )
+        self._stepnx_inspector_context = (str(kind), int(document_index), split_id, block_id)
         original_inspect(kind, document_index, split_id, block_id)
 
-    def apply_document(
-        self,
-        document_index,
-        widget,
-        document,
-        *,
-        tree_selection=None,
-    ) -> None:
+    def apply_document(self, document_index, widget, document, *, tree_selection=None) -> None:
         context = getattr(self, "_stepnx_inspector_context", None)
         before = None
-        if (
-            context is not None
-            and int(context[1]) == int(document_index)
-            and self.workspace is not None
-        ):
+        if context is not None and int(context[1]) == int(document_index) and self.workspace is not None:
             old_document = self.workspace.documents[int(document_index)].document
             before = inspector_context_signature(old_document, context)
-
-        original_apply(
-            document_index,
-            widget,
-            document,
-            tree_selection=tree_selection,
-        )
+        original_apply(document_index, widget, document, tree_selection=tree_selection)
         if context is None or int(context[1]) != int(document_index):
             return
         current = self.sessions[int(document_index)].current
@@ -352,16 +358,11 @@ def _install_inspector_state(window) -> None:
             self.inspector.clearContents()
             self.inspector.setRowCount(0)
             return
-
         after = inspector_context_signature(current, context)
         if before == after:
             return
-
         selected_side = self.side_tabs.currentWidget()
         kind, doc_index, split_id, block_id = context
-        # Bypass the tracking wrapper: this is a refresh of the same context,
-        # not a new user inspection. Restore the previously visible side pane so
-        # an edit cannot unexpectedly drag the user away from Diagnostics/Routes.
         original_inspect(kind, doc_index, split_id, block_id)
         if selected_side is not self.inspector:
             self.side_tabs.setCurrentWidget(selected_side)
@@ -374,7 +375,6 @@ def install_editor_ux_cleanup(window) -> None:
     if getattr(window, "_stepnx_editor_ux_cleanup_installed", False):
         return
     window._stepnx_editor_ux_cleanup_installed = True
-
     _install_tree_context_cleanup(window)
     _install_edit_action_state(window)
     _install_selection_feedback(window)
