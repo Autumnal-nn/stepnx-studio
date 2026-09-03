@@ -122,13 +122,14 @@ class _EditorZoomWheelFilter(QObject):
     def eventFilter(self, watched, event) -> bool:
         if event.type() != QEvent.Type.Wheel:
             return False
-        # Qt/Windows commonly reserves Alt+wheel for native horizontal scrolling.
-        # StepNX instead owns exact Shift+wheel while the pointer is over the
-        # Timeline viewport. Ctrl+wheel remains the independent vertical-precision
-        # zoom path implemented by TimelineWidget itself.
+        # StepNX owns exact Shift+wheel while the pointer is over the Timeline.
+        # Some Qt/platform combinations translate Shift+vertical-wheel into an
+        # already-horizontal delta before delivery, so accept either axis. Ctrl
+        # remains the independent vertical-precision zoom and Alt is left to Qt.
         if event.modifiers() != Qt.KeyboardModifier.ShiftModifier:
             return False
-        delta = event.angleDelta().y()
+        angle = event.angleDelta()
+        delta = angle.y() or angle.x()
         if delta == 0:
             return False
         window = self.widget.window()
