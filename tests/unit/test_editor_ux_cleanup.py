@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 
 from stepnx.authoring.selection import CellSelection, CellTarget
+from stepnx.codecs.nx20 import parse_bytes
+from stepnx.core.scalars import RawF32
 from stepnx.gui.editor_ux_cleanup import (
     _clipboard_compatible,
     _structure_actions,
+    inspector_context_exists,
+    inspector_context_signature,
     selection_summary,
 )
 from stepnx.gui.selection_lightmap_workflow import GridClipboard
 from stepnx.gui.split_follower_ui import route_mode_label
+from tests.fixture_factory import make_normal_nx20
 
 
 class _Row:
@@ -53,6 +59,10 @@ class EditorUxCleanupTests(unittest.TestCase):
             ),
         )
 
+    @staticmethod
+    def _document():
+        return parse_bytes(make_normal_nx20(), row_storage="rich")
+
     def test_route_labels_are_rendered_from_selector_semantics(self) -> None:
         self.assertEqual(route_mode_label(self._route(0x80)), "random at chart load")
         self.assertEqual(route_mode_label(self._route(0x40)), "random at block start")
@@ -80,7 +90,11 @@ class EditorUxCleanupTests(unittest.TestCase):
     def test_lightmap_selection_summary_uses_light_cell_noun(self) -> None:
         targets = {CellTarget(1, 0), CellTarget(1, 1), CellTarget(1, 2)}
         text = selection_summary(self._widget(targets, lightmap=True))
-        self.assertEqual(text, "3 light cells selected · 1 rows × 3 lanes")
+        self.assertEqual(text, "3 light cells selected · 1 row × 3 lanes")
+
+    def test_single_lightmap_selection_has_nonempty_feedback(self) -> None:
+        text = selection_summary(self._widget({CellTarget(1, 0)}, lightmap=True))
+        self.assertEqual(text, "1 light cell selected")
 
     def test_clipboard_compatibility_rejects_cross_document_kind(self) -> None:
         note_clipboard = GridClipboard("notes", 1, 1, ((0, 0, b"\0\0\0\0"),))
@@ -122,6 +136,44 @@ class EditorUxCleanupTests(unittest.TestCase):
         groups = _structure_actions(SimpleNamespace(**actions), "block")
         flattened = tuple(action for group in groups for action in group)
         self.assertEqual(flattened, tuple(actions.values()))
+
+    def test_inspector_context_detects_existing_and_missing_blocks(self) -> None:
+        document = self._document()
+        split = document.splits[0]
+        block = split.blocks[0]
+        context = ("block", 0, split.stable_id, block.stable_id)
+        self.assertTrue(inspector_context_exists(document, context))
+        missing = ("block", 0, split.stable_id, block.stable_id + 999999)
+        self.assertFalse(inspector_context_exists(document, missing))
+
+    def test_inspector_signature_ignores_row_only_edits(self) -> None:
+        document = self._document()
+        split = document.splits[0]
+        block = split.blocks[0]
+        context = ("block", 0, split.stable_id, block.stable_id)
+        before = inspector_context_signature(document, context)
+        reversed_block = replace(block, rows=tuple(reversed(block.rows)))
+        edited = replace(
+            document,
+            splits=(replace(split, blocks=(reversed_block, *split.blocks[1:])), *document.splits[1:]),
+        )
+        self.assertEqual(inspector_context_signature(edited, context), before)
+
+    def test_inspector_signature_changes_with_visible_timing(self) -> None:
+        document = self._document()
+        split = document.splits[0]
+        block = split.blocks[0]
+        context = ("block", 0, split.stable_id, block.stable_id)
+        before = inspector_context_signature(document, context)
+        changed_block = replace(
+            block,
+            bpm=RawF32.from_value(float(block.bpm.value) + 1.0),
+        )
+        edited = replace(
+            document,
+            splits=(replace(split, blocks=(changed_block, *split.blocks[1:])), *document.splits[1:]),
+        )
+        self.assertNotEqual(inspector_context_signature(edited, context), before)
 
 
 if __name__ == "__main__":
