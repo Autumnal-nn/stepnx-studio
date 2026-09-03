@@ -87,21 +87,29 @@ flags, padding, note cells, floating-point payloads, or its trailer.
   MissCombo maxima, score, grade, gauge, clear state, and item counters;
 - route provenance, conservative timing warnings, and refusal of conditions
   whose runtime state cannot be proven;
+- keyboard-first Timeline and Workspace workflows with shortcut scoping, F1
+  discoverability, and native Ctrl+Tab chart switching;
+- three-channel `LM.NX` Toggle/Select authoring with sparse Cut/Copy/Paste/Delete;
+- `View > Editor zoom` presets from 100% through 300% in 25% increments, with
+  Shift+wheel stepping the field scale and Ctrl+wheel retaining vertical timing
+  precision zoom;
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
   fixtures, and external corpus gates.
 
 ## 0.9.5 hardening scope
 
 The 0.9.5 cycle is a polish and hardening pass rather than a format-expansion
-release. Its planned work is:
+release. Its work is:
 
-1. documentation truth pass;
-2. performance regression coverage for bulk transforms;
-3. save/recovery fault-injection tests;
-4. keyboard workflow audit;
-5. high-DPI/scaling validation at 100%, 125%, 150%, and 200%;
-6. editor UX cleanup, including menus, selection, Inspector state, disabled
-   actions, and error messages.
+1. **complete:** documentation truth pass;
+2. **complete:** performance regression coverage for bulk transforms;
+3. **complete:** save/recovery fault-injection tests;
+4. **complete:** keyboard workflow audit and Lightmap authoring hardening;
+5. **complete:** editor-field scaling validation from 100% through 300% in 25%
+   increments;
+6. **active:** editor UX cleanup, including menus, selection, Inspector state,
+   disabled actions, destructive confirmations, shortcut truth, and error
+   messages.
 
 Open reverse-engineering questions are tracked separately from implementation
 work. Raw-preserved fields with no proven semantics are not treated as missing
@@ -176,8 +184,10 @@ one undo step. `Bank / ID` supplies the noteskin bank, item ID, or Division ID.
 `Save All` performs validation, shows affected files and a structural diff,
 then uses the existing atomic multi-file save plan. Split/Block details live in
 the right-side gutter; double-click that gutter to cycle a Split's active Block.
-Hold Ctrl while using the mouse wheel to zoom. Without Ctrl, each mouse-wheel
-notch scrolls half a musical beat in the split under the pointer.
+Hold **Ctrl** while using the mouse wheel for vertical timing precision zoom.
+Hold **Shift** while using the mouse wheel to step `View > Editor zoom` through
+100%..300% in 25% increments. Plain wheel scrolling keeps its ordinary Timeline
+behavior.
 Use **Edit → Structure → Edit Block timing** for the nine native NX20 Block
 scalars. The toolbar's **All splits** option applies a Start Time change as one
 relative delta across every Block, while **Edit → Editable Inspector timing
@@ -255,7 +265,7 @@ and [the NX2/NXA conversion analysis](docs/NX2_NXA_CONVERSION_ANALYSIS.md).
 
 The authoring viewport and gameplay preview are separate projections of the same
 canonical document. Only the StepNX core may open, mutate, or save NX/NFO.
-Open **Preview → Open gameplay preview** to choose the `.NX` filename, speed,
+Open **View → Open gameplay preview…** to choose the `.NX` filename, speed,
 and startup modifiers. Random route state is generated internally and is not
 exposed as a game option. During the run, `1` through `9` select 1x through 9x,
 `F6` toggles the debug overlay, `F8` toggles autoplay, `F9` toggles the guide,
