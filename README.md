@@ -3,7 +3,7 @@
 StepNX Studio is a lossless NX20 chart editor for Pump It Up. It is created and
 maintained by Autumnal ([`Autumnal-nn`](https://github.com/Autumnal-nn)).
 
-Status: **0.9.5 pre-alpha / hardening**. Practical and advanced NX20 authoring,
+Status: **0.9.5 pre-alpha release**. Practical and advanced NX20 authoring,
 legacy import, folder workflows, and the external native gameplay preview are
 implemented. The project's central contract remains unchanged: an unedited NX20
 or NFO document can be rebuilt byte for byte without normalizing metadata,
@@ -98,8 +98,8 @@ flags, padding, note cells, floating-point payloads, or its trailer.
 
 ## 0.9.5 hardening scope
 
-The 0.9.5 cycle is a polish and hardening pass rather than a format-expansion
-release. Its work is:
+The 0.9.5 cycle was a polish and hardening pass rather than a format-expansion
+release. Its work is complete:
 
 1. **complete:** documentation truth pass;
 2. **complete:** performance regression coverage for bulk transforms;
@@ -107,7 +107,7 @@ release. Its work is:
 4. **complete:** keyboard workflow audit and Lightmap authoring hardening;
 5. **complete:** editor-field scaling validation from 100% through 300% in 25%
    increments;
-6. **active:** editor UX cleanup, including menus, selection, Inspector state,
+6. **complete:** editor UX cleanup, including menus, selection, Inspector state,
    disabled actions, destructive confirmations, shortcut truth, and error
    messages.
 
@@ -115,8 +115,8 @@ Open reverse-engineering questions are tracked separately from implementation
 work. Raw-preserved fields with no proven semantics are not treated as missing
 features.
 
-This pre-alpha tree is suitable for focused authoring tests, not as a stable
-release or a substitute for runtime validation in the target game.
+This pre-alpha release is suitable for focused authoring tests, not as a
+substitute for runtime validation in the target game.
 
 ## Running from a checkout
 
