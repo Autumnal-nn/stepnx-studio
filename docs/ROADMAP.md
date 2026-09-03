@@ -181,7 +181,7 @@ product requirement when the corresponding official assets are unavailable.
 ## 0.9.5 hardening cycle
 
 The current release scope is deliberately narrower than the preceding feature
-cycles.
+cycles. All six hardening items are complete.
 
 ### 1. Documentation truth pass — complete
 
@@ -282,7 +282,7 @@ Item-5 checkpoint:
 
 See `HIGH_DPI_SCALING_GATE.md`.
 
-### 6. Editor UX cleanup — automated gate green, manual smoke pending
+### 6. Editor UX cleanup — complete
 
 The consistency pass covers:
 
@@ -310,16 +310,19 @@ Final automated checkpoint on functional/test head
 - Windows: **632 tests in 7.190 s, OK**, with one expected skip;
 - Linux/glibc 2.31: **632 tests in 5.253 s, OK**.
 
-The remaining closure work is only the focused manual Windows smoke in
-`EDITOR_UX_CLEANUP_AUDIT.md`.
+The focused manual Windows smoke also passed, including the Shift+wheel case on a
+Timeline with horizontal scrolling available and the context/action/Inspector/
+Routes/Help consistency checks in `EDITOR_UX_CLEANUP_AUDIT.md`.
 
 ## Remaining implementation for 0.9.5
 
-No new NX20 format family, legacy importer, trailer encoding, gameplay-debug
-subsystem, selection-performance subsystem, save/recovery subsystem, keyboard
-workflow or scaling subsystem is currently required to complete 0.9.5. The only
-open hardening gate is item-6 manual UX validation and any bug fallout it exposes,
-followed by release packaging/document consistency.
+The six-item hardening scope is complete. No new NX20 format family, legacy
+importer, trailer encoding, gameplay-debug subsystem, selection-performance
+subsystem, save/recovery subsystem, keyboard workflow, scaling subsystem or UX
+cleanup item remains open for 0.9.5.
+
+The remaining release work is integration, packaging, patch-note/document
+consistency and the final packaged smoke before tagging.
 
 A later 1.0 hardening phase should continue:
 
@@ -399,9 +402,9 @@ blockers.
 
 ### Release gates
 
-- strict Windows test gate with a **632-test minimum discovery floor**;
-- Linux full-suite/package gate on the glibc 2.31 baseline;
-- focused manual Windows UX smoke before item 6 closure;
+- strict Windows test gate with a **632-test minimum discovery floor**: passed;
+- Linux full-suite/package gate on the glibc 2.31 baseline: passed;
+- focused manual Windows UX smoke for item 6: passed;
 - packaged smoke tests for authoring, audio, preview, keyboard, scaling and
   save/recovery workflows;
-- documentation version/state consistency check before tagging.
+- documentation/version/patch-note consistency check before tagging.
