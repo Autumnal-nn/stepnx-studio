@@ -21,6 +21,11 @@
  * Captures the event order around libmad startup plus the exact byte buffers
  * handed to ALSA by snd_pcm_writei(). This is intended to distinguish actual
  * NXA output from a model inferred only from MP3 recovery errors.
+ *
+ * For mad_synth_frame(), the probe also reads the public libmad ABI layout of
+ * struct mad_synth after the real call and records pcm.length, samplerate,
+ * channels, first non-zero sample and peak fixed-point magnitude. This is
+ * observation only; no libmad state is modified.
  */
 
 typedef void mad_stream_t;
@@ -42,6 +47,24 @@ typedef int (*snd_pcm_drop_fn)(snd_pcm_t *);
 typedef snd_pcm_sframes_t (*snd_pcm_writei_fn)(snd_pcm_t *, const void *, snd_pcm_uframes_t);
 typedef int (*snd_pcm_delay_fn)(snd_pcm_t *, snd_pcm_sframes_t *);
 typedef long (*snd_pcm_frames_to_bytes_fn)(snd_pcm_t *, snd_pcm_sframes_t);
+
+/*
+ * libmad ABI subset used only for read-only observation after mad_synth_frame.
+ * On the 32-bit NXA target mad_fixed_t is a 32-bit signed long, represented
+ * here as int32_t so the layout is independent of the host compiler's long.
+ */
+struct probe_mad_pcm {
+    unsigned int samplerate;
+    unsigned short channels;
+    unsigned short length;
+    int32_t samples[2][1152];
+};
+
+struct probe_mad_synth {
+    int32_t filter[2][2][2][16][8];
+    unsigned int phase;
+    struct probe_mad_pcm pcm;
+};
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static int log_fd = -1;
@@ -83,7 +106,7 @@ static void ensure_log(void) {
     log_fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0666);
     if (log_fd >= 0) {
         const char *h = "mono_ns\ttid\tgeneration\tevent\tseq\tobject\targ0\targ1\tdetail\n";
-        write(log_fd, h, strlen(h));
+        (void)write(log_fd, h, strlen(h));
     }
     const char *mb = getenv("NXA_AUDIO_PROBE_MAX_MB");
     if (mb && *mb) {
@@ -102,7 +125,7 @@ static void event(const char *name, unsigned long seq, const void *object,
             "%llu\t%ld\t%lu\t%s\t%lu\t%p\t%lld\t%lld\t%s\n",
             (unsigned long long)mono_ns(), tid_now(), generation, name, seq,
             object, arg0, arg1, detail ? detail : "");
-        if (n > 0) write(log_fd, line, (size_t)n);
+        if (n > 0) (void)write(log_fd, line, (size_t)n);
     }
     pthread_mutex_unlock(&lock);
 }
@@ -196,6 +219,32 @@ void mad_synth_frame(mad_synth_t *synth, const mad_frame_t *frame) {
     pthread_mutex_lock(&lock); seq = ++synth_seq; pthread_mutex_unlock(&lock);
     event("mad_synth_enter", seq, synth, 0, 0, "");
     if (real_fn) real_fn(synth, frame);
+
+    const struct probe_mad_synth *observed = (const struct probe_mad_synth *)synth;
+    unsigned int raw_length = observed->pcm.length;
+    unsigned int scan_length = raw_length <= 1152U ? raw_length : 1152U;
+    unsigned int channels = observed->pcm.channels;
+    unsigned int scan_channels = channels <= 2U ? channels : 2U;
+    long first_nonzero = -1;
+    int64_t peak = 0;
+
+    for (unsigned int i = 0; i < scan_length; ++i) {
+        for (unsigned int ch = 0; ch < scan_channels; ++ch) {
+            int64_t value = observed->pcm.samples[ch][i];
+            int64_t magnitude = value < 0 ? -value : value;
+            if (value != 0 && first_nonzero < 0) first_nonzero = (long)i;
+            if (magnitude > peak) peak = magnitude;
+        }
+    }
+
+    char detail[160];
+    snprintf(detail, sizeof(detail),
+             "channels=%u first_nonzero=%ld peak=%lld",
+             channels, first_nonzero, (long long)peak);
+    event("mad_synth_pcm", seq, synth,
+          (long long)raw_length,
+          (long long)observed->pcm.samplerate,
+          detail);
     event("mad_synth_leave", seq, synth, 0, 0, "");
 }
 
