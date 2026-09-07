@@ -12,6 +12,14 @@ from stepnx.codecs.nx20 import load, parse_bytes, save_atomic, serialize
 from stepnx.core.diff import diff_documents
 from stepnx.core.errors import StepNXError, UnsupportedFormatError
 from stepnx.core.validation import validate
+from stepnx.exporters.ssc import (
+    SSC_DIFFICULTIES,
+    SscSongInfo,
+    difficulty_for_name,
+    export_chart,
+    render_extension,
+    render_simfile,
+)
 from stepnx.importers.nx10 import load as load_nx10
 from stepnx.importers.legacy import LegacyContainer, load_legacy, project_nx20
 from stepnx.workspace import (
@@ -706,7 +714,113 @@ def build_parser() -> argparse.ArgumentParser:
     mirror_parser.add_argument("--max-changes", type=int, default=100)
     mirror_parser.add_argument("--json", action="store_true")
     mirror_parser.set_defaults(handler=_mirror_compare)
+
+    export_parser = subparsers.add_parser(
+        "export-ssc",
+        help="project NX charts onto the SSC dialect read by the XSanity engine",
+    )
+    export_parser.add_argument("path", type=Path)
+    export_parser.add_argument("--output", "-o", type=Path)
+    export_parser.add_argument("--extension", action="store_true")
+    export_parser.add_argument("--song")
+    export_parser.add_argument("--title")
+    export_parser.add_argument("--artist")
+    export_parser.add_argument("--music")
+    export_parser.add_argument("--description")
+    export_parser.add_argument("--difficulty", choices=SSC_DIFFICULTIES)
+    export_parser.add_argument("--meter", type=int)
+    export_parser.add_argument("--profile", default="nxa-native")
+    export_parser.add_argument("--force", action="store_true")
+    export_parser.add_argument("--json", action="store_true")
+    export_parser.set_defaults(handler=_export_ssc)
+
     return parser
+
+
+def _export_ssc(args: argparse.Namespace) -> int:
+    sources = sorted(args.path.glob("*.[Nn][Xx]")) if args.path.is_dir() else [args.path]
+    if not sources:
+        raise StepNXError(f"no NX document found in {args.path}")
+
+    if args.description and len(sources) > 1:
+        raise StepNXError("--description names a single chart; pass one NX file")
+
+    exported: list[tuple[Path, object]] = []
+    diagnostics = []
+    for source in sources:
+        document = load(source, profile=args.profile)
+        if document.effective_lightmap:
+            continue
+        report = export_chart(
+            document,
+            description=args.description or source.name,
+            difficulty=args.difficulty or difficulty_for_name(source.name),
+            meter=args.meter,
+        )
+        exported.append((source, report.chart))
+        diagnostics.extend(
+            {
+                "source": source.name,
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "occurrences": diagnostic.occurrences,
+            }
+            for diagnostic in report.diagnostics
+        )
+
+    if not exported:
+        raise StepNXError("every document in the selection is a Lightmap")
+
+    if args.extension:
+        if args.song is None:
+            raise StepNXError("--song is required when writing .ssc.ext companions")
+        written = []
+        for source, chart in exported:
+            target = (args.output or source.parent) / f"{source.stem}.ssc.ext"
+            _write_text(target, render_extension(chart, args.song), args.force)
+            written.append(str(target))
+    else:
+        song = SscSongInfo(
+            title=args.title or args.path.stem,
+            artist=args.artist or "",
+            music=args.music or "",
+        )
+        target = args.output or args.path.with_suffix(".ssc")
+        if target.is_dir():
+            target = target / f"{args.path.stem}.ssc"
+        _write_text(
+            target, render_simfile([chart for _, chart in exported], song), args.force
+        )
+        written = [str(target)]
+
+    result = {
+        "sources": [str(source) for source, _ in exported],
+        "written": written,
+        "charts": len(exported),
+        "diagnostics": diagnostics,
+    }
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        status = "CLEAN" if not diagnostics else "ATTENTION"
+        print(f"{status}: exported {len(exported)} chart(s) to {', '.join(written)}")
+        for diagnostic in diagnostics:
+            repeats = diagnostic["occurrences"]
+            suffix = f" (x{repeats})" if repeats > 1 else ""
+            print(
+                f"  {diagnostic['source']}: {diagnostic['code']}: "
+                f"{diagnostic['message']}{suffix}"
+            )
+    return 0
+
+
+def _write_text(target: Path, text: str, force: bool) -> None:
+    if target.exists() and not force:
+        raise StepNXError(f"{target} already exists; pass --force to overwrite")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".stepnx-tmp")
+    temporary.write_bytes(text.encode("utf-8"))
+    temporary.replace(target)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
