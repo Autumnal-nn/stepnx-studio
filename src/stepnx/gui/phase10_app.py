@@ -32,7 +32,7 @@ def main(argv=None) -> int:
     from stepnx.gui.editor_ux_cleanup import install_editor_ux_cleanup
     from stepnx.gui.keyboard_workflow import install_keyboard_workflow
     from stepnx.gui.lightmap_visual_polish import install_lightmap_visual_polish
-    from stepnx.gui.nxa_startup_experiment import install_nxa_startup_experiment
+    from stepnx.gui.nxa_audio_alignment import install_nxa_audio_alignment
     from stepnx.gui.phase10_install import install_phase10
     from stepnx.gui.phase10_timeline import Phase10TimelineWidget
     from stepnx.gui.phase10_timing import Phase10BlockTimingDialog
@@ -96,7 +96,7 @@ def main(argv=None) -> int:
             install_phase11_fast_note_index(self)
             install_phase11_render_performance(self)
             install_phase11_ui_polish(self)
-            install_nxa_startup_experiment(self)
+            install_nxa_audio_alignment(self)
             install_keyboard_workflow(self)
             # Keyboard workflow installs the three-lane Lightmap renderer. The
             # final polish deliberately wraps it last so LM selection uses the
