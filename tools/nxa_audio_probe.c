@@ -18,9 +18,15 @@
  * No libmad/ALSA development headers are needed. Types stay opaque and every
  * intercepted call is forwarded unchanged via RTLD_NEXT.
  *
- * Captures the event order around libmad startup plus the exact byte buffers
- * handed to ALSA by snd_pcm_writei(). This is intended to distinguish actual
- * NXA output from a model inferred only from MP3 recovery errors.
+ * The ALSA capture is continuous for each snd_pcm_t handle lifetime. It is
+ * deliberately NOT split at mad_stream_init(): decoder stream boundaries and
+ * the audio-output thread are asynchronous, and splitting there can assign
+ * already-queued PCM to the next libmad generation. Each stream init records
+ * the current accepted-PCM cursor instead.
+ *
+ * snd_pcm_writei() buffers are copied only after the real call returns, and
+ * only the frames ALSA actually accepted are stored. This avoids recording
+ * partial/error writes as if they had reached the device.
  *
  * For mad_synth_frame(), the probe also reads the public libmad ABI layout of
  * struct mad_synth after the real call and records pcm.length, samplerate,
@@ -72,6 +78,7 @@ static unsigned long generation = 0;
 static unsigned long decode_seq = 0;
 static unsigned long synth_seq = 0;
 static unsigned long write_seq = 0;
+static unsigned long pcm_open_seq = 0;
 static uint64_t capture_bytes = 0;
 static uint64_t capture_limit = 64ULL * 1024ULL * 1024ULL;
 
@@ -79,9 +86,18 @@ static uint64_t capture_limit = 64ULL * 1024ULL * 1024ULL;
 struct dump_slot {
     snd_pcm_t *handle;
     int fd;
-    unsigned long generation;
+    unsigned long open_seq;
+    uint64_t frames_accepted;
+    uint64_t bytes_captured;
 };
 static struct dump_slot dumps[MAX_HANDLES];
+
+struct cursor_snapshot {
+    snd_pcm_t *handle;
+    unsigned long open_seq;
+    uint64_t frames_accepted;
+    uint64_t bytes_captured;
+};
 
 static long tid_now(void) {
     return (long)syscall(SYS_gettid);
@@ -101,10 +117,12 @@ static const char *out_dir(void) {
 static void ensure_log(void) {
     if (log_fd >= 0) return;
     mkdir(out_dir(), 0777);
+    (void)chmod(out_dir(), 0777);
     char path[1024];
     snprintf(path, sizeof(path), "%s/events.tsv", out_dir());
     log_fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0666);
     if (log_fd >= 0) {
+        (void)fchmod(log_fd, 0644);
         const char *h = "mono_ns\ttid\tgeneration\tevent\tseq\tobject\targ0\targ1\tdetail\n";
         (void)write(log_fd, h, strlen(h));
     }
@@ -130,33 +148,50 @@ static void event(const char *name, unsigned long seq, const void *object,
     pthread_mutex_unlock(&lock);
 }
 
-static void close_dumps(void) {
-    for (int i = 0; i < MAX_HANDLES; ++i) {
-        if (dumps[i].fd >= 0) close(dumps[i].fd);
-        dumps[i].handle = NULL;
-        dumps[i].fd = -1;
-        dumps[i].generation = 0;
-    }
-    capture_bytes = 0;
+static void close_slot_locked(struct dump_slot *slot) {
+    if (!slot) return;
+    if (slot->fd >= 0) close(slot->fd);
+    slot->handle = NULL;
+    slot->fd = -1;
+    slot->open_seq = 0;
+    slot->frames_accepted = 0;
+    slot->bytes_captured = 0;
 }
 
-static struct dump_slot *dump_for(snd_pcm_t *handle) {
-    struct dump_slot *free_slot = NULL;
+static void close_dumps_locked(void) {
+    for (int i = 0; i < MAX_HANDLES; ++i) close_slot_locked(&dumps[i]);
+}
+
+static struct dump_slot *find_slot_locked(snd_pcm_t *handle) {
     for (int i = 0; i < MAX_HANDLES; ++i) {
-        if (dumps[i].handle == handle && dumps[i].generation == generation)
-            return &dumps[i];
-        if (!free_slot && dumps[i].handle == NULL) free_slot = &dumps[i];
+        if (dumps[i].handle == handle) return &dumps[i];
     }
-    if (!free_slot) return NULL;
-    char path[1024];
-    snprintf(path, sizeof(path), "%s/pcm-gen%03lu-handle-%p.raw",
-             out_dir(), generation, (void *)handle);
-    int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, 0666);
-    if (fd < 0) return NULL;
-    free_slot->handle = handle;
-    free_slot->fd = fd;
-    free_slot->generation = generation;
-    return free_slot;
+    return NULL;
+}
+
+static struct dump_slot *register_slot_locked(snd_pcm_t *handle) {
+    struct dump_slot *slot = find_slot_locked(handle);
+    if (slot) return slot;
+
+    for (int i = 0; i < MAX_HANDLES; ++i) {
+        if (dumps[i].handle != NULL) continue;
+
+        char path[1024];
+        unsigned long open_seq = ++pcm_open_seq;
+        snprintf(path, sizeof(path), "%s/pcm-open%03lu-handle-%p.raw",
+                 out_dir(), open_seq, (void *)handle);
+        int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+        if (fd < 0) return NULL;
+        (void)fchmod(fd, 0644);
+
+        dumps[i].handle = handle;
+        dumps[i].fd = fd;
+        dumps[i].open_seq = open_seq;
+        dumps[i].frames_accepted = 0;
+        dumps[i].bytes_captured = 0;
+        return &dumps[i];
+    }
+    return NULL;
 }
 
 __attribute__((constructor))
@@ -168,7 +203,7 @@ static void init_probe(void) {
 __attribute__((destructor))
 static void finish_probe(void) {
     pthread_mutex_lock(&lock);
-    close_dumps();
+    close_dumps_locked();
     if (log_fd >= 0) close(log_fd);
     log_fd = -1;
     pthread_mutex_unlock(&lock);
@@ -178,12 +213,36 @@ void mad_stream_init(mad_stream_t *stream) {
     static mad_stream_init_fn real_fn;
     if (!real_fn) real_fn = (mad_stream_init_fn)dlsym(RTLD_NEXT, "mad_stream_init");
     if (real_fn) real_fn(stream);
+
+    struct cursor_snapshot snapshots[MAX_HANDLES];
+    int snapshot_count = 0;
+
     pthread_mutex_lock(&lock);
     ++generation;
-    decode_seq = synth_seq = write_seq = 0;
-    close_dumps();
+    decode_seq = 0;
+    synth_seq = 0;
+    write_seq = 0;
+    for (int i = 0; i < MAX_HANDLES; ++i) {
+        if (!dumps[i].handle) continue;
+        snapshots[snapshot_count].handle = dumps[i].handle;
+        snapshots[snapshot_count].open_seq = dumps[i].open_seq;
+        snapshots[snapshot_count].frames_accepted = dumps[i].frames_accepted;
+        snapshots[snapshot_count].bytes_captured = dumps[i].bytes_captured;
+        ++snapshot_count;
+    }
     pthread_mutex_unlock(&lock);
+
     event("mad_stream_init", 0, stream, 0, 0, "new stream");
+    for (int i = 0; i < snapshot_count; ++i) {
+        char detail[96];
+        snprintf(detail, sizeof(detail), "open_seq=%lu bytes_captured=%llu",
+                 snapshots[i].open_seq,
+                 (unsigned long long)snapshots[i].bytes_captured);
+        event("pcm_cursor_at_stream_init", 0, snapshots[i].handle,
+              (long long)snapshots[i].frames_accepted,
+              (long long)snapshots[i].open_seq,
+              detail);
+    }
 }
 
 void mad_stream_buffer(mad_stream_t *stream, const unsigned char *buffer,
@@ -201,7 +260,10 @@ int mad_frame_decode(mad_frame_t *frame, mad_stream_t *stream) {
     if (!real_fn) real_fn = (mad_frame_decode_fn)dlsym(RTLD_NEXT, "mad_frame_decode");
     if (!errorstr_fn) errorstr_fn = (mad_stream_errorstr_fn)dlsym(RTLD_NEXT, "mad_stream_errorstr");
     unsigned long seq;
-    pthread_mutex_lock(&lock); seq = ++decode_seq; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock);
+    seq = ++decode_seq;
+    pthread_mutex_unlock(&lock);
+
     int rc = real_fn ? real_fn(frame, stream) : -1;
     const char *detail = "";
     if (rc != 0 && errorstr_fn) {
@@ -216,7 +278,10 @@ void mad_synth_frame(mad_synth_t *synth, const mad_frame_t *frame) {
     static mad_synth_frame_fn real_fn;
     if (!real_fn) real_fn = (mad_synth_frame_fn)dlsym(RTLD_NEXT, "mad_synth_frame");
     unsigned long seq;
-    pthread_mutex_lock(&lock); seq = ++synth_seq; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock);
+    seq = ++synth_seq;
+    pthread_mutex_unlock(&lock);
+
     event("mad_synth_enter", seq, synth, 0, 0, "");
     if (real_fn) real_fn(synth, frame);
 
@@ -252,8 +317,19 @@ int snd_pcm_open(snd_pcm_t **pcm, const char *name, int stream, int mode) {
     static snd_pcm_open_fn real_fn;
     if (!real_fn) real_fn = (snd_pcm_open_fn)dlsym(RTLD_NEXT, "snd_pcm_open");
     int rc = real_fn ? real_fn(pcm, name, stream, mode) : -1;
-    event("snd_pcm_open", 0, (rc == 0 && pcm) ? *pcm : NULL, rc, stream,
-          name ? name : "");
+
+    snd_pcm_t *handle = (rc == 0 && pcm) ? *pcm : NULL;
+    unsigned long open_seq = 0;
+    if (handle) {
+        pthread_mutex_lock(&lock);
+        struct dump_slot *slot = register_slot_locked(handle);
+        if (slot) open_seq = slot->open_seq;
+        pthread_mutex_unlock(&lock);
+    }
+
+    char detail[256];
+    snprintf(detail, sizeof(detail), "%s open_seq=%lu", name ? name : "", open_seq);
+    event("snd_pcm_open", 0, handle, rc, stream, detail);
     return rc;
 }
 
@@ -279,6 +355,11 @@ int snd_pcm_close(snd_pcm_t *pcm) {
     event("snd_pcm_close_enter", 0, pcm, 0, 0, "");
     int rc = real_fn ? real_fn(pcm) : -1;
     event("snd_pcm_close_leave", 0, pcm, rc, 0, "");
+
+    pthread_mutex_lock(&lock);
+    struct dump_slot *slot = find_slot_locked(pcm);
+    if (slot) close_slot_locked(slot);
+    pthread_mutex_unlock(&lock);
     return rc;
 }
 
@@ -288,25 +369,60 @@ snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *pcm, const void *buffer,
     static snd_pcm_frames_to_bytes_fn bytes_fn;
     if (!real_fn) real_fn = (snd_pcm_writei_fn)dlsym(RTLD_NEXT, "snd_pcm_writei");
     if (!bytes_fn) bytes_fn = (snd_pcm_frames_to_bytes_fn)dlsym(RTLD_NEXT, "snd_pcm_frames_to_bytes");
-    unsigned long seq;
-    long byte_count = bytes_fn ? bytes_fn(pcm, (snd_pcm_sframes_t)frames) : -1;
 
+    unsigned long seq;
     pthread_mutex_lock(&lock);
     seq = ++write_seq;
-    if (buffer && byte_count > 0 && capture_bytes < capture_limit) {
-        uint64_t remaining = capture_limit - capture_bytes;
-        size_t count = (uint64_t)byte_count < remaining ? (size_t)byte_count : (size_t)remaining;
-        struct dump_slot *slot = dump_for(pcm);
-        if (slot && slot->fd >= 0 && count) {
-            ssize_t written = write(slot->fd, buffer, count);
-            if (written > 0) capture_bytes += (uint64_t)written;
-        }
-    }
     pthread_mutex_unlock(&lock);
 
-    event("snd_pcm_writei_enter", seq, pcm, (long long)frames, byte_count, "");
+    long requested_bytes = bytes_fn ? bytes_fn(pcm, (snd_pcm_sframes_t)frames) : -1;
+    event("snd_pcm_writei_enter", seq, pcm, (long long)frames, requested_bytes, "");
+
     snd_pcm_sframes_t rc = real_fn ? real_fn(pcm, buffer, frames) : -1;
-    event("snd_pcm_writei_leave", seq, pcm, (long long)rc, (long long)frames, "");
+
+    uint64_t pcm_start = 0;
+    uint64_t pcm_end = 0;
+    long accepted_bytes = -1;
+    ssize_t captured_now = 0;
+    unsigned long open_seq = 0;
+
+    if (rc > 0) {
+        accepted_bytes = bytes_fn ? bytes_fn(pcm, rc) : -1;
+
+        pthread_mutex_lock(&lock);
+        struct dump_slot *slot = find_slot_locked(pcm);
+        if (!slot) slot = register_slot_locked(pcm);
+        if (slot) {
+            open_seq = slot->open_seq;
+            pcm_start = slot->frames_accepted;
+            slot->frames_accepted += (uint64_t)rc;
+            pcm_end = slot->frames_accepted;
+
+            if (buffer && accepted_bytes > 0 && capture_bytes < capture_limit) {
+                uint64_t remaining = capture_limit - capture_bytes;
+                size_t count = (uint64_t)accepted_bytes < remaining
+                    ? (size_t)accepted_bytes : (size_t)remaining;
+                if (slot->fd >= 0 && count) {
+                    captured_now = write(slot->fd, buffer, count);
+                    if (captured_now > 0) {
+                        slot->bytes_captured += (uint64_t)captured_now;
+                        capture_bytes += (uint64_t)captured_now;
+                    }
+                }
+            }
+        }
+        pthread_mutex_unlock(&lock);
+    }
+
+    char detail[192];
+    snprintf(detail, sizeof(detail),
+             "open_seq=%lu pcm_start=%llu pcm_end=%llu accepted_bytes=%ld captured_bytes=%ld",
+             open_seq,
+             (unsigned long long)pcm_start,
+             (unsigned long long)pcm_end,
+             accepted_bytes,
+             (long)captured_now);
+    event("snd_pcm_writei_leave", seq, pcm, (long long)rc, (long long)frames, detail);
     return rc;
 }
 
