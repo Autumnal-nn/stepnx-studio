@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import unittest
 
+from stepnx.authoring.mp3_gapless import Mp3GaplessAnalysis
 from stepnx.authoring.nxa_startup import NxaStartupAnalysis
 from stepnx.gui.nxa_audio_alignment import effective_nxa_audio_offset_ms
 
@@ -15,10 +16,35 @@ class NxaAudioAlignmentTests(unittest.TestCase):
             -32.5,
         )
 
+    def test_ffmpeg_lame_trim_is_restored_as_virtual_negative_offset(self) -> None:
+        analysis = NxaStartupAnalysis(0, 0, 0, 0, 0, 48000, ())
+        gapless = Mp3GaplessAnalysis(
+            encoder="LAME3.96",
+            encoder_delay_samples=576,
+            encoder_padding_samples=1000,
+            ffmpeg_start_skip_samples=1105,
+            sample_rate=48000,
+        )
+        self.assertAlmostEqual(
+            effective_nxa_audio_offset_ms(
+                -33.0,
+                analysis,
+                gapless,
+                nxa_profile=True,
+            ),
+            -56.02083333333333,
+        )
+
     def test_other_profiles_keep_manual_offset(self) -> None:
         analysis = NxaStartupAnalysis(0, 0, 0, 0, 6912, 48000, ())
+        gapless = Mp3GaplessAnalysis("LAME", 576, 0, 1105, 48000)
         self.assertEqual(
-            effective_nxa_audio_offset_ms(5.0, analysis, nxa_profile=False),
+            effective_nxa_audio_offset_ms(
+                5.0,
+                analysis,
+                gapless,
+                nxa_profile=False,
+            ),
             5.0,
         )
 
