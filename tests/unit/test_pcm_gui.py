@@ -30,18 +30,24 @@ from tests.unit.test_pcm import FIXTURE
 class _Sink:
     def __init__(self):
         self.processed = 0
+        self.start_error = QAudio.Error.NoError
+        self.running = False
+        self.starts = 0
 
     def processedUSecs(self):
         return self.processed
 
     def start(self, buffer):
         self.buffer = buffer
+        self.running = True
+        self.starts += 1
 
     def reset(self):
         self.processed = 0
+        self.running = False
 
     def error(self):
-        return QAudio.Error.NoError
+        return self.start_error
 
 
 @unittest.skipIf(QApplication is None, QT_ERROR)
@@ -50,6 +56,85 @@ class PcmGuiTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
         cls.pcm = decode_mp3_pcm(FIXTURE.read_bytes())
+
+    def test_startup_underrun_keeps_transport_clock_and_pause_connected(self):
+        transport = AudioTransport()
+        transport.nxa_timing_enabled = True
+        states, positions, errors = [], [], []
+        transport.playbackChanged.connect(states.append)
+        transport.positionChanged.connect(positions.append)
+        transport.errorOccurred.connect(errors.append)
+        try:
+            self.assertTrue(transport.load(FIXTURE))
+            playback = transport._pcm_playback
+            sink = _Sink()
+            sink.start_error = QAudio.Error.UnderrunError
+            playback._sink = sink
+            transport.toggle()
+            self.assertTrue(sink.running)
+            self.assertTrue(playback.playing)
+            self.assertTrue(playback._timer.isActive())
+            self.assertTrue(states[-1])
+            sink.processed = 100_000
+            playback._poll()
+            self.assertEqual(positions[-1], 100)
+            transport.toggle()
+            self.assertFalse(sink.running)
+            self.assertFalse(playback.playing)
+            self.assertFalse(states[-1])
+            self.assertEqual(sink.starts, 1)
+            self.assertEqual(playback.position_frames, 4800)
+            self.assertFalse(errors)
+        finally:
+            transport.cleanup_aud_staging()
+
+    def test_failed_start_resets_output_instead_of_leaving_audio_running(self):
+        for error in (QAudio.Error.OpenError, QAudio.Error.IOError, QAudio.Error.FatalError):
+            with self.subTest(error=error):
+                playback = PcmPlayback(self.pcm)
+                sink = _Sink()
+                sink.start_error = error
+                playback._sink = sink
+                states, errors = [], []
+                playback.playbackChanged.connect(states.append)
+                playback.errorOccurred.connect(errors.append)
+                try:
+                    playback.play()
+                    self.assertFalse(sink.running)
+                    self.assertFalse(playback.playing)
+                    self.assertFalse(playback._timer.isActive())
+                    self.assertEqual(states, [False])
+                    self.assertEqual(len(errors), 1)
+                finally:
+                    playback.close()
+
+    def test_synchronous_start_failure_does_not_publish_playing_after_stop(self):
+        playback = PcmPlayback(self.pcm)
+
+        class FailingSink(_Sink):
+            def start(self, buffer):
+                super().start(buffer)
+                playback._state_changed(QAudio.State.StoppedState)
+
+            def reset(self):
+                super().reset()
+                self.start_error = QAudio.Error.NoError
+
+        sink = FailingSink()
+        sink.start_error = QAudio.Error.OpenError
+        playback._sink = sink
+        states, errors = [], []
+        playback.playbackChanged.connect(states.append)
+        playback.errorOccurred.connect(errors.append)
+        try:
+            playback.play()
+            self.assertFalse(playback.playing)
+            self.assertFalse(sink.running)
+            self.assertFalse(playback._timer.isActive())
+            self.assertEqual(states, [False])
+            self.assertEqual(len(errors), 1)
+        finally:
+            playback.close()
 
     def test_clock_uses_processed_frames_and_seek_discards_old_queue(self):
         playback = PcmPlayback(self.pcm)

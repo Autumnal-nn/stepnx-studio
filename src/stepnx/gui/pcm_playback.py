@@ -98,9 +98,16 @@ class PcmPlayback(QObject):
         self._buffer.seek(self._base_frame * 4)
         self._playing = True
         self._sink.start(self._buffer)
-        if self._sink.error() != QAudio.Error.NoError:
-            self._playing = False
-            self.errorOccurred.emit(f"PCM output failed: {self._sink.error()}")
+        # start() can synchronously report a stop/end through stateChanged.
+        # Do not resurrect playback after that handler has already paused it.
+        if not self._playing:
+            return
+        error = self._sink.error()
+        # Older Qt backends report a recoverable buffering shortage here.
+        # The sink can continue playing: keep its clock and UI state attached.
+        if error not in (QAudio.Error.NoError, QAudio.Error.UnderrunError):
+            self.pause()
+            self.errorOccurred.emit(f"PCM output failed: {error}")
             return
         self._timer.start()
         self.playbackChanged.emit(True)
