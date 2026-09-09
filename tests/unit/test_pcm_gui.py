@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 import struct
 import unittest
+from unittest.mock import patch
 from dataclasses import replace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offscreen")
 
 try:
-    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtCore import QEventLoop, QTimer, QMetaObject, Qt
     from PySide6.QtMultimedia import QAudioSink
     try:
         from PySide6.QtMultimedia import QtAudio
@@ -53,6 +54,9 @@ class _Sink:
     def error(self):
         return self.start_error
 
+    def state(self):
+        return QtAudio.State.ActiveState if self.running else QtAudio.State.StoppedState
+
 
 @unittest.skipIf(QApplication is None, QT_ERROR)
 class PcmGuiTests(unittest.TestCase):
@@ -60,6 +64,40 @@ class PcmGuiTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
         cls.pcm = decode_mp3_pcm(FIXTURE.read_bytes())
+
+    def test_state_callback_is_a_zero_argument_qt_slot(self):
+        playback = PcmPlayback(self.pcm)
+        playback._sink = _Sink()
+        try:
+            meta = playback.metaObject()
+            index = meta.indexOfSlot('_sink_state_changed()')
+            self.assertGreaterEqual(index, 0)
+            self.assertEqual(meta.method(index).parameterCount(), 0)
+            with patch.object(playback, '_state_changed') as handler:
+                self.assertTrue(QMetaObject.invokeMethod(
+                    playback, '_sink_state_changed', Qt.ConnectionType.DirectConnection))
+                handler.assert_called_once_with(QtAudio.State.StoppedState)
+        finally:
+            playback.close()
+
+    def test_metronome_reenable_reuses_mix_but_changed_schedule_invalidates_it(self):
+        from stepnx.authoring.pcm_metronome import mix_clicks
+
+        playback = PcmPlayback(self.pcm)
+        try:
+            with patch('stepnx.authoring.pcm_metronome.mix_clicks', wraps=mix_clicks) as mixer:
+                playback.set_clicks((100, -100), (3,))
+                first = bytes(playback._buffer.data())
+                playback.set_clicks((), ())
+                self.assertEqual(bytes(playback._buffer.data()), self.pcm.samples)
+                playback.set_clicks((100, -100), (3,))
+                self.assertEqual(bytes(playback._buffer.data()), first)
+                self.assertEqual(mixer.call_count, 1)
+                playback.set_clicks((100, -100), (4,))
+                self.assertEqual(mixer.call_count, 2)
+                self.assertNotEqual(bytes(playback._buffer.data()), first)
+        finally:
+            playback.close()
 
     def test_simulated_sink_uses_enum_types_returned_by_real_qt(self):
         # No device or playback is required to inspect the real binding types.

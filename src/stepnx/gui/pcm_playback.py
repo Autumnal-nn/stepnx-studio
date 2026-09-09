@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QTimer, Signal
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QTimer, Signal, Slot
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 
 try:
@@ -27,7 +27,8 @@ class PcmPlayback(QObject):
         super().__init__(parent)
         self.pcm = pcm
         self._buffer = QBuffer(self)
-        self._buffer.setData(QByteArray(pcm.samples))
+        self._source_data = QByteArray(pcm.samples)
+        self._buffer.setData(self._source_data)
         self._buffer.open(QIODevice.OpenModeFlag.ReadOnly)
         self._sink = None
         self._base_frame = 0
@@ -35,6 +36,8 @@ class PcmPlayback(QObject):
         self._playing = False
         self._resetting = False
         self._click_configuration = None
+        self._mixed_configuration = None
+        self._mixed_data = None
         self._timer = QTimer(self)
         self._timer.setInterval(10)
         self._timer.timeout.connect(self._poll)
@@ -60,11 +63,18 @@ class PcmPlayback(QObject):
         configuration = (click, frames)
         if configuration == self._click_configuration:
             return
-        samples = mix_clicks(self.pcm.samples, click, frames)
+        if not click or not frames:
+            data = self._source_data
+        elif configuration == self._mixed_configuration:
+            data = self._mixed_data
+        else:
+            data = QByteArray(mix_clicks(self.pcm.samples, click, frames))
+            self._mixed_configuration = configuration
+            self._mixed_data = data
         playing = self._playing
         self.pause()
         self._buffer.close()
-        self._buffer.setData(QByteArray(samples))
+        self._buffer.setData(data)
         self._buffer.open(QIODevice.OpenModeFlag.ReadOnly)
         self._buffer.seek(self._last_frame * 4)
         self._click_configuration = configuration
@@ -85,8 +95,16 @@ class PcmPlayback(QObject):
         self._sink = QAudioSink(device, audio_format, self)
         self._sink.setVolume(0.8)
         self._sink.setBufferSize(4096)
-        self._sink.stateChanged.connect(self._state_changed)
+        self._sink.stateChanged.connect(self._sink_state_changed)
         return True
+
+    @Slot()
+    def _sink_state_changed(self) -> None:
+        # Some PySide6 bindings retain QAudio::State in the signal metadata
+        # while returning QtAudio.State from state(). Drop the signal argument
+        # in Qt and read the correctly typed value directly from the sink.
+        if self._sink is not None:
+            self._state_changed(self._sink.state())
 
     def toggle(self) -> None:
         if self._playing:

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from array import array
-import sys
-
 
 def mix_clicks(samples: bytes, click: tuple[int, ...], frames: tuple[int, ...]) -> bytes:
     """Mix stereo S16 clicks at absolute PCM frame indices.
@@ -16,29 +13,14 @@ def mix_clicks(samples: bytes, click: tuple[int, ...], frames: tuple[int, ...]) 
         raise ValueError("music and click must contain complete stereo frames")
     if not click or not frames:
         return samples
-    output = array("h")
-    output.frombytes(samples)
-    if sys.byteorder != "little":
-        output.byteswap()
-    length = len(output) // 2
+    from stepnx import _mpeg_pcm
+
+    length = len(samples) // 4
     click_length = len(click) // 2
-    # Accumulate each overlapping group before saturation, using bounded
-    # numeric arrays rather than a Python object for every touched sample.
-    events = sorted({frame for frame in frames if -click_length < frame < length})
-    index = 0
-    while index < len(events):
-        first = index
-        begin = max(0, events[index])
-        end = min(length, events[index] + click_length)
-        index += 1
-        while index < len(events) and events[index] <= end:
-            end = min(length, events[index] + click_length)
-            index += 1
-        mixed = array("i", output[begin * 2:end * 2])
-        for frame in events[first:index]:
-            for position in range(max(begin, frame) * 2, min(end, frame + click_length) * 2):
-                mixed[position - begin * 2] += click[position - frame * 2]
-        output[begin * 2:end * 2] = array("h", (max(-32768, min(32767, value)) for value in mixed))
-    if sys.byteorder != "little":
-        output.byteswap()
-    return output.tobytes()
+    events = tuple(sorted({frame for frame in frames if -click_length < frame < length}))
+    if not events:
+        return samples
+    mixer = getattr(_mpeg_pcm, "mix_clicks", None)
+    if mixer is None:
+        raise ValueError("PCM mixer extension is outdated; reinstall Studio with the same Python interpreter to rebuild it.")
+    return mixer(samples, click, events)

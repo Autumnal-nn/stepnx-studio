@@ -5,6 +5,7 @@ Run from the repository root with the GUI extra installed and, on Linux,
 QT_QPA_PLATFORM=offscreen. Uses only the original generated audio/NX fixtures.
 """
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from PySide6.QtWidgets import QMainWindow, QApplication
 from stepnx.gui.phase10_app import main
@@ -55,16 +56,31 @@ def exercise(app):
     assert w.audio_play.text()=='Play'
     assert sink.starts==1, 'Pause must not restart the sink'
     assert playback.position_frames==initial+4800
-  w._selected_profile=lambda:'fiesta2'
-  w.profile_actions['fiesta2'].triggered[bool].emit(False)
-  assert w.audio_transport.canonical_pcm is None
-  assert w.audio_transport.playback_source==fixture
-  w._selected_profile=lambda:'nxa-native'
-  w.profile_actions['nxa-native'].triggered[bool].emit(False)
-  assert w.audio_transport.canonical_pcm is not None
-  assert w.audio_transport.original_source==fixture
+  with TemporaryDirectory() as directory:
+   tagged=Path(directory)/'tagged.mp3'
+   tagged.write_bytes(b'Synthetic tag '+fixture.read_bytes())
+   w._load_audio(tagged)
+   startup=w.audio_transport.canonical_pcm.startup_offset_ms
+   assert startup != 0
+   assert w.audio_alignment.offset_ms==7+startup
+   for profile in ('prime2','fiesta2','nxa-native','prime2'):
+    w.profile_actions[profile].trigger()
+    assert w._selected_profile()==profile
+    if profile=='nxa-native':
+     assert w.audio_transport.canonical_pcm is not None
+     assert w.audio_alignment.offset_ms==7+startup
+    else:
+     assert w.audio_transport.canonical_pcm is None
+     assert w.audio_transport.playback_source==tagged.resolve()
+     assert Path(w.audio_transport.player.source().toLocalFile()).resolve()==tagged.resolve()
+     assert w.audio_alignment.offset_ms==7
+     assert w._nxa_startup_analysis is None
+     assert w.phase11_waveform_decoder._pcm is None
+    assert w.audio_offset.value()==7
+   w.audio_transport.load(None)
+   w.phase11_waveform_decoder.stop()
   for _ in range(5): app.processEvents()
-  print('PASS full GUI load, offset, metronome mode, play/follow/pause with normal and underrun starts, profile round trip')
+  print('PASS full GUI load, offset, metronome mode, play/follow/pause with normal and underrun starts, real profile actions NXA/Prime+/Fiesta with nonzero startup isolation')
  finally:
   w.audio_transport.cleanup_aud_staging()
   w.close()

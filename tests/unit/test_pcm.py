@@ -52,6 +52,40 @@ class PcmTests(unittest.TestCase):
         self.assertEqual(mixed[3 * 4:5 * 4], struct.pack("<hhhh", 2000, -2000, 4000, -4000))
         self.assertEqual(music, bytes(20 * 4))
 
+    def test_native_mixer_matches_independent_sum_then_clip(self):
+        import struct
+
+        rng = random.Random(20260910)
+        for case in range(42):
+            size = rng.randrange(1, 400) if case < 40 else 17000
+            click_size = rng.randrange(1, 150) if case < 40 else 9000
+            original = [rng.randrange(-32768, 32768) for _ in range(size * 2)]
+            click = tuple(rng.randrange(-32768, 32768) for _ in range(click_size * 2))
+            events = tuple(rng.randrange(-click_size, size + 5) for _ in range(20))
+            expected = original.copy()
+            for frame in set(events):
+                for index in range(max(0, frame) * 2, min(size, frame + click_size) * 2):
+                    expected[index] += click[index - frame * 2]
+            expected = [max(-32768, min(32767, value)) for value in expected]
+            music = struct.pack(f"<{len(original)}h", *original)
+            with self.subTest(case=case):
+                self.assertEqual(mix_clicks(music, click, events),
+                                 struct.pack(f"<{len(expected)}h", *expected))
+
+    def test_native_mixer_rejects_invalid_direct_calls(self):
+        from stepnx import _mpeg_pcm
+
+        for music, click, events in ((b"x", (1, 1), (0,)),
+                                     (bytes(40), (1,), (0,)),
+                                     (bytes(40), (40000, 0), (0,)),
+                                     (bytes(40), (1, 1), (2, 1)),
+                                     (bytes(40), (1, 1), (0, 0)),
+                                     (bytes(40), (1, 1), (-1,)),
+                                     (bytes(40), (1, 1), (10,))):
+            with self.subTest(music=len(music), click=click, events=events):
+                with self.assertRaises(ValueError):
+                    _mpeg_pcm.mix_clicks(music, click, events)
+
     def test_metadata_changes_startup_but_never_changes_source_pcm(self):
         payload = FIXTURE.read_bytes()
         clean = decode_mp3_pcm(payload)
