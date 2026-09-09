@@ -9,7 +9,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offs
 
 try:
     from PySide6.QtCore import QEventLoop, QTimer
-    from PySide6.QtMultimedia import QAudio
+    from PySide6.QtMultimedia import QAudioSink
+    try:
+        from PySide6.QtMultimedia import QtAudio
+    except ImportError:
+        from PySide6.QtMultimedia import QAudio as QtAudio
     from PySide6.QtWidgets import QApplication
     from stepnx.gui.audio_transport import AudioTransport
     from stepnx.gui.nxa_audio_alignment import effective_nxa_audio_offset_ms
@@ -30,7 +34,7 @@ from tests.unit.test_pcm import FIXTURE
 class _Sink:
     def __init__(self):
         self.processed = 0
-        self.start_error = QAudio.Error.NoError
+        self.start_error = QtAudio.Error.NoError
         self.running = False
         self.starts = 0
 
@@ -57,6 +61,46 @@ class PcmGuiTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
         cls.pcm = decode_mp3_pcm(FIXTURE.read_bytes())
 
+    def test_simulated_sink_uses_enum_types_returned_by_real_qt(self):
+        # No device or playback is required to inspect the real binding types.
+        # QAudio and QtAudio coexist in newer PySide6, but their enums differ.
+        probe = QAudioSink()
+        try:
+            self.assertIs(type(_Sink().error()), type(probe.error()))
+            self.assertIs(QtAudio.State, type(probe.state()))
+        finally:
+            probe.deleteLater()
+
+    def test_real_qt_state_type_drives_completion_and_device_failure(self):
+        probe = QAudioSink()
+        state_type, error_type = type(probe.state()), type(probe.error())
+        probe.deleteLater()
+        for end_of_file in (True, False):
+            with self.subTest(end_of_file=end_of_file):
+                playback = PcmPlayback(self.pcm)
+                sink = _Sink()
+                playback._sink = sink
+                states, errors = [], []
+                playback.playbackChanged.connect(states.append)
+                playback.errorOccurred.connect(errors.append)
+                try:
+                    playback.play()
+                    if end_of_file:
+                        playback._buffer.seek(playback._buffer.size())
+                        playback._state_changed(state_type.IdleState)
+                        self.assertEqual(playback.position_frames, self.pcm.frame_count)
+                        self.assertFalse(errors)
+                    else:
+                        sink.start_error = error_type.IOError
+                        playback._state_changed(state_type.StoppedState)
+                        self.assertEqual(len(errors), 1)
+                    self.assertEqual(states, [True, False])
+                    self.assertFalse(playback.playing)
+                    self.assertFalse(sink.running)
+                    self.assertFalse(playback._timer.isActive())
+                finally:
+                    playback.close()
+
     def test_startup_underrun_keeps_transport_clock_and_pause_connected(self):
         transport = AudioTransport()
         transport.nxa_timing_enabled = True
@@ -68,7 +112,7 @@ class PcmGuiTests(unittest.TestCase):
             self.assertTrue(transport.load(FIXTURE))
             playback = transport._pcm_playback
             sink = _Sink()
-            sink.start_error = QAudio.Error.UnderrunError
+            sink.start_error = QtAudio.Error.UnderrunError
             playback._sink = sink
             transport.toggle()
             self.assertTrue(sink.running)
@@ -89,7 +133,7 @@ class PcmGuiTests(unittest.TestCase):
             transport.cleanup_aud_staging()
 
     def test_failed_start_resets_output_instead_of_leaving_audio_running(self):
-        for error in (QAudio.Error.OpenError, QAudio.Error.IOError, QAudio.Error.FatalError):
+        for error in (QtAudio.Error.OpenError, QtAudio.Error.IOError, QtAudio.Error.FatalError):
             with self.subTest(error=error):
                 playback = PcmPlayback(self.pcm)
                 sink = _Sink()
@@ -114,14 +158,14 @@ class PcmGuiTests(unittest.TestCase):
         class FailingSink(_Sink):
             def start(self, buffer):
                 super().start(buffer)
-                playback._state_changed(QAudio.State.StoppedState)
+                playback._state_changed(QtAudio.State.StoppedState)
 
             def reset(self):
                 super().reset()
-                self.start_error = QAudio.Error.NoError
+                self.start_error = QtAudio.Error.NoError
 
         sink = FailingSink()
-        sink.start_error = QAudio.Error.OpenError
+        sink.start_error = QtAudio.Error.OpenError
         playback._sink = sink
         states, errors = [], []
         playback.playbackChanged.connect(states.append)

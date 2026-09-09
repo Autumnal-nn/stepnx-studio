@@ -11,8 +11,7 @@ from stepnx.gui.phase10_app import main
 from stepnx.authoring import create_authoring_snapshot
 from stepnx.codecs.nx20 import parse_bytes
 from tests.fixture_factory import make_normal_nx20
-from tests.unit.test_pcm_gui import _Sink
-from PySide6.QtMultimedia import QAudio
+from tests.unit.test_pcm_gui import _Sink, QtAudio
 from stepnx.gui.phase10_timeline import Phase10TimelineWidget
 
 windows=[]
@@ -37,7 +36,7 @@ def exercise(app):
   w.tabs.addTab(timeline,'Generated transport regression')
   w.tabs.setCurrentWidget(timeline)
   w.follow_audio_action.setChecked(True)
-  for error in (QAudio.Error.NoError, QAudio.Error.UnderrunError):
+  for error in (QtAudio.Error.NoError, QtAudio.Error.UnderrunError):
    playback=w.audio_transport._pcm_playback
    sink=_Sink()
    sink.start_error=error

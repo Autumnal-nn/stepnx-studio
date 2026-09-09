@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QTimer, Signal
-from PySide6.QtMultimedia import QAudio, QAudioFormat, QAudioSink, QMediaDevices
+from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
+
+try:
+    from PySide6.QtMultimedia import QtAudio
+except ImportError:  # Older supported PySide6 releases expose only QAudio.
+    from PySide6.QtMultimedia import QAudio as QtAudio
 
 from stepnx.authoring.pcm import CanonicalPcm
 
@@ -105,7 +110,7 @@ class PcmPlayback(QObject):
         error = self._sink.error()
         # Older Qt backends report a recoverable buffering shortage here.
         # The sink can continue playing: keep its clock and UI state attached.
-        if error not in (QAudio.Error.NoError, QAudio.Error.UnderrunError):
+        if error not in (QtAudio.Error.NoError, QtAudio.Error.UnderrunError):
             self.pause()
             self.errorOccurred.emit(f"PCM output failed: {error}")
             return
@@ -152,10 +157,10 @@ class PcmPlayback(QObject):
     def _state_changed(self, state) -> None:
         if self._resetting or self._sink is None:
             return
-        if state == QAudio.State.IdleState and self._buffer.atEnd():
+        if state == QtAudio.State.IdleState and self._buffer.atEnd():
             self._last_frame = self.pcm.frame_count
             self.pause()
-        elif state == QAudio.State.StoppedState and self._sink.error() != QAudio.Error.NoError:
+        elif state == QtAudio.State.StoppedState and self._sink.error() != QtAudio.Error.NoError:
             error = self._sink.error()
             self.pause()
             self.errorOccurred.emit(f"PCM output stopped: {error}")
