@@ -100,10 +100,12 @@ hashes and measurements, not proprietary audio or executable bytes.
 - Twelve generated mono/stereo cases at 16, 22.05, 24, 32, 44.1 and 48 kHz
   had zero measured lag against the local oracle. This is an offline check of
   the 48 kHz consumption contract, not an original-cabinet hardware test.
-- The existing five-second F08 mixer capture previously showed a constant
-  content displacement across five sampled windows. That capture used a
-  patched executable; it does not establish chart-zero or DAC latency for the
-  unmodified executable supplied in this session.
+- The existing F08 mixer capture also supports an independently reconstructed
+  chart coordinate: at the post-update gameplay call, 174/180 residuals are
+  zero and six are +1 ms. The pre-update clock breakpoint instead has a +12 ms
+  median because it reads the previous chart value. See
+  [the clock-phase analysis](NXA_CLOCK_CAPTURE_ANALYSIS.md). This is a patched
+  runtime's cached ALSA estimate, not a physical DAC latency measurement.
 - Full Qt integration was exercised offscreen for load, manual offset,
   metronome mode and NXA/Fiesta2/NXA source reload. No physical audio output was
   available in the test environment.
