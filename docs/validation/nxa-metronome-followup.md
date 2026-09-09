@@ -70,3 +70,32 @@ profile and calibration used in that comparison.
 
 Validation: 670 unit tests passed, plus the full GUI smoke. Physical Windows
 playback and the reported Prime+/Rise residual remain external validation.
+
+## Collect the missing Qt timeline evidence
+
+The additional chart archives contain 33 Prime 2 charts for the four codes in
+the reported log (15A0, 14C1, 1594, 1556), and the Rise archive contains charts
+for a03 and 18a1. Their corresponding music files are absent. Parsing the
+charts is not sufficient to reproduce an audio alignment difference, and
+Sanity offsets cannot substitute for a measurement of the original music.
+
+`tools/probe_qt_audio_timing.py` reports the installed Qt/PySide version, input
+hash, decoded sample count and format, first/last presentation timestamps,
+duration notifications, waveform duration and timestamp gaps. It uses the
+same native-format QAudioDecoder path as the Prime+/Fiesta waveform, without
+playing audio or modifying the file. Run it with Studio's own interpreter:
+
+```powershell
+.\.venv\Scripts\python.exe tools/probe_qt_audio_timing.py "C:\path\affected.mp3" > qt-audio-timing.json
+```
+
+Several paths may be provided for a single report. Unsupported/invalid inputs
+are reported as errors with a nonzero exit code. AUD files must first be decoded
+to MP3; this tool specifically probes Qt's compressed-audio presentation path.
+
+On the generated MP3 control, Qt 6.11.2 produced 23,040 frames at 48 kHz, exactly
+480 ms, with zero timestamp gaps and zero waveform/sample-duration difference.
+A generated 44.1 kHz mono WAV and invalid MP3 were also exercised to verify
+sample counting and error reporting. An FFmpeg bitrate-duration warning alone
+does not establish a timing error. This probe does not measure QMediaPlayer's
+physical output, manual calibration, or the original game's clock.
