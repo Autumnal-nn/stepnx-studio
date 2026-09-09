@@ -106,6 +106,8 @@ class AuthoringSkipRuntimeTimingTests(unittest.TestCase):
             2222.0,
         )
         self.assertEqual(clock.note_at(2222.0).row_index, 1)
+        self.assertEqual(clock.times_between(2222.0, 2223.0), (2222.0, 2222.0))
+        self.assertEqual(clock.times_between(0.0, 2222.0), ())
 
 
 if __name__ == "__main__":

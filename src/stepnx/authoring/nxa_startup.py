@@ -78,6 +78,8 @@ class _Header:
     def samples_per_frame(self) -> int:
         if self.layer == 3:
             return 384
+        if self.layer == 2:
+            return 1152
         return 1152 if self.version == 3 else 576
 
     @property
@@ -119,11 +121,11 @@ def _parse_header(payload: bytes, offset: int) -> _Header | None:
 
     # Runtime ordering matters. In particular, all-ones headers are reported as
     # forbidden bitrate before their also-reserved sample-frequency field.
-    if version == 1 or layer == 0:
+    if version == 1:
         header.error = "lost synchronization"
         return header
-    if emphasis == 2:
-        header.error = "invalid"
+    if layer == 0:
+        header.error = "reserved layer value"
         return header
     if bitrate_index == 15:
         header.error = "forbidden bitrate value"
@@ -193,10 +195,13 @@ def _infer_free_frame_size(payload: bytes, header: _Header) -> int | None:
             continue
         distance = offset - header.offset
         if header.layer == 3:
-            # Layer-I free-format inference is slot based. Runtime observation
-            # shows the inferred distance rounded to the next four-byte slot
-            # before the predicted next header is checked.
-            return (distance + 3) & ~3
+            # Black-box probes show bitrate inference quantized to 1 kbit/s,
+            # followed by Layer-I's four-byte slot calculation. Simply rounding
+            # the byte distance up is wrong at 48 kHz and on padded headers.
+            inferred_kbps = ((distance - 4 * header.padding + 4) * header.sample_rate) // 48_000
+            if inferred_kbps < 8:
+                continue
+            return 4 * (12_000 * inferred_kbps // header.sample_rate + header.padding)
         return distance
     return None
 
@@ -205,8 +210,9 @@ def _confirm_next_header(payload: bytes, header: _Header) -> bool:
     if header.frame_size is None:
         return False
     next_offset = header.offset + header.frame_size
-    candidate = _parse_header(payload, next_offset)
-    return _compatible(header, candidate)
+    # Resynchronization checks the next syncword, not format compatibility.
+    # A false Layer-I header can therefore consume real Layer-III bytes.
+    return _syncword(payload, next_offset)
 
 
 def _find_source_start(payload: bytes) -> tuple[int, _Header]:
@@ -279,6 +285,32 @@ def _source_sample_map(payload: bytes, source_start: int) -> dict[int, int]:
     return samples
 
 
+def _layer1_recovery(payload: bytes, header: _Header) -> str:
+    """Prove a recoverable Layer-I failure without decoding Layer-I audio."""
+    channels = 1 if header.mono else 2
+    bound = (((payload[header.offset + 3] >> 4) & 3) + 1) * 4 if header.mode == 1 else 32
+    allocation_bits = 4 * (bound * channels + 32 - bound)
+    base = header.offset + 4 + (0 if header.protection else 2)
+    size = (allocation_bits + 7) // 8
+    if base + size > len(payload):
+        raise NxaStartupError("truncated Layer I allocation during startup")
+    allocations = payload[base:base + size]
+    if not header.protection:
+        crc = 0xFFFF
+        for value in payload[header.offset + 2:header.offset + 4] + allocations:
+            for bit in range(8):
+                feedback = bool(crc & 0x8000) != bool(value & (0x80 >> bit))
+                crc = (crc << 1) & 0xFFFF
+                if feedback:
+                    crc ^= 0x8005
+        expected = int.from_bytes(payload[header.offset + 4:header.offset + 6], "big")
+        if crc != expected:
+            return "CRC check failed"
+    if any(value >> 4 == 15 or value & 15 == 15 for value in allocations):
+        return "forbidden bit allocation value"
+    raise NxaStartupError("potentially decodable Layer I startup is outside the supported timeline contract")
+
+
 def analyze_nxa_mp3_startup(payload: bytes) -> NxaStartupAnalysis:
     """Model NXA/libmad startup displacement from exact MP3 bytes.
 
@@ -298,114 +330,71 @@ def analyze_nxa_mp3_startup(payload: bytes) -> NxaStartupAnalysis:
     source_samples = _source_sample_map(payload, source_start)
 
     cursor = 0
-    synchronized = False
+    synchronized = True
+    last_layer = 0
     last_samples = 1152
     synthetic_samples = 0
     recoveries: list[NxaStartupRecovery] = []
     reservoir = 0
-    previous_header: _Header | None = None
 
     def recover(error: str, offset: int, samples: int) -> None:
         nonlocal synthetic_samples
         synthetic_samples += samples
         recoveries.append(NxaStartupRecovery(error, offset, samples))
 
+    def update_header_state(header: _Header) -> None:
+        nonlocal last_samples, last_layer
+        # Parsing mutates the synthesis header even when the candidate is
+        # subsequently rejected. Reserved version fails before layer is read;
+        # it clears the low-sampling-frequency flag but preserves the layer.
+        if header.version != 1:
+            last_layer = header.layer
+        last_samples = (384 if last_layer == 3 else
+                        576 if last_layer == 1 and header.version in (0, 2) else
+                        1152)
+
     for _ in range(_MAX_RECOVERIES):
         if synchronized:
-            candidate_offset = cursor
-            header = _parse_header(payload, candidate_offset)
-            if (
-                header is None
-                or header.error in {"invalid", "lost synchronization"}
-                or (
-                    previous_header is not None
-                    and header is not None
-                    and not _compatible(previous_header, header)
-                )
-            ):
-                recover("lost synchronization", candidate_offset, last_samples)
-                cursor = candidate_offset + 1
+            header = _parse_header(payload, cursor)
+            if header is None:
+                recover("lost synchronization", cursor, last_samples)
+                cursor += 1
                 synchronized = False
-                previous_header = None
                 continue
-            if header.error:
-                last_samples = header.samples_per_frame
-                recover(header.error, candidate_offset, last_samples)
-                cursor = candidate_offset + 1
-                synchronized = False
-                previous_header = None
-                continue
-            if header.bitrate_index == 0:
-                frame_size = _infer_free_frame_size(payload, header)
-                if frame_size is None:
-                    recover("lost synchronization", candidate_offset, last_samples)
-                    cursor = candidate_offset + 1
-                    synchronized = False
-                    previous_header = None
-                    continue
-                header.frame_size = frame_size
-            last_samples = header.samples_per_frame
+            update_header_state(header)
         else:
-            # The first call on non-MPEG leading bytes reports LOSTSYNC once;
-            # subsequent calls scan forward for a plausible header.
-            if cursor == 0 and not _syncword(payload, 0):
-                recover("lost synchronization", 0, last_samples)
-                cursor = 1
-                continue
-
-            header: _Header | None = None
-            candidate_offset: int | None = None
-            offset = cursor
+            header = None
             stop = min(len(payload) - 4, cursor + _STARTUP_SCAN_LIMIT)
-            while offset <= stop:
-                if not _syncword(payload, offset):
-                    offset += 1
-                    continue
+            for offset in range(cursor, stop + 1):
                 candidate = _parse_header(payload, offset)
                 if candidate is None:
-                    offset += 1
                     continue
-                if candidate.error == "invalid":
-                    offset += 1
-                    continue
+                update_header_state(candidate)
                 if candidate.error:
                     header = candidate
-                    candidate_offset = offset
                     break
                 if candidate.bitrate_index == 0:
-                    frame_size = _infer_free_frame_size(payload, candidate)
-                    if frame_size is None:
-                        offset += 1
-                        continue
-                    candidate.frame_size = frame_size
-                    if not _confirm_next_header(payload, candidate):
-                        offset += 1
-                        continue
-                    header = candidate
-                    candidate_offset = offset
-                    break
+                    candidate.frame_size = _infer_free_frame_size(payload, candidate)
+                    if candidate.frame_size is None:
+                        header = candidate
+                        break
                 if _confirm_next_header(payload, candidate):
                     header = candidate
-                    candidate_offset = offset
                     break
-                offset += 1
-
-            if header is None or candidate_offset is None:
+            if header is None:
                 raise NxaStartupError("cannot locate a decodable MPEG frame during startup")
-            if header.error == "lost synchronization":
-                recover("lost synchronization", candidate_offset, last_samples)
-                cursor = candidate_offset + 1
+        if header.error:
+            recover(header.error, header.offset, last_samples)
+            cursor = header.offset + 1
+            synchronized = False
+            continue
+        if header.bitrate_index == 0 and header.frame_size is None:
+            header.frame_size = _infer_free_frame_size(payload, header)
+            if header.frame_size is None:
+                recover("lost synchronization", header.offset, last_samples)
+                cursor = header.offset + 1
                 synchronized = False
-                previous_header = None
                 continue
-            if header.error:
-                last_samples = header.samples_per_frame
-                recover(header.error, candidate_offset, last_samples)
-                cursor = candidate_offset + 1
-                synchronized = False
-                previous_header = None
-                continue
-            last_samples = header.samples_per_frame
 
         if header.frame_size is None:
             raise NxaStartupError("MPEG frame has no resolved size")
@@ -413,22 +402,20 @@ def analyze_nxa_mp3_startup(payload: bytes) -> NxaStartupAnalysis:
         candidate_offset = header.offset
         cursor = candidate_offset + header.frame_size
         synchronized = True
-        previous_header = header
 
-        if not header.protection:
-            # Every protected false Layer-I candidate observed during NXA startup
-            # fails its CRC before content becomes relevant. Official source
-            # frames in the validation corpus are unprotected Layer III.
-            recover("CRC check failed", candidate_offset, last_samples)
-            continue
+        if not header.protection and header.layer == 1:
+            from stepnx.authoring.mpeg_crc import layer3_crc_valid
+
+            if not layer3_crc_valid(payload, candidate_offset, header):
+                recover("CRC check failed", candidate_offset, last_samples)
+                reservoir = min(511, reservoir + _main_data_capacity(header))
+                continue
         if header.layer == 3:
-            recover("forbidden bit allocation value", candidate_offset, last_samples)
+            error = _layer1_recovery(payload, header)
+            recover(error, candidate_offset, last_samples)
             continue
         if header.layer != 1:
-            recover("lost synchronization", candidate_offset, last_samples)
-            synchronized = False
-            previous_header = None
-            continue
+            raise NxaStartupError("Layer II startup decoding is outside the supported timeline contract")
 
         main_data_begin = _main_data_begin(payload, header)
         if main_data_begin > reservoir:

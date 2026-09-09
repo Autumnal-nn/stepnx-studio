@@ -8,6 +8,9 @@ from stepnx.gui.audio_transport import AudioTransport
 def _cleanup_aud_staging_retryable(transport) -> bool:
     """Release QMediaPlayer and remove staged AUD data without losing retry state."""
 
+    close_pcm = getattr(transport, "_close_pcm", None)
+    if close_pcm is not None:
+        close_pcm()
     directory = transport._aud_directory
     if directory is None:
         return True

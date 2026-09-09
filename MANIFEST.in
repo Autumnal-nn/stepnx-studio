@@ -1,0 +1,4 @@
+include src/stepnx/_vendor/minimp3/minimp3.h
+include src/stepnx/_vendor/minimp3/LICENSE
+include src/stepnx/_vendor/minimp3/PROVENANCE.md
+recursive-include tests/fixtures/audio *.mp3 *.sha256 *.json *.md

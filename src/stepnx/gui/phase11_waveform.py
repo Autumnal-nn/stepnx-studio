@@ -4,9 +4,9 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPointF, QRectF, QUrl, Signal
+from PySide6.QtCore import QByteArray, QObject, QPointF, QRectF, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QPen
-from PySide6.QtMultimedia import QAudioDecoder, QAudioFormat
+from PySide6.QtMultimedia import QAudioBuffer, QAudioDecoder, QAudioFormat
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 import stepnx.workspace as workspace_package
@@ -84,6 +84,8 @@ class WaveformChannelSummary:
 
     minima: tuple[float, ...]
     maxima: tuple[float, ...]
+    sample_rate: int = 0
+    frames_per_summary: int = 0
 
     def __post_init__(self) -> None:
         if len(self.minima) != len(self.maxima):
@@ -112,8 +114,12 @@ class WaveformChannelSummary:
         if high_time <= low_time:
             high_time = min(duration_ms, low_time + duration_ms / count)
 
-        first = min(count - 1, max(0, math.floor(low_time / duration_ms * count)))
-        last = min(count, max(first + 1, math.ceil(high_time / duration_ms * count)))
+        scale = (
+            self.sample_rate / (1000.0 * self.frames_per_summary)
+            if self.sample_rate and self.frames_per_summary else count / duration_ms
+        )
+        first = min(count - 1, max(0, math.floor(low_time * scale)))
+        last = min(count, max(first + 1, math.ceil(high_time * scale)))
         return min(self.minima[first:last]), max(self.maxima[first:last])
 
 
@@ -293,15 +299,19 @@ class QtWaveformDecoder(QObject):
         super().__init__(parent)
         self.decoder = QAudioDecoder(self)
         self.decoder.bufferReady.connect(self._buffer_ready)
-        self.decoder.finished.connect(self._finished)
+        self.decoder.finished.connect(self._qt_finished)
         self.decoder.isDecodingChanged.connect(self._decoding_changed)
         self._summaries = _WaveformSummaryBuilder()
         self._duration_us = 0
         self._active = False
         self._finished_successfully = False
         self._source: Path | None = None
+        self._pcm = None
+        self._pcm_generation = 0
 
     def start(self, path: str | Path) -> None:
+        self._pcm_generation += 1
+        self._pcm = None
         source = Path(path).resolve()
         self.decoder.stop()
         self._summaries.clear()
@@ -328,11 +338,42 @@ class QtWaveformDecoder(QObject):
         self.decoder.start()
 
     def stop(self) -> None:
+        self._pcm_generation += 1
+        self._pcm = None
         self._active = False
         self.decoder.stop()
 
+    def start_pcm(self, pcm) -> None:
+        """Summarize the exact playback bytes without a second decoder."""
+        self.stop()
+        self._pcm = pcm
+        self._summaries.clear()
+        self._duration_us = pcm.frame_count * 1_000_000 / pcm.sample_rate
+        self._active = True
+        self._finished_successfully = False
+        self._source = None
+        generation = self._pcm_generation
+        audio_format = QAudioFormat()
+        audio_format.setSampleRate(pcm.sample_rate)
+        audio_format.setChannelCount(2)
+        audio_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+
+        def append_chunk(first=0) -> None:
+            if generation != self._pcm_generation or not self._active:
+                return
+            last = min(first + 16_384, pcm.frame_count)
+            data = pcm.slice_frames(first, last)
+            buffer = QAudioBuffer(QByteArray(data), audio_format, first * 1_000_000 // pcm.sample_rate)
+            self._summaries.append(buffer)
+            if last == pcm.frame_count:
+                self._finished()
+            else:
+                QTimer.singleShot(0, lambda: append_chunk(last))
+
+        QTimer.singleShot(0, append_chunk)
+
     def _buffer_ready(self) -> None:
-        if not self._active:
+        if not self._active or self._pcm is not None:
             return
         buffer = self.decoder.read()
         if not buffer.isValid():
@@ -352,12 +393,16 @@ class QtWaveformDecoder(QObject):
         else:
             self._duration_us += duration_us
 
+    def _qt_finished(self) -> None:
+        if self._pcm is None:
+            self._finished()
+
     def _finished(self) -> None:
         if not self._active:
             return
         self._finished_successfully = True
         self._active = False
-        decoder_duration = int(self.decoder.duration())
+        decoder_duration = 0 if self._pcm is not None else int(self.decoder.duration())
         duration_ms = max(
             0.0,
             self._duration_us / 1000.0,
@@ -392,7 +437,9 @@ class QtWaveformDecoder(QObject):
                 WaveformEnvelope(duration_ms, aggregate),
                 tuple(
                     WaveformChannelSummary(
-                        channel.minima[:point_count], channel.maxima[:point_count]
+                        channel.minima[:point_count], channel.maxima[:point_count],
+                        sample_rate=self._summaries.sample_rate if self._pcm is not None else 0,
+                        frames_per_summary=self._summaries.frames_per_summary if self._pcm is not None else 0,
                     )
                     for channel in channel_summaries
                 ),
@@ -403,7 +450,7 @@ class QtWaveformDecoder(QObject):
         self.waveformReady.emit(waveform)
 
     def _decoding_changed(self, decoding: bool) -> None:
-        if decoding or not self._active or self._finished_successfully:
+        if self._pcm is not None or decoding or not self._active or self._finished_successfully:
             return
         error = self.decoder.error()
         if error != QAudioDecoder.Error.NoError:
@@ -735,7 +782,11 @@ def install_phase11_waveform(window) -> None:
         # Always run the Phase 11 decoder, including for PCM WAV. The legacy
         # synchronous WAV envelope is useful as an immediate fallback, but its
         # fixed 4096 buckets are too coarse for zoomed waveform authoring.
-        decoder.start(source)
+        pcm = getattr(window.audio_transport, "canonical_pcm", None)
+        if pcm is not None:
+            decoder.start_pcm(pcm)
+        else:
+            decoder.start(source)
         window.statusBar().showMessage(
             f"Loaded audio: {Path(path).name} · decoding waveform…", 5000
         )

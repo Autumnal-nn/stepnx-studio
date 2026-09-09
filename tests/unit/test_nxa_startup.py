@@ -70,6 +70,7 @@ class NxaStartupTests(unittest.TestCase):
 
         payload[8:12] = bytes.fromhex("fffe08b1")
         payload[2000:2004] = bytes.fromhex("ffff5a09")
+        payload[2004] = 0xFF  # Prove forbidden Layer-I allocation.
 
         result = analyze_nxa_mp3_startup(bytes(payload))
         self.assertEqual(result.source_start_offset, 100)

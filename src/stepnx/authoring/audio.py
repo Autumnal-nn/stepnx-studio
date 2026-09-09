@@ -457,6 +457,11 @@ def decode_aud(path: str | Path) -> bytes:
         source = Path(path).read_bytes()
     except OSError as exc:
         raise AudDecodeError(f"cannot read AUD: {exc}") from exc
+    return decode_aud_bytes(source)
+
+
+def decode_aud_bytes(source: bytes) -> bytes:
+    """Decode an immutable AUD snapshot so hashes and decoded bytes agree."""
     magic = source[:4].upper()
     if magic == b"ENC1":
         return _decode_enc1_source(source)

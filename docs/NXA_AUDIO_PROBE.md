@@ -1,5 +1,10 @@
 # NXA audio runtime probe
 
+For the current deterministic Studio decoder and offline reference gates, see
+[NXA PCM contract](NXA_PCM_CONTRACT.md). This runtime probe remains necessary
+to measure chart-clock and physical-output residuals; offline PCM agreement
+does not replace those observations.
+
 This experiment observes the actual 32-bit NXA audio path instead of inferring
 runtime timing from MP3/libmad startup errors alone.
 

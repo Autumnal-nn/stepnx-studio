@@ -58,8 +58,8 @@ flags, padding, note cells, floating-point payloads, or its trailer.
   visible musical snapping, and note function/visibility flags;
 - deterministic row/beat/time projection, atomic Block timing editing, and
   chart-wide Start Time shifting;
-- session audio transport, selection-or-viewport Play seeking, PCM-WAV and
-  Qt-decoded compressed waveform generation, adaptive stereo min/max waveform
+- session audio transport, selection-or-viewport Play seeking, shared canonical
+  PCM for NXA compressed audio and Qt decoding for other profiles, adaptive stereo min/max waveform
   rendering, per-beat or per-arrow metronome, follow-playhead, and explicit
   audio offset;
 - bundled royalty-free noteskin atlases and metronome sound, with local
@@ -156,6 +156,11 @@ PYTHONPATH=src python3 -m stepnx verify /path/to/corpus
 ```
 
 Editable installation:
+
+Source installs require a C compiler for the pinned PCM decoder (MSVC Build
+Tools on Windows, or a system C compiler on Linux). See the
+[NXA PCM contract and reproducible checks](docs/NXA_PCM_CONTRACT.md) for scope,
+measured parity and the remaining physical-output validation gate.
 
 ```bash
 python -m pip install -e .

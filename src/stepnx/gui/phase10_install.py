@@ -1653,8 +1653,7 @@ def _phase10_toggle_playback(self) -> None:
         _stop_silent_transport(self)
         return
 
-    source = self.audio_transport.player.source()
-    if not source.isEmpty():
+    if self.audio_transport.playback_source is not None:
         return self.phase10_original_toggle_audio_playback()
 
     chart_time = self._selected_chart_time()
