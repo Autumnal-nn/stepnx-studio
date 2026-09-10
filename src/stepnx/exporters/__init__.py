@@ -1,4 +1,4 @@
-"""One-way projections from the canonical NX20 model to foreign chart formats."""
+"""Projections from the canonical NX20 model to foreign chart formats."""
 
 from stepnx.exporters.ssc import (
     SscChart,
@@ -11,6 +11,12 @@ from stepnx.exporters.ssc import (
     render_extension,
     render_simfile,
 )
+from stepnx.exporters.ssc_random import (
+    SscLabeledChart,
+    SscRandomExportReport,
+    compile_ssc_export,
+    render_compiled_simfile,
+)
 
 __all__ = [
     "SscChart",
@@ -18,8 +24,12 @@ __all__ = [
     "SscExportError",
     "SscExportReport",
     "SscSongInfo",
+    "SscLabeledChart",
+    "SscRandomExportReport",
     "difficulty_for_name",
     "export_chart",
     "render_extension",
     "render_simfile",
+    "compile_ssc_export",
+    "render_compiled_simfile",
 ]
