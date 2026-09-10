@@ -285,3 +285,6 @@ contributors.
 
 StepNX Studio is an unofficial project and is not affiliated with Andamiro.
 Official game assets are not distributed by this repository.
+
+For Rise chart/audio analysis, see the [documented -24 ms session calibration
+and accepted audio-branch scope](docs/validation/rise-audio-calibration.md).

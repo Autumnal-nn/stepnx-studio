@@ -1,5 +1,10 @@
 # Metronome latency, Qt state callbacks, and profile isolation
 
+> Status: the maintainer accepted the branch after follow-up tests. See
+> [Rise calibration and branch acceptance](rise-audio-calibration.md) for the
+> remaining documented Rise-only calibration. The investigation notes below
+> describe earlier checkpoints and are superseded by that acceptance record.
+
 Follow-up to `4dfd52a` on `fix/nxa-canonical-pcm`.
 
 ## Metronome activation
