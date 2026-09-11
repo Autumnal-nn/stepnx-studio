@@ -4,9 +4,9 @@ import struct
 import unittest
 
 from stepnx.codecs.nx20 import parse_bytes
-from stepnx.exporters.ssc import LINES_PER_MEASURE, SscSongInfo
+from stepnx.exporters.ssc import LINES_PER_MEASURE, SscExportError, SscSongInfo
 from stepnx.exporters.ssc_random import compile_ssc_export
-from stepnx.exporters.ssc_xsanity import render_compiled_simfile
+from stepnx.exporters.ssc_xsanity import render_compiled_reports, render_compiled_simfile
 
 from tests.fixture_factory import f32, metadata, u32
 
@@ -109,9 +109,6 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         report = compile_ssc_export(parse_bytes(raw), description="ZERO_SCROLL.NX")
         text = render_compiled_simfile(report, SscSongInfo(title="Zero-scroll guard"))
 
-        # Random split starts at row 64. The immediately preceding 32 rows have
-        # scroll 0, so they contribute no visual lead. At scroll 0.125 another
-        # 16 source rows are needed to accumulate two visual beats.
         self.assertEqual(wrap_rows(text), [16])
 
     def test_wrap_keeps_two_visual_beats_when_preceding_scroll_moves(self) -> None:
@@ -186,6 +183,31 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         self.assertEqual(len(names), 21)
         self.assertEqual(len(set(names)), 21)
         self.assertIn("STEPNX_RANDOM_020", names)
+
+    def test_combined_non_random_reports_get_unique_chartnames(self) -> None:
+        raw = document([(0x00, [block([EMPTY_ROW] * 32)])])
+        first = compile_ssc_export(parse_bytes(raw), description="NM.NX")
+        second = compile_ssc_export(parse_bytes(raw), description="HD.NX")
+        text = render_compiled_reports((first, second), SscSongInfo(title="Arcade song"))
+
+        self.assertEqual(text.count("#NOTEDATA:;"), 2)
+        self.assertIn("#CHARTNAME:STEPNX_01_BASE;", text)
+        self.assertIn("#CHARTNAME:STEPNX_02_BASE;", text)
+        self.assertNotIn("#SPECIAL:LEVEL,RANDOM;", text)
+
+    def test_combined_random_reports_of_same_steps_type_are_rejected(self) -> None:
+        two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
+        raw = document(
+            [
+                (0x00, [block([EMPTY_ROW] * 64)]),
+                (0x80, two),
+            ]
+        )
+        first = compile_ssc_export(parse_bytes(raw), description="R1.NX")
+        second = compile_ssc_export(parse_bytes(raw), description="R2.NX")
+
+        with self.assertRaisesRegex(SscExportError, "more than one random chart"):
+            render_compiled_reports((first, second), SscSongInfo(title="Conflict"))
 
 
 if __name__ == "__main__":
