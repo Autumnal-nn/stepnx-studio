@@ -15,8 +15,8 @@ from stepnx.exporters.ssc_random import (
     SscLabeledChart,
     SscRandomExportReport,
     compile_ssc_export,
-    render_compiled_simfile,
 )
+from stepnx.exporters.ssc_xsanity import render_compiled_simfile
 
 __all__ = [
     "SscChart",
