@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 
 from stepnx.exporters.ssc import (
     SSC_DIFFICULTIES,
+    UNKNOWN_NOTE_EMPTY,
+    UNKNOWN_NOTE_ERROR,
     SscExportError,
     SscSongInfo,
     difficulty_for_name,
@@ -29,6 +31,19 @@ from stepnx.exporters.ssc import (
     render_extension,
     render_simfile,
 )
+
+
+def _write_atomic(target: Path, text: str) -> None:
+    """Write ``text`` so a failed write cannot leave a half-written file behind."""
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".stepnx-tmp")
+    try:
+        temporary.write_bytes(text.encode("utf-8"))
+        temporary.replace(target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _file_menu(window) -> QMenu | None:
@@ -67,6 +82,9 @@ class SscExportDialog(QDialog):
         self.difficulty.addItem("From chart filename")
         self.difficulty.addItems(SSC_DIFFICULTIES)
         self.extension = QCheckBox("Write .ssc.ext companions instead of one .ssc")
+        self.keep_unknown = QCheckBox(
+            "Write unsupported notes as empty lanes instead of stopping"
+        )
         self.song_tag = QLineEdit()
         self.song_tag.setPlaceholderText("Group/Song folder pair for #SONG")
         form.addRow("Title", self.title)
@@ -74,6 +92,7 @@ class SscExportDialog(QDialog):
         form.addRow("Music file", self.music)
         form.addRow("Difficulty", self.difficulty)
         form.addRow("", self.extension)
+        form.addRow("", self.keep_unknown)
         form.addRow("Song tag", self.song_tag)
         layout.addLayout(form)
 
@@ -101,25 +120,68 @@ class SscExportDialog(QDialog):
         return self.difficulty.currentText()
 
 
-def _report_diagnostics(window, diagnostics: list[tuple[str, str]]) -> None:
-    if not diagnostics:
-        return
+def _confirm_report(window, route: str, diagnostics: list[tuple[str, str]]) -> bool:
+    """Show what the export will lose and let the user stop before anything is written."""
+
     dialog = QDialog(window)
-    dialog.setWindowTitle("SSC export diagnostics")
+    dialog.setWindowTitle("SSC export report")
     layout = QVBoxLayout(dialog)
-    layout.addWidget(
-        QLabel("The simfile was written. These details have no SSC representation:")
+    heading = (
+        f"Route to export: {route}\n\n"
+        "The projection is one-way. These details have no SSC representation "
+        "and will not be written:"
+        if diagnostics
+        else f"Route to export: {route}\n\nNothing was reported as unrepresented."
     )
+    label = QLabel(heading)
+    label.setWordWrap(True)
+    layout.addWidget(label)
     body = "\n".join(f"{name}: {message}" for name, message in diagnostics)
-    text = QPlainTextEdit(body)
-    text.setReadOnly(True)
-    layout.addWidget(text)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-    buttons.rejected.connect(dialog.reject)
+    if body:
+        text = QPlainTextEdit(body)
+        text.setReadOnly(True)
+        layout.addWidget(text)
+    buttons = QDialogButtonBox(
+        QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+    )
     buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
     layout.addWidget(buttons)
-    dialog.resize(640, 320)
-    dialog.exec()
+    dialog.resize(680, 360)
+    return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+def _snapshot_for(window, document_index: int):
+    """Return the snapshot the editor is showing, so the exported route matches it."""
+
+    from stepnx.gui.timeline_widget import TimelineWidget
+
+    tabs = getattr(window, "tabs", None)
+    documents = getattr(window, "widget_documents", {})
+    if tabs is None:
+        return None
+    for index in range(tabs.count()):
+        widget = tabs.widget(index)
+        if (
+            isinstance(widget, TimelineWidget)
+            and documents.get(widget) == document_index
+        ):
+            return getattr(widget, "snapshot", None)
+    return None
+
+
+def _confirm_overwrite(window, targets: list[Path]) -> bool:
+    listed = "\n".join(f"- {target.name}" for target in targets[:12])
+    if len(targets) > 12:
+        listed += f"\n- and {len(targets) - 12} more"
+    answer = QMessageBox.question(
+        window,
+        "Replace existing companions",
+        f"{len(targets)} file(s) already exist and will be replaced:\n{listed}",
+        QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel,
+        QMessageBox.StandardButton.Cancel,
+    )
+    return answer == QMessageBox.StandardButton.Save
 
 
 def export_workspace_to_ssc(window) -> None:
@@ -135,7 +197,7 @@ def export_workspace_to_ssc(window) -> None:
         document = window.sessions[index].current
         if document.effective_lightmap:
             continue
-        charts.append((entry.path, document))
+        charts.append((entry.path, document, _snapshot_for(window, index)))
     if not charts:
         QMessageBox.information(
             window, "Export to SSC", "The folder holds no exportable chart."
@@ -143,7 +205,7 @@ def export_workspace_to_ssc(window) -> None:
         return
 
     dialog = SscExportDialog(
-        window, workspace.root.name, [path.name for path, _ in charts]
+        window, workspace.root.name, [path.name for path, _, _ in charts]
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return
@@ -151,20 +213,34 @@ def export_workspace_to_ssc(window) -> None:
     chosen = dialog.selected_difficulty()
     rendered = []
     diagnostics: list[tuple[str, str]] = []
-    for path, document in charts:
+    routes: list[str] = []
+    for path, document, snapshot in charts:
         try:
             report = export_chart(
                 document,
                 description=path.name,
                 difficulty=chosen or difficulty_for_name(path.name),
+                snapshot=snapshot,
+                unknown_notes=UNKNOWN_NOTE_EMPTY
+                if dialog.keep_unknown.isChecked()
+                else UNKNOWN_NOTE_ERROR,
             )
         except SscExportError as exc:
             QMessageBox.critical(window, "Export to SSC failed", f"{path.name}: {exc}")
             return
         rendered.append((path, report.chart))
+        routes.append(f"{path.name}: {report.route_summary}")
         diagnostics.extend(
-            (path.name, f"{item.code}: {item.message}") for item in report.diagnostics
+            (
+                path.name,
+                f"{item.code}: {item.message}"
+                + (f" (x{item.occurrences})" if item.occurrences > 1 else ""),
+            )
+            for item in report.diagnostics
         )
+
+    if not _confirm_report(window, "; ".join(routes), diagnostics):
+        return
 
     if dialog.extension.isChecked():
         tag = dialog.song_tag.text().strip()
@@ -173,10 +249,15 @@ def export_workspace_to_ssc(window) -> None:
                 window, "Export to SSC", "A .ssc.ext companion needs a song tag."
             )
             return
+        targets = [
+            (path.with_name(path.stem + ".ssc.ext"), chart) for path, chart in rendered
+        ]
+        existing = [target for target, _ in targets if target.exists()]
+        if existing and not _confirm_overwrite(window, existing):
+            return
         try:
-            for path, chart in rendered:
-                target = path.with_name(path.stem + ".ssc.ext")
-                target.write_bytes(render_extension(chart, tag).encode("utf-8"))
+            for target, chart in targets:
+                _write_atomic(target, render_extension(chart, tag))
         except OSError as exc:
             QMessageBox.critical(window, "Export to SSC failed", str(exc))
             return
@@ -191,14 +272,13 @@ def export_workspace_to_ssc(window) -> None:
         target = Path(selected)
         text = render_simfile([chart for _, chart in rendered], dialog.song_info())
         try:
-            target.write_bytes(text.encode("utf-8"))
+            _write_atomic(target, text)
         except OSError as exc:
             QMessageBox.critical(window, "Export to SSC failed", str(exc))
             return
         written = str(target)
 
     window.statusBar().showMessage(f"Exported to {written}", 8000)
-    _report_diagnostics(window, diagnostics)
 
 
 def install_ssc_export(window) -> None:

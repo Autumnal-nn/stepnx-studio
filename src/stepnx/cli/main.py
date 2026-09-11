@@ -14,6 +14,8 @@ from stepnx.core.errors import StepNXError, UnsupportedFormatError
 from stepnx.core.validation import validate
 from stepnx.exporters.ssc import (
     SSC_DIFFICULTIES,
+    UNKNOWN_NOTE_ERROR,
+    UNKNOWN_NOTE_POLICIES,
     SscSongInfo,
     difficulty_for_name,
     export_chart,
@@ -729,6 +731,12 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--description")
     export_parser.add_argument("--difficulty", choices=SSC_DIFFICULTIES)
     export_parser.add_argument("--meter", type=int)
+    export_parser.add_argument(
+        "--unknown-notes",
+        choices=UNKNOWN_NOTE_POLICIES,
+        default=UNKNOWN_NOTE_ERROR,
+        help="what to do with a note byte the SSC dialect has no character for",
+    )
     export_parser.add_argument("--profile", default="nxa-native")
     export_parser.add_argument("--force", action="store_true")
     export_parser.add_argument("--json", action="store_true")
@@ -747,6 +755,7 @@ def _export_ssc(args: argparse.Namespace) -> int:
 
     exported: list[tuple[Path, object]] = []
     diagnostics = []
+    routes: list[dict[str, str]] = []
     for source in sources:
         document = load(source, profile=args.profile)
         if document.effective_lightmap:
@@ -756,8 +765,10 @@ def _export_ssc(args: argparse.Namespace) -> int:
             description=args.description or source.name,
             difficulty=args.difficulty or difficulty_for_name(source.name),
             meter=args.meter,
+            unknown_notes=args.unknown_notes,
         )
         exported.append((source, report.chart))
+        routes.append({"source": source.name, "route": report.route_summary})
         diagnostics.extend(
             {
                 "source": source.name,
@@ -797,6 +808,7 @@ def _export_ssc(args: argparse.Namespace) -> int:
         "sources": [str(source) for source, _ in exported],
         "written": written,
         "charts": len(exported),
+        "routes": routes,
         "diagnostics": diagnostics,
     }
     if args.json:
@@ -804,6 +816,9 @@ def _export_ssc(args: argparse.Namespace) -> int:
     else:
         status = "CLEAN" if not diagnostics else "ATTENTION"
         print(f"{status}: exported {len(exported)} chart(s) to {', '.join(written)}")
+        for entry in routes:
+            if entry["route"] != "single route":
+                print(f"  {entry['source']}: route {entry['route']}")
         for diagnostic in diagnostics:
             repeats = diagnostic["occurrences"]
             suffix = f" (x{repeats})" if repeats > 1 else ""
