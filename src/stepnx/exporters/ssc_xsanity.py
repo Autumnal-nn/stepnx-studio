@@ -1,7 +1,7 @@
 """Runtime-facing rendering for semantic XSanity SSC exports.
 
 The random compiler in :mod:`stepnx.exporters.ssc_random` builds chart state and
-control cells.  This module owns the standalone XSanity envelope and the small
+control cells. This module owns the standalone XSanity envelope and the small
 runtime-specific adaptations that make those generated Steps behave like the
 working Sanity corpus.
 
@@ -11,20 +11,20 @@ The current rules are evidence-driven:
   A 20-way runtime probe stayed on the base/first route without it; adding only
   that tag immediately produced different helper outcomes;
 * generated ``LABELTYPE:DIVISION`` Steps receive a non-empty, unique
-  ``#CHARTNAME`` to match the corpus shape.  The chart-name requirement has not
+  ``#CHARTNAME`` to match the corpus shape. The chart-name requirement has not
   been isolated independently from the song-level random gate;
-* ``#TICKCOUNTS`` follows the writer's virtual row grid.  The current mechanical
+* ``#TICKCOUNTS`` follows the writer's virtual row grid. The current mechanical
   projection maps one NX row to one SSC row and defines one SSC beat as
   ``LINE_BEAT_SPLIT`` rows, so using the same value as the tick count preserves
   one hold tick per source NX row even when BPM is rescaled;
-* a Wrap control that lands inside a zero-scroll block is moved to one SSC beat
-  before that block starts.  Runtime testing showed that firing T inside a
-  multi-second zero-scroll section can swap the branch only after its arrows
-  have already entered the visible field.  Ordinary scrolling keeps the
-  compiler's one-beat lead, matching the known Cleaner recipe.
+* Wrap is scheduled with at least two *visual* beats of lookahead. Runtime
+  testing showed that one musical beat can still switch a branch after its
+  arrows are already visible. Visual distance is accumulated from the source
+  NX scroll magnitude, so a zero-scroll section contributes no lookahead and
+  forces T farther back, while faster scrolling needs fewer source rows.
 
-This does not make ``LINE_BEAT_SPLIT == 8`` a property of SSC.  It is merely the
-coordinate system of the current writer.  A later rational/adaptive timeline
+This does not make ``LINE_BEAT_SPLIT == 8`` a property of SSC. It is merely the
+coordinate system of the current writer. A later rational/adaptive timeline
 compiler can replace the grid, tick-count projection, and runtime lookahead
 rules together.
 """
@@ -32,6 +32,7 @@ rules together.
 from __future__ import annotations
 
 from dataclasses import replace
+from math import ceil
 
 from stepnx.exporters.ssc import (
     LINES_PER_MEASURE,
@@ -47,6 +48,7 @@ _CORPUS_VERSION_LINE = "#VERSION:0.83;"
 _PR_VERSION_LINE = "#VERSION:0.83 xSanity;"
 _RANDOM_SPECIAL_LINE = "#SPECIAL:LEVEL,RANDOM;"
 _WRAP = "T"
+_MIN_VISUAL_LOOKAHEAD_BEATS = 2.0
 
 
 def _chart_name(item: SscLabeledChart) -> str:
@@ -149,13 +151,52 @@ def _random_return_splits(report: SscRandomExportReport) -> tuple[int, ...]:
     return tuple(result)
 
 
-def _containing_split(
-    bounds: dict[int, tuple[int, int]], row_index: int
-) -> int | None:
-    for split_index, (start, end) in bounds.items():
-        if start <= row_index < end:
-            return split_index
-    return None
+def _visual_lookahead_row(
+    report: SscRandomExportReport,
+    random_split_index: int,
+    *,
+    minimum_visual_beats: float = _MIN_VISUAL_LOOKAHEAD_BEATS,
+) -> int:
+    """Return the latest row that leaves enough visual travel before a random split.
+
+    The writer maps one NX row to 1/8 SSC beat and projects
+    ``SSC_SCROLL = NX_SCROLL * 8``. Therefore one source row contributes
+    ``abs(NX_SCROLL)`` normal-scroll beats of visual distance. Zero scroll
+    contributes no distance and is crossed completely while walking backward.
+    """
+
+    if minimum_visual_beats <= 0.0:
+        raise ValueError("minimum visual lookahead must be greater than zero")
+
+    snapshot = report.program.base_snapshot
+    bounds = _split_bounds(report)
+    target_row = bounds[random_split_index][0]
+    remaining = float(minimum_visual_beats)
+    cursor = target_row
+
+    for split_index in reversed(tuple(bounds)):
+        start, end = bounds[split_index]
+        segment_end = min(end, cursor)
+        if segment_end <= start:
+            continue
+
+        split = snapshot.splits[split_index]
+        block = snapshot.active_block(split.stable_id)
+        visual_per_row = abs(float(block.scroll))
+        available_rows = segment_end - start
+
+        if visual_per_row > 0.0:
+            needed_rows = max(1, ceil((remaining - 1e-12) / visual_per_row))
+            if needed_rows <= available_rows:
+                return segment_end - needed_rows
+            remaining -= available_rows * visual_per_row
+
+        cursor = start
+
+    raise SscExportError(
+        f"random split {random_split_index} has less than "
+        f"{minimum_visual_beats:g} visual beats available before it for a runtime-safe Wrap"
+    )
 
 
 def _inject_wrap(
@@ -175,15 +216,15 @@ def _inject_wrap(
             rows[row_index] = "".join(cells)
             return row_index
     raise SscExportError(
-        "no empty lane is available for a runtime-safe Wrap before a zero-scroll section"
+        "no empty lane is available for a runtime-safe Wrap with the required visual lookahead"
     )
 
 
-def _retime_wraps_for_zero_scroll(
+def _retime_wraps_for_visual_lookahead(
     report: SscRandomExportReport,
     chart: SscChart,
 ) -> SscChart:
-    """Move T before a zero-scroll lookahead region when the compiler put it inside one."""
+    """Move each T early enough to provide at least two visual beats of lead."""
 
     analysis = report.program.analysis
     random_splits = tuple(analysis.random_split_indices)
@@ -207,24 +248,21 @@ def _retime_wraps_for_zero_scroll(
 
     for ordinal, (random_split_index, control) in enumerate(zip(random_splits, controls)):
         old_row, old_lane = control
-        containing_index = _containing_split(bounds, old_row)
-        if containing_index is not None:
-            containing_split = snapshot.splits[containing_index]
-            containing_block = snapshot.active_block(containing_split.stable_id)
-            if containing_block.scroll == 0.0:
-                zero_scroll_start, _ = bounds[containing_index]
-                latest = zero_scroll_start - LINE_BEAT_SPLIT
-                if latest < previous_return_end:
-                    raise SscExportError(
-                        f"random split {random_split_index} needs Wrap before zero-scroll split "
-                        f"{containing_index}, but that would overlap the previous random region"
-                    )
+        latest = _visual_lookahead_row(report, random_split_index)
+        if latest < previous_return_end:
+            raise SscExportError(
+                f"random split {random_split_index} cannot keep "
+                f"{_MIN_VISUAL_LOOKAHEAD_BEATS:g} visual beats of Wrap lookahead without "
+                "overlapping the previous random region; dense random clusters require "
+                "trajectory/joint-state compilation"
+            )
 
-                old_cells = _split_cells(rows[old_row], columns)
-                old_cells[old_lane] = "0"
-                rows[old_row] = "".join(old_cells)
-                _inject_wrap(rows, columns, latest, previous_return_end)
-                changed = True
+        if old_row > latest:
+            old_cells = _split_cells(rows[old_row], columns)
+            old_cells[old_lane] = "0"
+            rows[old_row] = "".join(old_cells)
+            _inject_wrap(rows, columns, latest, previous_return_end)
+            changed = True
 
         previous_return_end = bounds[return_splits[ordinal]][1]
 
@@ -237,7 +275,7 @@ def _runtime_charts(report: SscRandomExportReport) -> tuple[SscLabeledChart, ...
     charts = list(report.charts)
     if report.helper_count and charts:
         base = charts[0]
-        runtime_chart = _retime_wraps_for_zero_scroll(report, base.chart)
+        runtime_chart = _retime_wraps_for_visual_lookahead(report, base.chart)
         if runtime_chart is not base.chart:
             charts[0] = replace(base, chart=runtime_chart)
     return tuple(charts)
@@ -282,7 +320,9 @@ def _decorate_runtime_metadata(
             awaiting_description = False
 
     if random_mode and not random_gate_inserted:
-        raise SscExportError("rendered simfile is missing #TITLE, so the XSanity random gate cannot be inserted")
+        raise SscExportError(
+            "rendered simfile is missing #TITLE, so the XSanity random gate cannot be inserted"
+        )
     if chart_index + 1 != len(charts):
         raise SscExportError(
             f"rendered simfile contains {chart_index + 1} chart sections but "
