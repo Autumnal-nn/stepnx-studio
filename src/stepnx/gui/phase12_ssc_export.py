@@ -114,7 +114,7 @@ def _diagnostic_lines(report: SscRandomExportReport) -> list[str]:
 
 def _preflight_text(report: SscRandomExportReport, defaults: SscGuiExportDefaults) -> tuple[str, str]:
     pool = report.program.pool
-    probability = "exact"
+    probability = "exact marginals"
     if not report.exact_probabilities:
         probability = (
             f"approximate, max error {report.max_probability_error * 100:.3f} pp "
@@ -124,6 +124,7 @@ def _preflight_text(report: SscRandomExportReport, defaults: SscGuiExportDefault
     summary = [
         f"Chart: {defaults.description}",
         f"Random helpers: {report.helper_count}",
+        f"Random windows: {report.window_count}",
         f"Random probabilities: {probability}",
         f"Music: {defaults.music or '(not detected)'}",
     ]
@@ -234,7 +235,8 @@ def _choose_ssc_export(window) -> None:
 
     _publish_diagnostics(window, entry.path.name, report)
     window.statusBar().showMessage(
-        f"Exported {entry.path.name} to {target.name} with {report.helper_count} random helper(s)",
+        f"Exported {entry.path.name} to {target.name} with {report.helper_count} random helper(s) "
+        f"across {report.window_count} window(s)",
         8000,
     )
 
