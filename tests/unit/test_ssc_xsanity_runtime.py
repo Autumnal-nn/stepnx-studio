@@ -93,7 +93,7 @@ class XSanityRuntimeExportTest(unittest.TestCase):
 
         self.assertNotIn("#SPECIAL:LEVEL,RANDOM;", text)
 
-    def test_wrap_moves_before_zero_scroll_block(self) -> None:
+    def test_wrap_crosses_zero_scroll_then_keeps_two_visual_beats(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
@@ -106,12 +106,11 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         report = compile_ssc_export(parse_bytes(raw), description="ZERO_SCROLL.NX")
         text = render_compiled_simfile(report, SscSongInfo(title="Zero-scroll guard"))
 
-        # Random split starts at row 64. The semantic compiler places T at row 56,
-        # inside the zero-scroll block (32..63). Runtime output moves it to row 24,
-        # one beat before that zero-scroll section starts.
-        self.assertEqual(wrap_rows(text), [24])
+        # Random starts at row 64. Rows 32..63 have zero visual travel, so the
+        # two visual beats must come from 16 rows of normal 0.125 NX scroll.
+        self.assertEqual(wrap_rows(text), [16])
 
-    def test_wrap_keeps_one_beat_lead_when_preceding_scroll_moves(self) -> None:
+    def test_wrap_keeps_two_visual_beats_at_normal_scroll(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
@@ -124,7 +123,25 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         report = compile_ssc_export(parse_bytes(raw), description="MOVING_SCROLL.NX")
         text = render_compiled_simfile(report, SscSongInfo(title="Moving scroll"))
 
-        self.assertEqual(wrap_rows(text), [56])
+        # At normal scroll each NX row contributes 0.125 visual beat, so two
+        # visual beats require 16 rows of lead from the random start at row 64.
+        self.assertEqual(wrap_rows(text), [48])
+
+    def test_wrap_uses_more_rows_when_scroll_is_slower(self) -> None:
+        two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
+        raw = document(
+            [
+                (0x00, [block([EMPTY_ROW] * 64, scroll=0.0625)]),
+                (0x80, two),
+                (0x00, [block([EMPTY_ROW] * 32, scroll=0.125)]),
+            ]
+        )
+        report = compile_ssc_export(parse_bytes(raw), description="SLOW_SCROLL.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Slow-scroll guard"))
+
+        # Half normal visual speed needs 32 source rows for the same two-beat
+        # visible lead.
+        self.assertEqual(wrap_rows(text), [32])
 
     def test_generated_chartnames_are_unique_beyond_historical_nine_routes(self) -> None:
         twenty = [block([EMPTY_ROW] * 8) for _ in range(20)]
