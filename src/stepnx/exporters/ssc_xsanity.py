@@ -9,8 +9,9 @@ mechanical PR #27 writer:
 
 * generated ``LABELTYPE:DIVISION`` Steps receive a non-empty, unique
   ``#CHARTNAME``.  The Sanity corpus does this consistently for Division helper
-  Steps and the runtime test of a 20-way pool showed that omitting that identity
-  leaves the controller on its base/first route;
+  Steps.  Our first 20-way runtime probe omitted those identities and remained
+  on the base/first route, so the exporter now matches the proven corpus shape
+  before we draw stronger conclusions about the exact loader requirement;
 * ``#TICKCOUNTS`` follows the writer's virtual row grid.  The current mechanical
   projection maps one NX row to one SSC row and defines one SSC beat as
   ``LINE_BEAT_SPLIT`` rows, so using the same value as the tick count preserves
