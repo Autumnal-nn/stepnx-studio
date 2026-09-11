@@ -22,8 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Developer probe for the semantic NX -> XSanity random compiler. "
-            "This is intentionally separate from the public StepNX CLI until "
-            "the generated T/O helper recipe is runtime-validated."
+            "The default profile now requests exact marginal random probabilities "
+            "up to the known 2520-helper corpus outliers."
         )
     )
     parser.add_argument("path", type=Path)
@@ -33,8 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--title")
     parser.add_argument("--artist", default="")
     parser.add_argument("--music", default="")
-    parser.add_argument("--max-helpers", type=int, default=128)
-    parser.add_argument("--max-probability-error-pp", type=float, default=1.25)
+    parser.add_argument("--max-helpers", type=int, default=2520)
+    parser.add_argument("--max-probability-error-pp", type=float, default=0.0)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -58,14 +58,18 @@ def main() -> int:
         music=args.music,
     )
     target = args.output or args.path.with_suffix(".ssc")
-    _write_text(target, render_compiled_simfile(report, song), force=args.force)
+    text = render_compiled_simfile(report, song)
+    _write_text(target, text, force=args.force)
 
     analysis = report.program.analysis
     pool = report.program.pool
+    size_bytes = len(text.encode("utf-8"))
     result = {
         "source": str(args.path),
         "written": str(target),
+        "output_bytes": size_bytes,
         "random_decisions": len(analysis.random_split_indices),
+        "random_windows": report.window_count,
         "bank_episodes": len(analysis.bank_episodes),
         "max_live_banks": analysis.max_live_banks,
         "helper_count": report.helper_count,
@@ -85,11 +89,12 @@ def main() -> int:
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        exact = "exact" if report.exact_probabilities else "approximate"
+        exact = "exact marginals" if report.exact_probabilities else "approximate"
         print(
             f"wrote {target}: {report.helper_count} helper(s), "
+            f"{report.window_count} window(s), "
             f"{len(analysis.random_split_indices)} random decision(s), "
-            f"{exact} probabilities"
+            f"{exact}, {size_bytes / (1024 * 1024):.2f} MiB"
         )
         if not report.exact_probabilities:
             print(
