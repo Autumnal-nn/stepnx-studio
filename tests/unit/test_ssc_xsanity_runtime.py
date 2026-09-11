@@ -1,72 +1,142 @@
 from __future__ import annotations
 
+import struct
 import unittest
-from types import SimpleNamespace
 
-from stepnx.exporters import SscSongInfo, render_compiled_simfile
-from stepnx.exporters.ssc import SscChart
-from stepnx.exporters.ssc_random import SscLabeledChart
+from stepnx.codecs.nx20 import parse_bytes
+from stepnx.exporters.ssc import LINES_PER_MEASURE, SscSongInfo
+from stepnx.exporters.ssc_random import compile_ssc_export
+from stepnx.exporters.ssc_xsanity import render_compiled_simfile
 
-
-def chart(description: str, notes: str) -> SscChart:
-    return SscChart(
-        steps_type="pump-double",
-        difficulty="Edit",
-        description=description,
-        meter=22,
-        credit="",
-        offset=0.0,
-        bpms="0=100,",
-        stops="",
-        delays="",
-        warps="",
-        scrolls="0=2,",
-        speeds="0=1=1=1,",
-        notes=notes,
-        noteskin_banks=(),
-    )
+from tests.fixture_factory import f32, metadata, u32
 
 
-class XSanityRuntimeRenderTest(unittest.TestCase):
-    def test_compiled_steps_get_unique_chartnames_labels_and_tickcounts(self) -> None:
-        base = SscLabeledChart(chart("D22_22.NX", "T000000000\n"), "NORMAL")
-        helper1 = SscLabeledChart(
-            chart("D22_22.NX [StepNX random 1]", "O000000000\n"),
-            "DIVISION",
-            0,
+EMPTY_ROW = bytes((0x80, 0x00, 0x00, 0x00))
+
+
+def block(
+    rows: list[bytes],
+    *,
+    bpm: float = 120.0,
+    scroll: float = 0.125,
+    beat_split: int = 8,
+) -> bytes:
+    body = bytearray()
+    body += f32(0.0) + f32(bpm) + f32(scroll) + f32(0.0) + f32(1.0)
+    body += bytes((beat_split, 4, 0, 0))
+    body += metadata()
+    body += u32(len(rows))
+    body += b"".join(rows)
+    return bytes(body)
+
+
+def document(splits: list[tuple[int, list[bytes]]], *, columns: int = 5) -> bytes:
+    data = bytearray(b"NX20")
+    data += u32(0) + u32(columns) + u32(0)
+    data += metadata((1001, 18))
+    data += u32(len(splits))
+    for selector, blocks in splits:
+        data += bytes((selector, 0)) + struct.pack("<H", 0)
+        data += metadata()
+        data += u32(len(blocks))
+        data += b"".join(blocks)
+    return bytes(data)
+
+
+def first_chart_rows(text: str, *, columns: int = 5) -> list[str]:
+    section = text.split("#NOTEDATA:;", 1)[1].split("#NOTEDATA:;", 1)[0]
+    notes = section.split("#NOTES:\n", 1)[1].rstrip("\n")
+    blank = "0" * columns
+    rows: list[str] = []
+    for measure in notes.split(",\n"):
+        lines = measure.splitlines()
+        if lines == [blank]:
+            lines = [blank] * LINES_PER_MEASURE
+        rows.extend(lines)
+    return rows
+
+
+def wrap_rows(text: str, *, columns: int = 5) -> list[int]:
+    rows = first_chart_rows(text, columns=columns)
+    return [index for index, line in enumerate(rows) if "T" in line]
+
+
+class XSanityRuntimeExportTest(unittest.TestCase):
+    def test_random_pool_emits_runtime_envelope(self) -> None:
+        two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
+        raw = document(
+            [
+                (0x00, [block([EMPTY_ROW] * 32)]),
+                (0x80, two),
+                (0x00, [block([EMPTY_ROW] * 32)]),
+            ]
         )
-        helper2 = SscLabeledChart(
-            chart("D22_22.NX [StepNX random 2]", "O000000000\n"),
-            "DIVISION",
-            1,
-        )
-        report = SimpleNamespace(charts=(base, helper1, helper2))
-
-        text = render_compiled_simfile(report, SscSongInfo(title="1309"))
+        report = compile_ssc_export(parse_bytes(raw), description="RANDOM.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Runtime random"))
 
         self.assertTrue(text.startswith("#VERSION:0.83;\n"))
         self.assertNotIn("#VERSION:0.83 xSanity;", text)
+        self.assertEqual(text.count("#SPECIAL:LEVEL,RANDOM;"), 1)
         self.assertIn("#CHARTNAME:STEPNX_BASE;", text)
         self.assertIn("#CHARTNAME:STEPNX_RANDOM_001;", text)
         self.assertIn("#CHARTNAME:STEPNX_RANDOM_002;", text)
-        self.assertEqual(text.count("#CHARTNAME:"), 3)
         self.assertEqual(text.count("#LABELTYPE:NORMAL;"), 1)
         self.assertEqual(text.count("#LABELTYPE:DIVISION;"), 2)
         self.assertEqual(text.count("#TICKCOUNTS:0.000000=8;"), 3)
-        # Bare T/O are valid Sanity cells (e.g. Cleaner); the runtime envelope,
-        # not the control-token spelling, is what this layer hardens.
-        self.assertIn("T000000000", text)
-        self.assertIn("O000000000", text)
+        self.assertIn("T0000", text)
+        self.assertIn("O0000", text)
+
+    def test_non_random_export_does_not_claim_random_special(self) -> None:
+        raw = document([(0x00, [block([EMPTY_ROW] * 32)])])
+        report = compile_ssc_export(parse_bytes(raw), description="NORMAL.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Runtime normal"))
+
+        self.assertNotIn("#SPECIAL:LEVEL,RANDOM;", text)
+
+    def test_wrap_moves_before_zero_scroll_block(self) -> None:
+        two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
+        raw = document(
+            [
+                (0x00, [block([EMPTY_ROW] * 32, scroll=0.125)]),
+                (0x00, [block([EMPTY_ROW] * 32, scroll=0.0)]),
+                (0x80, two),
+                (0x00, [block([EMPTY_ROW] * 32, scroll=0.125)]),
+            ]
+        )
+        report = compile_ssc_export(parse_bytes(raw), description="ZERO_SCROLL.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Zero-scroll guard"))
+
+        # Random split starts at row 64. The semantic compiler places T at row 56,
+        # inside the zero-scroll block (32..63). Runtime output moves it to row 24,
+        # one beat before that zero-scroll section starts.
+        self.assertEqual(wrap_rows(text), [24])
+
+    def test_wrap_keeps_one_beat_lead_when_preceding_scroll_moves(self) -> None:
+        two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
+        raw = document(
+            [
+                (0x00, [block([EMPTY_ROW] * 32, scroll=0.125)]),
+                (0x00, [block([EMPTY_ROW] * 32, scroll=0.125)]),
+                (0x80, two),
+                (0x00, [block([EMPTY_ROW] * 32, scroll=0.125)]),
+            ]
+        )
+        report = compile_ssc_export(parse_bytes(raw), description="MOVING_SCROLL.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Moving scroll"))
+
+        self.assertEqual(wrap_rows(text), [56])
 
     def test_generated_chartnames_are_unique_beyond_historical_nine_routes(self) -> None:
-        items = [SscLabeledChart(chart("base", "0000000000\n"), "NORMAL")]
-        items.extend(
-            SscLabeledChart(chart(f"helper {index}", "0000000000\n"), "DIVISION", index)
-            for index in range(20)
+        twenty = [block([EMPTY_ROW] * 8) for _ in range(20)]
+        raw = document(
+            [
+                (0x00, [block([EMPTY_ROW] * 32)]),
+                (0x80, twenty),
+                (0x00, [block([EMPTY_ROW] * 32)]),
+            ]
         )
-        report = SimpleNamespace(charts=tuple(items))
-
-        text = render_compiled_simfile(report, SscSongInfo(title="1309"))
+        report = compile_ssc_export(parse_bytes(raw), description="TWENTY.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Twenty routes"))
 
         names = [
             line.removeprefix("#CHARTNAME:").removesuffix(";")
