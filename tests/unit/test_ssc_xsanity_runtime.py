@@ -43,13 +43,13 @@ def document(splits: list[tuple[int, list[bytes]]], *, columns: int = 5) -> byte
     return bytes(data)
 
 
-def chart_rows(text: str, chart_index: int = 0, *, columns: int = 5) -> list[str]:
-    sections = text.split("#NOTEDATA:;")[1:]
-    section = sections[chart_index]
-    notes = section.split("#NOTES:\n", 1)[1].split(";", 1)[0].rstrip("\n")
+def notes_rows(notes: str, *, columns: int = 5) -> list[str]:
     blank = "0" * columns
+    stripped = notes.rstrip("\n")
+    if not stripped:
+        return []
     rows: list[str] = []
-    for measure in notes.split(",\n"):
+    for measure in stripped.split(",\n"):
         lines = measure.splitlines()
         if lines == [blank]:
             lines = [blank] * LINES_PER_MEASURE
@@ -57,13 +57,25 @@ def chart_rows(text: str, chart_index: int = 0, *, columns: int = 5) -> list[str
     return rows
 
 
+def chart_rows(text: str, chart_index: int = 0, *, columns: int = 5) -> list[str]:
+    sections = text.split("#NOTEDATA:;")[1:]
+    section = sections[chart_index]
+    notes = section.split("#NOTES:\n", 1)[1].split(";", 1)[0]
+    return notes_rows(notes, columns=columns)
+
+
 def wrap_rows(text: str, *, columns: int = 5) -> list[int]:
     rows = chart_rows(text, 0, columns=columns)
     return [index for index, line in enumerate(rows) if "T" in line]
 
 
+def planning_wrap_rows(report, *, columns: int = 5) -> list[int]:
+    rows = notes_rows(report.charts[0].chart.notes, columns=columns)
+    return [index for index, line in enumerate(rows) if "T" in line]
+
+
 class XSanityRuntimeExportTest(unittest.TestCase):
-    def test_random_pool_emits_runtime_envelope(self) -> None:
+    def test_random_pool_emits_runtime_envelope_with_one_startup_swap(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
@@ -85,8 +97,8 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         self.assertEqual(text.count("#LABELTYPE:NORMAL;"), 1)
         self.assertEqual(text.count("#LABELTYPE:DIVISION;"), 2)
         self.assertEqual(text.count("#TICKCOUNTS:0.000000=8;"), 3)
-        self.assertIn("T0000", text)
-        self.assertIn("O0000", text)
+        self.assertEqual(wrap_rows(text), [0])
+        self.assertNotIn("O0000", text)
 
     def test_non_random_export_does_not_claim_random_special(self) -> None:
         raw = document([(0x00, [block([EMPTY_ROW] * 32)])])
@@ -96,7 +108,7 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         self.assertEqual(report.window_count, 0)
         self.assertNotIn("#SPECIAL:LEVEL,RANDOM;", text)
 
-    def test_wrap_crosses_zero_scroll_to_keep_two_visual_beats(self) -> None:
+    def test_semantic_planner_crosses_zero_scroll_for_two_visual_beats(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
@@ -107,11 +119,14 @@ class XSanityRuntimeExportTest(unittest.TestCase):
             ]
         )
         report = compile_ssc_export(parse_bytes(raw), description="ZERO_SCROLL.NX")
+
+        self.assertEqual(planning_wrap_rows(report), [16])
+        # Runtime projection deliberately ignores this mid-song seam and swaps
+        # before play begins instead.
         text = render_compiled_simfile(report, SscSongInfo(title="Zero-scroll guard"))
+        self.assertEqual(wrap_rows(text), [0])
 
-        self.assertEqual(wrap_rows(text), [16])
-
-    def test_wrap_keeps_two_visual_beats_when_preceding_scroll_moves(self) -> None:
+    def test_semantic_planner_keeps_two_visual_beats_when_scroll_moves(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
@@ -122,11 +137,10 @@ class XSanityRuntimeExportTest(unittest.TestCase):
             ]
         )
         report = compile_ssc_export(parse_bytes(raw), description="MOVING_SCROLL.NX")
-        text = render_compiled_simfile(report, SscSongInfo(title="Moving scroll"))
 
-        self.assertEqual(wrap_rows(text), [48])
+        self.assertEqual(planning_wrap_rows(report), [48])
 
-    def test_dense_load_time_randoms_coalesce_into_one_helper_window(self) -> None:
+    def test_dense_load_time_randoms_coalesce_for_planning_but_render_one_startup_swap(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         three = [block([EMPTY_ROW] * 8) for _ in range(3)]
         raw = document(
@@ -143,10 +157,11 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         self.assertEqual(report.helper_count, 6)
         self.assertEqual(report.window_count, 1)
         self.assertEqual(report.windows[0].random_split_indices, (1, 2))
-        self.assertEqual(len(wrap_rows(text)), 1)
+        self.assertEqual(wrap_rows(text), [0])
+        self.assertNotIn("O0000", text)
         self.assertIn("ssc.random-window-compressed-joint", {d.code for d in report.diagnostics})
 
-    def test_sparse_helpers_drop_deterministic_tail_after_final_return(self) -> None:
+    def test_runtime_helpers_are_rebuilt_full_length_and_have_no_returns(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
@@ -155,13 +170,13 @@ class XSanityRuntimeExportTest(unittest.TestCase):
                 (0x00, [block([EMPTY_ROW] * 256)]),
             ]
         )
-        report = compile_ssc_export(parse_bytes(raw), description="SPARSE.NX")
-        text = render_compiled_simfile(report, SscSongInfo(title="Sparse helper"))
+        report = compile_ssc_export(parse_bytes(raw), description="FULL_HELPER.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Full runtime helper"))
 
         base_rows = chart_rows(text, 0)
         helper_rows = chart_rows(text, 1)
-        self.assertLess(len(helper_rows), len(base_rows))
-        self.assertTrue(any("O" in row for row in helper_rows))
+        self.assertEqual(len(helper_rows), len(base_rows))
+        self.assertFalse(any("O" in row for row in helper_rows))
 
     def test_generated_chartnames_are_unique_beyond_historical_nine_routes(self) -> None:
         twenty = [block([EMPTY_ROW] * 8) for _ in range(20)]
