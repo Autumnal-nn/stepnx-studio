@@ -16,7 +16,7 @@ from stepnx.authoring.snapshot import AuthoringSnapshot
 
 
 class RandomCompileError(ValueError):
-    """Raised when Wrap/Wrap0 cannot represent the NX random state safely."""
+    """Raised when random state cannot be materialized safely."""
 
 
 class RandomControlKind(str, Enum):
@@ -33,12 +33,17 @@ class RandomControl:
 
 @dataclass(frozen=True, slots=True)
 class CompiledRandomProgram:
-    """Target-independent plan for projecting NX random state onto T/O helpers.
+    """Target-independent materialization of NX random state.
 
-    ``helper_snapshots`` are ordinary authoring snapshots with the random and
-    bank-follow block choices already materialized.  They deliberately contain
-    no SSC-specific cells.  ``controls`` tells the SSC layer where a Wrap draw
-    must happen and where helper execution can safely return to the base chart.
+    ``helper_snapshots`` are ordinary authoring snapshots with every random and
+    bank-follow block choice already materialized for one helper identity. They
+    deliberately contain no SSC-specific cells.
+
+    ``controls`` retains the primitive per-decision T/O boundaries discovered
+    from NX state. A target exporter may coalesce several decisions into one
+    larger execution window when a runtime cannot safely switch charts between
+    them. This is how dense load-time random sequences can be represented by a
+    joint helper state without losing bank followers.
     """
 
     base_snapshot: AuthoringSnapshot
@@ -70,7 +75,7 @@ def _store_for_follower(
     return None
 
 
-def _validate_wrap_compilable(
+def _validate_materializable(
     snapshot: AuthoringSnapshot,
     analysis: RandomStructureAnalysis,
 ) -> None:
@@ -78,27 +83,13 @@ def _validate_wrap_compilable(
         first = analysis.diagnostics[0]
         raise RandomCompileError(f"{first.code} at split {first.split_index}: {first.message}")
 
-    # A plain T changes the current helper identity.  While a bank is live that
-    # identity is the bank memory, so a second random draw would destroy it.
-    # Joint-state compilation will eventually cover this case; until then it is
-    # better to fail than silently emit a wrong follower.
-    for episode in analysis.bank_episodes:
-        for split_index in analysis.random_split_indices:
-            if split_index == episode.store_split_index:
-                continue
-            if episode.store_split_index < split_index <= episode.last_use_split_index:
-                raise RandomCompileError(
-                    "random draw at split "
-                    f"{split_index} occurs while bank {episode.bank_id} from split "
-                    f"{episode.store_split_index} is still live"
-                )
-
-    if analysis.max_live_banks > 1:
-        raise RandomCompileError(
-            f"{analysis.max_live_banks} banks are simultaneously live; joint-state compilation "
-            "is required"
-        )
-
+    # Overlapping live banks and a new draw while another bank is live are not
+    # intrinsically invalid once a helper identity represents the *joint* state
+    # of several load-time decisions. The SSC layer decides whether those
+    # decisions can use separate runtime Wraps or must be coalesced into one
+    # execution window. At this layer we only need every random start to have a
+    # materializable block choice and every named follower to have passed the
+    # structural analysis above.
     for split_index in analysis.random_split_indices:
         if not snapshot.splits[split_index].blocks:
             raise RandomCompileError(f"random split {split_index} has no blocks")
@@ -128,7 +119,7 @@ def _helper_choices(
                 choices[helper_index][follower_index] = block_index
 
     # Named followers are only legal after a store, and the structure analysis
-    # has already rejected orphans.  Assert that every one was materialized.
+    # has already rejected orphans. Assert that every one was materialized.
     for split_index, selector in enumerate(analysis.selectors):
         if not selector.follows_named_bank:
             continue
@@ -196,15 +187,15 @@ def compile_random_program(
     snapshot: AuthoringSnapshot,
     policy: RandomPoolPolicy = RandomPoolPolicy(),
 ) -> CompiledRandomProgram:
-    """Compile the NX random/bank machine into helper snapshots and T/O boundaries.
+    """Materialize NX random/bank choices into reusable helper snapshots.
 
-    This first implementation intentionally supports the corpus-dominant case
-    where at most one stored bank is live at once.  Overlapping banks are
-    rejected explicitly until joint-state compilation is implemented.
+    A helper can encode several simultaneously-live banks or several load-time
+    random choices at once. Runtime-specific constraints, such as how much
+    visual lead XSanity needs before a Wrap, are handled later by the exporter.
     """
 
     analysis = analyze_random_structure(snapshot)
-    _validate_wrap_compilable(snapshot, analysis)
+    _validate_materializable(snapshot, analysis)
     pool = plan_random_pool(snapshot, policy)
     helper_choices = _helper_choices(snapshot, analysis, pool)
     helpers = tuple(
