@@ -1,27 +1,32 @@
 """Runtime-facing rendering for semantic XSanity SSC exports.
 
-The semantic compiler in :mod:`stepnx.exporters.ssc_random` owns helper-window
-planning, two-visual-beat Wrap lead, and sparse helper note payloads. This module
-applies the standalone XSanity metadata envelope and can combine several NX
-charts from one song folder into one SSC.
+The semantic compiler materializes NX load-time random choices into XSanity
+``LABELTYPE:DIVISION`` helpers. Runtime testing showed that changing Steps in
+the middle of gameplay is not transparent: visible taps can disappear and an
+active hold can be severed even when both charts contain equivalent nearby
+notes. NX ``0x8_`` decisions are load-time decisions, so the XSanity runtime
+projection now performs exactly one StepSwap before the first judged note and
+keeps the selected helper active for the rest of the chart.
+
+The compiler may still build sparse multi-window helpers internally because
+that representation is compact and convenient for planning. This renderer
+reconstructs each full helper by overlaying those sparse random windows onto
+the NORMAL chart, removes every Wrap0 return, then places one T in the earliest
+safe pre-note row. That avoids all mid-song StepSwap seams while retaining the
+chosen helper pool and per-split ticket distribution.
 
 Current evidence-driven rules:
 
 * random helper pools require song-level ``#SPECIAL:LEVEL,RANDOM;``;
 * generated ``LABELTYPE:DIVISION`` Steps receive a non-empty unique
   ``#CHARTNAME``;
-* ``#TICKCOUNTS`` follows the writer's virtual row grid. The current projection
-  maps one NX row to one SSC row and defines one SSC beat as
-  ``LINE_BEAT_SPLIT`` rows, so the same tick count preserves one hold tick per
-  source NX row after BPM rescaling;
-* XSanity Wrap selects from the DIVISION pool of the same StepsType. Until a
-  narrower runtime filter is proven, one combined SSC may therefore contain at
-  most one random source chart for each StepsType. Non-random charts of that
-  StepsType are safe because they remain LABELTYPE:NORMAL;
-* changing Steps while a long note is already active severs that sustain in
-  runtime. If the semantic compiler's visually-safe T row lands inside a hold
-  or roll, the runtime layer moves T backward to the latest hold-safe row and
-  restores the newly exposed common prefix in every sparse helper.
+* ``#TICKCOUNTS`` follows the writer's virtual row grid;
+* XSanity Wrap selects from the DIVISION pool of the same StepsType, so a
+  combined SSC may contain at most one random source chart per StepsType until
+  a narrower runtime filter is proven;
+* startup random requires at least one row before the first judged note. If the
+  source begins immediately at row zero, export fails instead of gambling on
+  same-row StepSwap ordering.
 """
 
 from __future__ import annotations
@@ -42,8 +47,6 @@ _PR_VERSION_LINE = "#VERSION:0.83 xSanity;"
 _RANDOM_SPECIAL_LINE = "#SPECIAL:LEVEL,RANDOM;"
 _WRAP = "T"
 _RETURN = "O"
-_HOLD_HEAD_KINDS = frozenset({"2", "4"})
-_HOLD_TAIL_KIND = "3"
 
 
 def _single_chart_name(item: SscLabeledChart) -> str:
@@ -145,42 +148,6 @@ def _measure_rows(rows: list[str], columns: int) -> str:
     return ",\n".join(parts)
 
 
-def _cell_kind(cell: str) -> str:
-    if not cell:
-        return ""
-    if cell.startswith("{"):
-        return cell[1:2]
-    return cell[0]
-
-
-def _hold_unsafe_rows(rows: list[str], columns: int) -> tuple[bool, ...]:
-    """Mark every row that starts, ends, or lies inside an SSC hold/roll.
-
-    T/O are Step switches rather than ordinary judged notes. Runtime testing
-    shows that a switch while a sustain is already active drops that sustain,
-    so seam rows must not bisect a long note. Head and tail rows are also kept
-    unsafe because their processing order relative to a StepSwap is not proven.
-    """
-
-    active: list[bool] = [False] * columns
-    unsafe: list[bool] = []
-    for line in rows:
-        cells = _split_cells(line, columns)
-        row_unsafe = any(active)
-        for lane, cell in enumerate(cells):
-            kind = _cell_kind(cell)
-            if kind in _HOLD_HEAD_KINDS:
-                row_unsafe = True
-                active[lane] = True
-            elif kind == _HOLD_TAIL_KIND:
-                row_unsafe = True
-                active[lane] = False
-        if any(active):
-            row_unsafe = True
-        unsafe.append(row_unsafe)
-    return tuple(unsafe)
-
-
 def _control_cells(rows: list[str], columns: int, token: str) -> tuple[tuple[int, int], ...]:
     result: list[tuple[int, int]] = []
     for row_index, line in enumerate(rows):
@@ -190,30 +157,55 @@ def _control_cells(rows: list[str], columns: int, token: str) -> tuple[tuple[int
     return tuple(result)
 
 
-def _without_control(line: str, columns: int, token: str) -> str:
+def _without_controls(line: str, columns: int) -> str:
     cells = _split_cells(line, columns)
     changed = False
     for lane, cell in enumerate(cells):
-        if cell == token:
+        if cell in {_WRAP, _RETURN}:
             cells[lane] = "0"
             changed = True
     return "".join(cells) if changed else line
 
 
-def _retime_wraps_around_active_holds(
+def _first_judged_row(rows: list[str], columns: int) -> int | None:
+    for row_index, line in enumerate(rows):
+        if any(cell not in {"0", _WRAP, _RETURN} for cell in _split_cells(line, columns)):
+            return row_index
+    return None
+
+
+def _startup_wrap_row(rows: list[str], columns: int) -> tuple[int, int]:
+    """Choose a StepSwap row before any judged source note.
+
+    Prefer the earliest row so XSanity has the maximum possible startup time to
+    settle on the selected DIVISION chart. We intentionally do not place T on
+    the first judged row because same-row processing order is not established.
+    """
+
+    first = _first_judged_row(rows, columns)
+    limit = len(rows) if first is None else first
+    for row_index in range(limit):
+        cells = _split_cells(rows[row_index], columns)
+        for lane, cell in enumerate(cells):
+            if cell == "0":
+                return row_index, lane
+    raise SscExportError(
+        "load-time random chart has no empty SSC row before its first judged note; "
+        "a startup StepSwap cannot be placed safely without adding a timing pre-roll"
+    )
+
+
+def _materialize_startup_random(
     report: SscRandomExportReport,
 ) -> tuple[SscLabeledChart, ...]:
-    """Move T before any sustain it would otherwise cut in XSanity runtime.
+    """Rebuild sparse helper windows as full charts and swap exactly once.
 
-    The semantic layer deliberately places T as late as possible while keeping
-    two visual beats before the first divergent row. That can still land in the
-    middle of a deterministic long note immediately before the random window.
-    XSanity drops that already-active sustain when it swaps Steps.
-
-    Moving T backward is semantically safe because it only increases random
-    lookahead. Sparse helpers need one matching repair: rows newly exposed by
-    the earlier swap are copied from the NORMAL chart, where they are still in
-    the common pre-random prefix.
+    ``compile_ssc_export`` keeps helpers sparse and brackets each active region
+    with base T / helper O controls. Those controls are useful planning markers,
+    but runtime testing proved that switching Steps after play has begun can
+    invalidate notes already on screen and can sever active holds. Because NX
+    0x8_ choices are made at chart load, the runtime form uses the markers only
+    to reconstruct each helper, then discards them in favour of one pre-note T.
     """
 
     charts = list(report.charts)
@@ -224,77 +216,51 @@ def _retime_wraps_around_active_holds(
     base_rows = _dense_rows(charts[0].chart.notes, columns)
     wraps = _control_cells(base_rows, columns, _WRAP)
     if not wraps:
-        return tuple(charts)
+        raise SscExportError("compiled random base chart contains no Wrap planning markers")
 
-    helper_rows = [_dense_rows(item.chart.notes, columns) for item in charts[1:]]
-    helper_returns = [
-        _control_cells(rows, columns, _RETURN) for rows in helper_rows
-    ]
-    for controls in helper_returns:
-        if len(controls) != len(wraps):
+    plain_base = [_without_controls(line, columns) for line in base_rows]
+    startup_row, startup_lane = _startup_wrap_row(plain_base, columns)
+
+    rebuilt_helpers: list[list[str]] = []
+    for item in charts[1:]:
+        sparse = _dense_rows(item.chart.notes, columns)
+        returns = _control_cells(sparse, columns, _RETURN)
+        if len(returns) != len(wraps):
             raise SscExportError(
-                "compiled helper contains a different number of Wrap0 controls than the base Wrap count"
+                "compiled helper contains a different number of Wrap0 planning markers than "
+                "the base Wrap count"
             )
 
-    plain_base = [_without_control(line, columns, _WRAP) for line in base_rows]
-    unsafe = _hold_unsafe_rows(plain_base, columns)
-    moved: list[tuple[int, int]] = []
+        full = list(plain_base)
+        blank = "0" * columns
+        if len(full) < len(sparse):
+            full.extend([blank] * (len(sparse) - len(full)))
+        for (wrap_row, _), (return_row, _) in zip(wraps, returns):
+            if return_row < wrap_row:
+                raise SscExportError(
+                    f"compiled random window returns at row {return_row} before Wrap row {wrap_row}"
+                )
+            if return_row >= len(sparse):
+                raise SscExportError("compiled sparse helper ends before its Wrap0 marker")
+            for row_index in range(wrap_row, return_row + 1):
+                full[row_index] = _without_controls(sparse[row_index], columns)
+        rebuilt_helpers.append(full)
 
-    for ordinal, (old_row, old_lane) in enumerate(wraps):
-        if old_row >= len(unsafe) or not unsafe[old_row]:
-            continue
-
-        earliest = 0
-        if ordinal:
-            earliest = max(controls[ordinal - 1][0] for controls in helper_returns) + 1
-
-        new_row = None
-        new_lane = None
-        for candidate in range(old_row - 1, earliest - 1, -1):
-            if candidate < len(unsafe) and unsafe[candidate]:
-                continue
-            cells = _split_cells(plain_base[candidate], columns)
-            lane = next((index for index, cell in enumerate(cells) if cell == "0"), None)
-            if lane is None:
-                continue
-            new_row = candidate
-            new_lane = lane
-            break
-
-        if new_row is None or new_lane is None:
-            raise SscExportError(
-                f"Wrap {ordinal + 1} falls inside an active long note and cannot be moved "
-                "to a hold-safe row without crossing the previous random window"
-            )
-
-        old_cells = _split_cells(base_rows[old_row], columns)
-        old_cells[old_lane] = "0"
-        base_rows[old_row] = "".join(old_cells)
-        new_cells = _split_cells(base_rows[new_row], columns)
-        if new_cells[new_lane] != "0":
-            raise SscExportError("internal Wrap retiming selected a non-empty lane")
-        new_cells[new_lane] = _WRAP
-        base_rows[new_row] = "".join(new_cells)
-
-        for rows in helper_rows:
-            blank = "0" * columns
-            if old_row >= len(rows):
-                rows.extend([blank] * (old_row + 1 - len(rows)))
-            for row_index in range(new_row, old_row + 1):
-                rows[row_index] = plain_base[row_index]
-        moved.append((old_row, new_row))
-
-    if not moved:
-        return tuple(charts)
-
+    startup_cells = _split_cells(plain_base[startup_row], columns)
+    if startup_cells[startup_lane] != "0":
+        raise SscExportError("internal startup Wrap placement selected a non-empty lane")
+    startup_cells[startup_lane] = _WRAP
+    base_rows = list(plain_base)
+    base_rows[startup_row] = "".join(startup_cells)
     charts[0] = replace(
         charts[0],
         chart=replace(charts[0].chart, notes=_measure_rows(base_rows, columns)),
     )
-    for index, rows in enumerate(helper_rows, 1):
-        charts[index] = replace(
-            charts[index],
-            chart=replace(charts[index].chart, notes=_measure_rows(rows, columns)),
+
+    for chart_index, rows in enumerate(rebuilt_helpers, 1):
+        charts[chart_index] = replace(
+            charts[chart_index],
+            chart=replace(charts[chart_index].chart, notes=_measure_rows(rows, columns)),
         )
     return tuple(charts)
 
@@ -358,9 +324,9 @@ def _decorate_runtime_metadata(
 
 
 def render_compiled_simfile(report: SscRandomExportReport, song: SscSongInfo) -> str:
-    """Render a standalone runtime-oriented XSanity SSC from one compiled report."""
+    """Render one report with a single pre-note StepSwap for load-time random."""
 
-    charts = _retime_wraps_around_active_holds(report)
+    charts = _materialize_startup_random(report)
     if not charts:
         raise SscExportError("a compiled simfile needs at least one chart")
     text = render_simfile([item.chart for item in charts], song)
@@ -371,19 +337,14 @@ def render_compiled_reports(
     reports: tuple[SscRandomExportReport, ...] | list[SscRandomExportReport],
     song: SscSongInfo,
 ) -> str:
-    """Render several source charts from one song folder into one XSanity SSC.
-
-    Random reports are intentionally limited to one per StepsType because T is
-    known to select from the global DIVISION pool of that StepsType. This guard
-    can be relaxed only after runtime evidence proves a narrower filter.
-    """
+    """Render several source charts from one song folder into one XSanity SSC."""
 
     frozen = tuple(reports)
     if not frozen:
         raise SscExportError("a combined simfile needs at least one source chart")
     _validate_combined_random_pools(frozen)
 
-    runtime_groups = tuple(_retime_wraps_around_active_holds(report) for report in frozen)
+    runtime_groups = tuple(_materialize_startup_random(report) for report in frozen)
     charts = tuple(item for group in runtime_groups for item in group)
     if not charts:
         raise SscExportError("a combined simfile needs at least one chart section")
