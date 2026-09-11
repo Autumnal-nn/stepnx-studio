@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import pytest
-
 from stepnx.authoring.random_program import (
-    RandomCompileError,
     RandomControlKind,
     compile_random_program,
 )
@@ -94,7 +91,7 @@ def test_1309_helpers_keep_store_and_followers_on_same_twenty_way_choice() -> No
     assert seen == set(range(20))
 
 
-def test_independent_random_returns_after_its_own_split() -> None:
+def test_independent_random_keeps_primitive_per_decision_controls() -> None:
     snapshot = _snapshot([(0x80, 3), (0x00, 1), (0x80, 2)])
     program = compile_random_program(snapshot)
     controls = [(control.kind, control.split_index) for control in program.controls]
@@ -123,7 +120,7 @@ def test_sequential_banks_reuse_one_helper_identity_at_a_time() -> None:
         assert _active_index(helper, 3) == _active_index(helper, 2)
 
 
-def test_random_draw_inside_live_bank_is_rejected_until_joint_states_exist() -> None:
+def test_random_draw_inside_live_bank_materializes_joint_state() -> None:
     snapshot = _snapshot(
         [
             (0x81, 3),
@@ -131,18 +128,28 @@ def test_random_draw_inside_live_bank_is_rejected_until_joint_states_exist() -> 
             (0x41, 3),
         ]
     )
-    with pytest.raises(RandomCompileError, match="still live"):
-        compile_random_program(snapshot)
+    program = compile_random_program(snapshot)
+
+    assert program.analysis.max_live_banks == 1
+    assert program.helper_count == 6
+    for helper in program.helper_snapshots:
+        assert _active_index(helper, 2) == _active_index(helper, 0)
+        assert 0 <= _active_index(helper, 1) < 2
 
 
-def test_overlapping_named_banks_are_rejected_until_joint_states_exist() -> None:
+def test_overlapping_named_banks_materialize_both_followers() -> None:
     snapshot = _snapshot(
         [
             (0x81, 2),
-            (0x82, 2),
+            (0x82, 3),
             (0x41, 2),
-            (0x42, 2),
+            (0x42, 3),
         ]
     )
-    with pytest.raises(RandomCompileError, match="simultaneously live"):
-        compile_random_program(snapshot)
+    program = compile_random_program(snapshot)
+
+    assert program.analysis.max_live_banks == 2
+    assert program.helper_count == 6
+    for helper in program.helper_snapshots:
+        assert _active_index(helper, 2) == _active_index(helper, 0)
+        assert _active_index(helper, 3) == _active_index(helper, 1)
