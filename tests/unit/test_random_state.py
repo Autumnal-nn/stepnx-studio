@@ -113,11 +113,21 @@ def test_1309_bank_episode_preserves_twenty_block_probability_mass() -> None:
     assert plan.mappings[0].tickets_per_block == (1,) * 20
 
 
-def test_ef662_arities_choose_sixty_helpers_at_default_quality() -> None:
+def test_ef662_arities_choose_sixty_helpers_at_generic_default_quality() -> None:
     helper_count, exact, error = choose_helper_count((7, 8, 9, 10))
     assert exact == 2520
     assert helper_count == 60
     assert error <= 0.0125
+
+
+def test_ef662_arities_can_request_exact_2520_pool() -> None:
+    helper_count, exact, error = choose_helper_count(
+        (7, 8, 9, 10),
+        RandomPoolPolicy(max_probability_error=0.0, max_helpers=2520),
+    )
+    assert helper_count == 2520
+    assert exact == 2520
+    assert error == 0.0
 
 
 def test_exact_helper_count_is_lcm_not_product() -> None:
@@ -134,6 +144,14 @@ def test_balanced_mapping_keeps_every_block_reachable_and_rotates_remainder() ->
     assert second.tickets_per_block == (3, 4, 3)
     assert set(first.helper_to_block) == {0, 1, 2}
     assert len(first.helper_to_block) == 10
+
+
+def test_equal_arity_splits_do_not_reuse_identical_helper_sequence() -> None:
+    first = balanced_ticket_mapping(2, 10, 60)
+    second = balanced_ticket_mapping(3, 10, 60)
+    assert first.tickets_per_block == (6,) * 10
+    assert second.tickets_per_block == (6,) * 10
+    assert first.helper_to_block != second.helper_to_block
 
 
 def test_sequential_banks_do_not_create_false_cartesian_overlap() -> None:
