@@ -43,9 +43,10 @@ def document(splits: list[tuple[int, list[bytes]]], *, columns: int = 5) -> byte
     return bytes(data)
 
 
-def first_chart_rows(text: str, *, columns: int = 5) -> list[str]:
-    section = text.split("#NOTEDATA:;", 1)[1].split("#NOTEDATA:;", 1)[0]
-    notes = section.split("#NOTES:\n", 1)[1].rstrip("\n")
+def chart_rows(text: str, chart_index: int = 0, *, columns: int = 5) -> list[str]:
+    sections = text.split("#NOTEDATA:;")[1:]
+    section = sections[chart_index]
+    notes = section.split("#NOTES:\n", 1)[1].split(";", 1)[0].rstrip("\n")
     blank = "0" * columns
     rows: list[str] = []
     for measure in notes.split(",\n"):
@@ -57,7 +58,7 @@ def first_chart_rows(text: str, *, columns: int = 5) -> list[str]:
 
 
 def wrap_rows(text: str, *, columns: int = 5) -> list[int]:
-    rows = first_chart_rows(text, columns=columns)
+    rows = chart_rows(text, 0, columns=columns)
     return [index for index, line in enumerate(rows) if "T" in line]
 
 
@@ -66,7 +67,7 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
-                (0x00, [block([EMPTY_ROW] * 32)]),
+                (0x00, [block([EMPTY_ROW] * 64)]),
                 (0x80, two),
                 (0x00, [block([EMPTY_ROW] * 32)]),
             ]
@@ -74,6 +75,7 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         report = compile_ssc_export(parse_bytes(raw), description="RANDOM.NX")
         text = render_compiled_simfile(report, SscSongInfo(title="Runtime random"))
 
+        self.assertEqual(report.window_count, 1)
         self.assertTrue(text.startswith("#VERSION:0.83;\n"))
         self.assertNotIn("#VERSION:0.83 xSanity;", text)
         self.assertEqual(text.count("#SPECIAL:LEVEL,RANDOM;"), 1)
@@ -91,9 +93,10 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         report = compile_ssc_export(parse_bytes(raw), description="NORMAL.NX")
         text = render_compiled_simfile(report, SscSongInfo(title="Runtime normal"))
 
+        self.assertEqual(report.window_count, 0)
         self.assertNotIn("#SPECIAL:LEVEL,RANDOM;", text)
 
-    def test_wrap_crosses_zero_scroll_then_keeps_two_visual_beats(self) -> None:
+    def test_wrap_crosses_zero_scroll_to_keep_two_visual_beats(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
@@ -106,11 +109,12 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         report = compile_ssc_export(parse_bytes(raw), description="ZERO_SCROLL.NX")
         text = render_compiled_simfile(report, SscSongInfo(title="Zero-scroll guard"))
 
-        # Random starts at row 64. Rows 32..63 have zero visual travel, so the
-        # two visual beats must come from 16 rows of normal 0.125 NX scroll.
+        # Random split starts at row 64. The immediately preceding 32 rows have
+        # scroll 0, so they contribute no visual lead. At scroll 0.125 another
+        # 16 source rows are needed to accumulate two visual beats.
         self.assertEqual(wrap_rows(text), [16])
 
-    def test_wrap_keeps_two_visual_beats_at_normal_scroll(self) -> None:
+    def test_wrap_keeps_two_visual_beats_when_preceding_scroll_moves(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
@@ -123,31 +127,50 @@ class XSanityRuntimeExportTest(unittest.TestCase):
         report = compile_ssc_export(parse_bytes(raw), description="MOVING_SCROLL.NX")
         text = render_compiled_simfile(report, SscSongInfo(title="Moving scroll"))
 
-        # At normal scroll each NX row contributes 0.125 visual beat, so two
-        # visual beats require 16 rows of lead from the random start at row 64.
         self.assertEqual(wrap_rows(text), [48])
 
-    def test_wrap_uses_more_rows_when_scroll_is_slower(self) -> None:
+    def test_dense_load_time_randoms_coalesce_into_one_helper_window(self) -> None:
+        two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
+        three = [block([EMPTY_ROW] * 8) for _ in range(3)]
+        raw = document(
+            [
+                (0x00, [block([EMPTY_ROW] * 64)]),
+                (0x80, two),
+                (0x80, three),
+                (0x00, [block([EMPTY_ROW] * 32)]),
+            ]
+        )
+        report = compile_ssc_export(parse_bytes(raw), description="DENSE.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Dense random"))
+
+        self.assertEqual(report.helper_count, 6)
+        self.assertEqual(report.window_count, 1)
+        self.assertEqual(report.windows[0].random_split_indices, (1, 2))
+        self.assertEqual(len(wrap_rows(text)), 1)
+        self.assertIn("ssc.random-window-compressed-joint", {d.code for d in report.diagnostics})
+
+    def test_sparse_helpers_drop_deterministic_tail_after_final_return(self) -> None:
         two = [block([EMPTY_ROW] * 8), block([EMPTY_ROW] * 8)]
         raw = document(
             [
-                (0x00, [block([EMPTY_ROW] * 64, scroll=0.0625)]),
+                (0x00, [block([EMPTY_ROW] * 64)]),
                 (0x80, two),
-                (0x00, [block([EMPTY_ROW] * 32, scroll=0.125)]),
+                (0x00, [block([EMPTY_ROW] * 256)]),
             ]
         )
-        report = compile_ssc_export(parse_bytes(raw), description="SLOW_SCROLL.NX")
-        text = render_compiled_simfile(report, SscSongInfo(title="Slow-scroll guard"))
+        report = compile_ssc_export(parse_bytes(raw), description="SPARSE.NX")
+        text = render_compiled_simfile(report, SscSongInfo(title="Sparse helper"))
 
-        # Half normal visual speed needs 32 source rows for the same two-beat
-        # visible lead.
-        self.assertEqual(wrap_rows(text), [32])
+        base_rows = chart_rows(text, 0)
+        helper_rows = chart_rows(text, 1)
+        self.assertLess(len(helper_rows), len(base_rows))
+        self.assertTrue(any("O" in row for row in helper_rows))
 
     def test_generated_chartnames_are_unique_beyond_historical_nine_routes(self) -> None:
         twenty = [block([EMPTY_ROW] * 8) for _ in range(20)]
         raw = document(
             [
-                (0x00, [block([EMPTY_ROW] * 32)]),
+                (0x00, [block([EMPTY_ROW] * 64)]),
                 (0x80, twenty),
                 (0x00, [block([EMPTY_ROW] * 32)]),
             ]
