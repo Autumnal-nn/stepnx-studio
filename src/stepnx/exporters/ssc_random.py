@@ -1,18 +1,27 @@
-"""Compile NX20 random branches into XSanity LABELTYPE:DIVISION helpers.
+"""Compile NX20 load-time random branches into XSanity helper windows.
 
 The low-level :mod:`stepnx.exporters.ssc` writer serializes one already-
-materialized authoring snapshot.  This module is the semantic layer above it:
-it compiles NX ``0x80``/``0x8n``/``0x4n`` random state into XSanity Wrap
-(``T``) and Wrap0 (``O``) controls plus helper ``#NOTEDATA`` sections.
+materialized authoring snapshot. This module is the semantic layer above it:
+it materializes NX ``0x80``/``0x8n``/``0x4n`` state into a reusable XSanity
+``LABELTYPE:DIVISION`` helper pool and schedules Wrap (``T``) / Wrap0 (``O``)
+execution windows.
 
-The first implementation deliberately rejects random structures whose helper
-identity cannot represent the NX state safely.  Failing loudly is preferable
-to flattening a bank follower or silently dropping an outcome.
+Several NX random decisions can be chosen at chart load with no safe visual gap
+between their Split regions. XSanity, however, changes the active Steps at a T
+cell. Instead of forcing one visible swap per NX decision, dense decisions are
+coalesced into one helper window. The selected helper already contains the
+whole vector of choices for that window, including named-bank followers.
+
+The SSC-specific default requests exact marginal probabilities up to 2520
+helpers. This deliberately covers the two known corpus outliers whose arities
+have LCM(7, 8, 9, 10) = 2520. The full Cartesian joint distribution is not
+materialized; decisions coalesced into the same window share one helper draw.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from math import ceil
 from pathlib import PurePath
 
 from stepnx.authoring.random_program import (
@@ -39,6 +48,11 @@ _LABEL_DIVISION = "DIVISION"
 _WRAP = "T"
 _RETURN = "O"
 _ALT_DROPPED = "ssc.alternate-branches-dropped"
+_MIN_VISUAL_LOOKAHEAD_BEATS = 2.0
+_DEFAULT_XSANITY_RANDOM_POLICY = RandomPoolPolicy(
+    max_probability_error=0.0,
+    max_helpers=2520,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,16 +65,31 @@ class SscLabeledChart:
 
 
 @dataclass(frozen=True, slots=True)
+class SscRandomWindow:
+    """One contiguous period during which a selected helper stays active."""
+
+    random_split_indices: tuple[int, ...]
+    start_split_index: int
+    return_split_index: int
+    latest_wrap_row: int
+
+
+@dataclass(frozen=True, slots=True)
 class SscRandomExportReport:
-    """A base chart, its Wrap helpers, and semantic conversion diagnostics."""
+    """A base chart, its Wrap helpers, execution windows, and diagnostics."""
 
     program: CompiledRandomProgram
     charts: tuple[SscLabeledChart, ...]
     diagnostics: tuple[SscDiagnostic, ...]
+    windows: tuple[SscRandomWindow, ...] = ()
 
     @property
     def helper_count(self) -> int:
         return self.program.helper_count
+
+    @property
+    def window_count(self) -> int:
+        return len(self.windows)
 
     @property
     def exact_probabilities(self) -> bool:
@@ -180,6 +209,8 @@ def _dense_rows(notes: str, columns: int) -> list[str]:
 
 def _measure_rows(rows: list[str], columns: int) -> str:
     blank = "0" * columns
+    if not rows:
+        return blank + "\n"
     if len(rows) % LINES_PER_MEASURE:
         rows = list(rows) + [blank] * (LINES_PER_MEASURE - len(rows) % LINES_PER_MEASURE)
 
@@ -191,6 +222,99 @@ def _measure_rows(rows: list[str], columns: int) -> str:
         else:
             parts.append("\n".join(measure) + "\n")
     return ",\n".join(parts)
+
+
+def _visual_lookahead_row(
+    snapshot: AuthoringSnapshot,
+    bounds: dict[int, tuple[int, int]],
+    random_split_index: int,
+    *,
+    minimum_visual_beats: float = _MIN_VISUAL_LOOKAHEAD_BEATS,
+) -> int:
+    """Latest source row that leaves the requested visual travel before a split.
+
+    The writer maps one NX row to 1/8 SSC beat and emits
+    ``SSC_SCROLL = NX_SCROLL * 8``. One source row therefore contributes
+    ``abs(NX_SCROLL)`` normal-scroll beats of visual distance. Zero-scroll rows
+    contribute no distance and are crossed completely while walking backward.
+    """
+
+    if minimum_visual_beats <= 0.0:
+        raise ValueError("minimum visual lookahead must be greater than zero")
+
+    target_row = bounds[random_split_index][0]
+    remaining = float(minimum_visual_beats)
+    cursor = target_row
+
+    for split_index in reversed(tuple(bounds)):
+        start, end = bounds[split_index]
+        segment_end = min(end, cursor)
+        if segment_end <= start:
+            continue
+
+        split = snapshot.splits[split_index]
+        block = snapshot.active_block(split.stable_id)
+        visual_per_row = abs(float(block.scroll))
+        available_rows = segment_end - start
+
+        if visual_per_row > 0.0:
+            needed_rows = max(1, ceil((remaining - 1e-12) / visual_per_row))
+            if needed_rows <= available_rows:
+                return segment_end - needed_rows
+            remaining -= available_rows * visual_per_row
+        cursor = start
+
+    raise SscExportError(
+        f"random split {random_split_index} has less than "
+        f"{minimum_visual_beats:g} visual beats available before it for a runtime-safe Wrap"
+    )
+
+
+def _plan_windows(program: CompiledRandomProgram) -> tuple[SscRandomWindow, ...]:
+    """Coalesce random decisions until every runtime T has a safe visual gap."""
+
+    regions = _regions(program)
+    if not regions:
+        return ()
+
+    snapshot = program.base_snapshot
+    bounds = _split_bounds(snapshot)
+    windows: list[SscRandomWindow] = []
+
+    for region in regions:
+        latest = _visual_lookahead_row(snapshot, bounds, region.random_split_index)
+        if not windows:
+            windows.append(
+                SscRandomWindow(
+                    (region.random_split_index,),
+                    region.random_split_index,
+                    region.return_split_index,
+                    latest,
+                )
+            )
+            continue
+
+        previous = windows[-1]
+        previous_return_end = bounds[previous.return_split_index][1]
+        if latest <= previous_return_end:
+            windows[-1] = SscRandomWindow(
+                previous.random_split_indices + (region.random_split_index,),
+                previous.start_split_index,
+                max(previous.return_split_index, region.return_split_index),
+                previous.latest_wrap_row,
+            )
+            continue
+
+        windows.append(
+            SscRandomWindow(
+                (region.random_split_index,),
+                region.random_split_index,
+                region.return_split_index,
+                latest,
+            )
+        )
+
+    return tuple(windows)
 
 
 def _inject(
@@ -216,34 +340,37 @@ def _inject(
     raise SscExportError(description)
 
 
-def _inject_wraps(chart: SscChart, program: CompiledRandomProgram) -> tuple[SscChart, tuple[int, ...]]:
+def _inject_wraps(
+    chart: SscChart,
+    program: CompiledRandomProgram,
+    windows: tuple[SscRandomWindow, ...],
+) -> tuple[SscChart, tuple[int, ...]]:
     columns = program.base_snapshot.columns
     rows = _dense_rows(chart.notes, columns)
     bounds = _split_bounds(program.base_snapshot)
-    regions = _regions(program)
     wrap_rows: list[int] = []
-    previous_return_end = 0
+    previous_return_end: int | None = None
 
-    for region in regions:
-        split_start, _ = bounds[region.random_split_index]
-        latest = split_start - LINE_BEAT_SPLIT
-        if latest < previous_return_end:
+    for window in windows:
+        earliest = 0 if previous_return_end is None else previous_return_end + 1
+        latest = window.latest_wrap_row
+        if latest < earliest:
             raise SscExportError(
-                f"random split {region.random_split_index} begins too soon after the previous "
-                "random region to place Wrap at least one SSC beat before it"
+                f"random window beginning at split {window.start_split_index} cannot place a "
+                f"Wrap with {_MIN_VISUAL_LOOKAHEAD_BEATS:g} visual beats of lookahead"
             )
         row_index = _inject(
             rows,
             columns,
             _WRAP,
-            range(latest, previous_return_end - 1, -1),
+            range(latest, earliest - 1, -1),
             description=(
-                f"no empty lane is available before random split {region.random_split_index} "
-                "for a Wrap control"
+                f"no empty lane is available before random window beginning at split "
+                f"{window.start_split_index} for a Wrap control"
             ),
         )
         wrap_rows.append(row_index)
-        previous_return_end = bounds[region.return_split_index][1]
+        previous_return_end = bounds[window.return_split_index][1]
 
     return replace(chart, notes=_measure_rows(rows, columns)), tuple(wrap_rows)
 
@@ -251,48 +378,87 @@ def _inject_wraps(chart: SscChart, program: CompiledRandomProgram) -> tuple[SscC
 def _inject_returns(
     chart: SscChart,
     snapshot: AuthoringSnapshot,
-    program: CompiledRandomProgram,
+    windows: tuple[SscRandomWindow, ...],
     wrap_rows: tuple[int, ...],
-) -> SscChart:
+) -> tuple[SscChart, tuple[int, ...]]:
     columns = snapshot.columns
     rows = _dense_rows(chart.notes, columns)
     bounds = _split_bounds(snapshot)
-    regions = _regions(program)
+    return_rows: list[int] = []
 
-    for index, region in enumerate(regions):
-        _, return_end = bounds[region.return_split_index]
+    for index, window in enumerate(windows):
+        _, return_end = bounds[window.return_split_index]
         next_wrap = wrap_rows[index + 1] if index + 1 < len(wrap_rows) else None
         if next_wrap is None:
             candidates = range(return_end, max(return_end + LINES_PER_MEASURE, len(rows)))
         else:
             if return_end >= next_wrap:
                 raise SscExportError(
-                    f"random region ending at split {region.return_split_index} overlaps the "
+                    f"random window ending at split {window.return_split_index} overlaps the "
                     f"next Wrap row {next_wrap}; helper cannot safely rejoin the base chart"
                 )
             candidates = range(return_end, next_wrap)
 
-        _inject(
-            rows,
-            columns,
-            _RETURN,
-            candidates,
-            description=(
-                f"no empty lane is available after random region ending at split "
-                f"{region.return_split_index} for a Wrap0 return"
-            ),
+        return_rows.append(
+            _inject(
+                rows,
+                columns,
+                _RETURN,
+                candidates,
+                description=(
+                    f"no empty lane is available after random window ending at split "
+                    f"{window.return_split_index} for a Wrap0 return"
+                ),
+            )
         )
 
-    return replace(chart, notes=_measure_rows(rows, columns))
+    return replace(chart, notes=_measure_rows(rows, columns)), tuple(return_rows)
+
+
+def _sparsify_helper(
+    chart: SscChart,
+    *,
+    columns: int,
+    wrap_rows: tuple[int, ...],
+    return_rows: tuple[int, ...],
+) -> SscChart:
+    """Drop note payload while the helper can never be active.
+
+    All rows from T through O are retained verbatim so deterministic notes in a
+    window's visual lead and tail still exist after XSanity changes Steps. Rows
+    between windows become collapsed blank measures, and everything after the
+    final O is trimmed entirely. Timing tags are intentionally kept because the
+    working Sanity DIVISION corpus carries chart-level timing and we do not yet
+    have runtime evidence that omitting it is safe.
+    """
+
+    if not wrap_rows:
+        return chart
+    if len(wrap_rows) != len(return_rows):
+        raise SscExportError("helper sparsification received mismatched Wrap/Wrap0 boundaries")
+
+    rows = _dense_rows(chart.notes, columns)
+    blank = "0" * columns
+    keep = [False] * len(rows)
+    for start, end in zip(wrap_rows, return_rows):
+        if end < start:
+            raise SscExportError(f"helper return row {end} precedes Wrap row {start}")
+        if end >= len(keep):
+            keep.extend([False] * (end + 1 - len(keep)))
+            rows.extend([blank] * (end + 1 - len(rows)))
+        for row_index in range(start, end + 1):
+            keep[row_index] = True
+
+    for row_index, retained in enumerate(keep):
+        if not retained:
+            rows[row_index] = blank
+
+    last = max(return_rows) + 1
+    return replace(chart, notes=_measure_rows(rows[:last], columns))
 
 
 def _correct_scrolls(snapshot: AuthoringSnapshot) -> str:
-    """Use the corpus-confirmed NX -> XSanity scroll conversion.
-
-    The PR #27 writer used the inverse BeatSplit factor.  That happens to give
-    1.0 for the common NX scroll 0.125 at BeatSplit 8, but it is wrong for
-    custom scroll values.  Corpus pairs establish ``SSC scroll = NX scroll * 8``.
-    """
+    """Use the corpus-confirmed NX -> XSanity scroll conversion."""
 
     position = 0.0
     entries: list[str] = []
@@ -344,7 +510,10 @@ def _merge_diagnostics(groups: list[tuple[SscDiagnostic, ...]]) -> tuple[SscDiag
     return tuple(merged[key] for key in order)
 
 
-def _semantic_diagnostics(program: CompiledRandomProgram) -> tuple[SscDiagnostic, ...]:
+def _semantic_diagnostics(
+    program: CompiledRandomProgram,
+    windows: tuple[SscRandomWindow, ...],
+) -> tuple[SscDiagnostic, ...]:
     diagnostics: list[SscDiagnostic] = []
     handled = set(program.analysis.random_split_indices)
     for episode in program.analysis.bank_episodes:
@@ -379,6 +548,21 @@ def _semantic_diagnostics(program: CompiledRandomProgram) -> tuple[SscDiagnostic
                 f"{pool.max_probability_error * 100:.3f} percentage points",
             )
         )
+
+    compressed = [window for window in windows if len(window.random_split_indices) > 1]
+    if compressed:
+        decisions = sum(len(window.random_split_indices) for window in compressed)
+        diagnostics.append(
+            SscDiagnostic(
+                "ssc.random-window-compressed-joint",
+                f"{decisions} load-time random decisions are coalesced into "
+                f"{len(compressed)} XSanity helper window(s). Per-split ticket probabilities "
+                "follow the planned distribution, but decisions inside one window share a "
+                "single helper draw instead of materializing the full Cartesian joint state.",
+                split_index=compressed[0].start_split_index,
+                occurrences=len(compressed),
+            )
+        )
     return tuple(diagnostics)
 
 
@@ -389,13 +573,15 @@ def compile_ssc_export(
     difficulty: str | None = None,
     meter: int | None = None,
     credit: str | None = None,
-    policy: RandomPoolPolicy = RandomPoolPolicy(),
+    policy: RandomPoolPolicy = _DEFAULT_XSANITY_RANDOM_POLICY,
 ) -> SscRandomExportReport:
-    """Compile one NX20 chart into a base SSC chart plus random helper charts.
+    """Compile one NX20 chart into a base SSC chart plus sparse random helpers.
 
-    Random NX selectors are preserved through XSanity ``T``/``O`` controls and
-    ``LABELTYPE:DIVISION`` helper charts.  Non-random alternate blocks are not
-    yet compiled into ``#DIVISION`` and are reported explicitly.
+    The XSanity profile requests exact marginal ticket counts whenever their LCM
+    is at most 2520. Dense load-time decisions are grouped into execution
+    windows so T never has to fire with less than two visual beats of lead.
+    Non-random alternate blocks are not yet compiled into ``#DIVISION`` and are
+    reported explicitly.
     """
 
     snapshot = create_authoring_snapshot(document)
@@ -405,6 +591,7 @@ def compile_ssc_export(
         raise SscExportError(str(exc)) from exc
 
     _validate_row_geometry(program)
+    windows = _plan_windows(program)
     base_description = description or _default_description(document)
     base, base_diagnostics = _project(
         document,
@@ -414,7 +601,7 @@ def compile_ssc_export(
         meter=meter,
         credit=credit,
     )
-    base, wrap_rows = _inject_wraps(base, program)
+    base, wrap_rows = _inject_wraps(base, program, windows)
 
     labeled: list[SscLabeledChart] = [SscLabeledChart(base, _LABEL_NORMAL)]
     diagnostic_groups: list[tuple[SscDiagnostic, ...]] = [base_diagnostics]
@@ -428,15 +615,22 @@ def compile_ssc_export(
             meter=meter,
             credit=credit,
         )
-        helper = _inject_returns(helper, helper_snapshot, program, wrap_rows)
+        helper, return_rows = _inject_returns(helper, helper_snapshot, windows, wrap_rows)
+        helper = _sparsify_helper(
+            helper,
+            columns=helper_snapshot.columns,
+            wrap_rows=wrap_rows,
+            return_rows=return_rows,
+        )
         labeled.append(SscLabeledChart(helper, _LABEL_DIVISION, helper_index))
         diagnostic_groups.append(helper_diagnostics)
 
-    diagnostic_groups.append(_semantic_diagnostics(program))
+    diagnostic_groups.append(_semantic_diagnostics(program, windows))
     return SscRandomExportReport(
         program=program,
         charts=tuple(labeled),
         diagnostics=_merge_diagnostics(diagnostic_groups),
+        windows=windows,
     )
 
 
@@ -468,6 +662,7 @@ def render_compiled_simfile(report: SscRandomExportReport, song: SscSongInfo) ->
 
 __all__ = [
     "SscLabeledChart",
+    "SscRandomWindow",
     "SscRandomExportReport",
     "compile_ssc_export",
     "render_compiled_simfile",
