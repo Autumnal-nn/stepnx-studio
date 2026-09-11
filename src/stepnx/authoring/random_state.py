@@ -17,7 +17,7 @@ SELECT_BANK_MASK = 0x1F
 class SplitSelector:
     """Bitwise interpretation of an NX20 split selector byte.
 
-    The selector bits are intentionally exposed independently.  Some corpus
+    The selector bits are intentionally exposed independently. Some corpus
     values combine flags, and callers must not collapse those values into a
     single enum before the semantics are known.
     """
@@ -41,7 +41,7 @@ class SplitSelector:
 class BankEpisode:
     """One stored random choice and the followers that consume it.
 
-    A later store to the same bank starts a new episode.  The lifetime only
+    A later store to the same bank starts a new episode. The lifetime only
     extends through the last follower before that overwrite, because no state
     has to be retained after the final observable use.
     """
@@ -75,9 +75,9 @@ class TicketMapping:
     """Map uniformly selected helper states onto one NX random split.
 
     Blocks are kept as distinct slots even when their contents are identical.
-    This is deliberate: repeated blocks are probability mass.  A 20-block
-    split with nineteen equal blocks and one distinct block must remain 95/5,
-    not be deduplicated into a 50/50 two-outcome choice.
+    This is deliberate: repeated blocks are probability mass. A 20-block split
+    with nineteen equal blocks and one distinct block must remain 95/5, not be
+    deduplicated into a 50/50 two-outcome choice.
     """
 
     split_index: int
@@ -100,7 +100,7 @@ class RandomPoolPolicy:
     """Quality policy for projecting NX random choices onto XSanity Wrap.
 
     ``max_probability_error`` is expressed as an absolute probability, so
-    0.0125 means 1.25 percentage points.  ``max_helpers`` is a safety ceiling,
+    0.0125 means 1.25 percentage points. ``max_helpers`` is a safety ceiling,
     not a semantic constant of the format.
     """
 
@@ -294,6 +294,30 @@ def choose_helper_count(
     return helper_count, exact, error
 
 
+def _shuffle_tickets(values: list[int], *, split_index: int, block_count: int) -> None:
+    """Deterministically decorrelate helper identities across random decisions.
+
+    A joint helper window necessarily compresses the full Cartesian product of
+    several NX load-time choices. If every exact mapping emitted the same
+    repeating ``0..N-1`` sequence, equal-arity decisions inside one window
+    would become perfectly correlated. A deterministic Fisher-Yates shuffle
+    preserves ticket counts exactly while spreading those correlations across
+    the helper pool. No runtime randomness is consumed here.
+    """
+
+    if len(values) < 2:
+        return
+    state = (
+        ((split_index + 1) * 0x9E3779B1)
+        ^ (block_count * 0x85EBCA6B)
+        ^ (len(values) * 0xC2B2AE35)
+    ) & 0xFFFFFFFF
+    for index in range(len(values) - 1, 0, -1):
+        state = (1664525 * state + 1013904223) & 0xFFFFFFFF
+        other = state % (index + 1)
+        values[index], values[other] = values[other], values[index]
+
+
 def balanced_ticket_mapping(
     split_index: int,
     block_count: int,
@@ -303,6 +327,9 @@ def balanced_ticket_mapping(
 
     The remainder rotates by split index so approximate projections do not
     systematically favour the lowest-numbered block slots throughout a chart.
+    The resulting ticket multiset is then deterministically shuffled per split
+    so multiple decisions coalesced into one helper window are not trivially
+    locked to the same block index.
     """
 
     if block_count < 1:
@@ -317,20 +344,9 @@ def balanced_ticket_mapping(
         counts[(rotation + offset) % block_count] += 1
 
     helper_to_block: list[int] = []
-    remaining = counts.copy()
-    # Interleave the tickets instead of emitting large runs.  The runtime RNG
-    # is uniform over helper indices, so this does not change probabilities,
-    # but it makes generated helper charts easier to inspect and diff.
-    while len(helper_to_block) < helper_count:
-        made_progress = False
-        for block_index in range(block_count):
-            if remaining[block_index] == 0:
-                continue
-            helper_to_block.append(block_index)
-            remaining[block_index] -= 1
-            made_progress = True
-        if not made_progress:
-            break
+    for block_index, count in enumerate(counts):
+        helper_to_block.extend([block_index] * count)
+    _shuffle_tickets(helper_to_block, split_index=split_index, block_count=block_count)
 
     return TicketMapping(
         split_index=split_index,
