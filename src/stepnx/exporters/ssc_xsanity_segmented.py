@@ -1,0 +1,255 @@
+"""Experimental XSanity runtime projection with safe Wrap0 handoffs.
+
+NX load-time random choices may be compressed into a reusable helper pool. A
+single startup Wrap is runtime-safe but correlates every random decision in the
+song to one helper index. This projection reuses the semantic compiler's random
+windows to introduce a small number of fresh draws:
+
+    NORMAL --T--> DIVISION --O0--> NORMAL --T--> DIVISION
+
+The handoff is emitted only when a conservative dead-air corridor exists. Both
+Wrap and Wrap0 perform StepSwap operations in XSanity, and runtime testing has
+shown that swapping near visible taps or an active hold can drop notes. A
+candidate corridor must therefore be blank and hold-free in the NORMAL chart
+and in every materialized helper, with a quiet guard after each control. If no
+such corridor exists, the boundary is skipped and the neighboring random groups
+remain correlated rather than risking gameplay corruption.
+
+This module is intentionally a test layer over :mod:`stepnx.exporters.ssc_xsanity`.
+The known-good single-startup materializer remains available there as a fallback.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+from stepnx.exporters.ssc import SscExportError, SscSongInfo, render_simfile
+from stepnx.exporters.ssc_random import SscLabeledChart, SscRandomExportReport
+from stepnx.exporters.ssc_xsanity import (
+    _combined_chart_names,
+    _control_cells,
+    _decorate_runtime_metadata,
+    _dense_rows,
+    _materialize_startup_random,
+    _measure_rows,
+    _split_cells,
+    _validate_combined_random_pools,
+)
+
+_WRAP = "T"
+_RETURN = "O"  # bare O is Wrap0: return to the initial/base Steps
+_HOLD_HEAD_KINDS = frozenset({"2", "4"})
+_HOLD_TAIL_KIND = "3"
+
+# Runtime-test guard. O0 gets eight completely empty rows before the next T;
+# the new T then gets sixteen completely empty rows before any chart content.
+# With the writer's eight-row beat grid, the latter is two SSC beats of dead air.
+_EMPTY_ROWS_AFTER_RETURN = 8
+_EMPTY_ROWS_AFTER_WRAP = 16
+_MIN_CORRIDOR_ROWS = 1 + _EMPTY_ROWS_AFTER_RETURN + 1 + _EMPTY_ROWS_AFTER_WRAP
+
+
+def _cell_kind(cell: str) -> str:
+    if not cell:
+        return ""
+    if cell.startswith("{"):
+        return cell[1:2]
+    return cell[0]
+
+
+def _safe_blank_mask(rows: list[str], columns: int, length: int) -> tuple[bool, ...]:
+    """Return rows where a StepSwap sees neither notes nor an active sustain."""
+
+    blank = "0" * columns
+    active = [False] * columns
+    safe: list[bool] = []
+    for row_index in range(length):
+        line = rows[row_index] if row_index < len(rows) else blank
+        cells = _split_cells(line, columns)
+        active_before = any(active)
+        touches_hold = False
+        for lane, cell in enumerate(cells):
+            kind = _cell_kind(cell)
+            if kind in _HOLD_HEAD_KINDS:
+                touches_hold = True
+                active[lane] = True
+            elif kind == _HOLD_TAIL_KIND:
+                touches_hold = True
+                active[lane] = False
+        safe.append(
+            not active_before
+            and not any(active)
+            and not touches_hold
+            and all(cell == "0" for cell in cells)
+        )
+    return tuple(safe)
+
+
+def _combined_safe_blank_mask(
+    chart_rows: tuple[list[str], ...],
+    columns: int,
+) -> tuple[bool, ...]:
+    length = max((len(rows) for rows in chart_rows), default=0)
+    masks = tuple(_safe_blank_mask(rows, columns, length) for rows in chart_rows)
+    return tuple(all(mask[row] for mask in masks) for row in range(length))
+
+
+def _runs(mask: tuple[bool, ...], start: int, end: int) -> tuple[tuple[int, int], ...]:
+    """Return inclusive safe runs intersecting ``[start, end]``."""
+
+    start = max(0, start)
+    end = min(len(mask) - 1, end)
+    if end < start:
+        return ()
+    result: list[tuple[int, int]] = []
+    cursor = start
+    while cursor <= end:
+        if not mask[cursor]:
+            cursor += 1
+            continue
+        run_start = cursor
+        while cursor + 1 <= end and mask[cursor + 1]:
+            cursor += 1
+        result.append((run_start, cursor))
+        cursor += 1
+    return tuple(result)
+
+
+def _find_handoff_corridor(
+    safe: tuple[bool, ...],
+    *,
+    after_row: int,
+    latest_wrap_row: int,
+) -> tuple[int, int] | None:
+    """Choose O0/T inside the best dead-air run before the next random window.
+
+    The T row may not be later than the semantic compiler's planning T because
+    that marker already represents the latest point with two visual beats of
+    lead to the next random divergence. The quiet run itself is allowed to
+    extend beyond that marker so the post-T guard can be verified directly.
+    """
+
+    search_start = after_row + 1
+    search_end = min(len(safe) - 1, latest_wrap_row + _EMPTY_ROWS_AFTER_WRAP)
+    candidates: list[tuple[int, int, int]] = []
+    for run_start, run_end in _runs(safe, search_start, search_end):
+        if run_end - run_start + 1 < _MIN_CORRIDOR_ROWS:
+            continue
+        latest_t = min(latest_wrap_row, run_end - _EMPTY_ROWS_AFTER_WRAP)
+        earliest_t = run_start + 1 + _EMPTY_ROWS_AFTER_RETURN
+        if latest_t < earliest_t:
+            continue
+        # Prefer the longest dead-air corridor, then put T as late as possible
+        # while preserving its post-swap quiet guard.
+        candidates.append((run_end - run_start + 1, run_start, latest_t))
+
+    if not candidates:
+        return None
+    _, return_row, wrap_row = max(candidates, key=lambda item: (item[0], item[2]))
+    return return_row, wrap_row
+
+
+def _put_control(rows: list[str], columns: int, row_index: int, token: str) -> None:
+    if not (0 <= row_index < len(rows)):
+        raise SscExportError(f"runtime control row {row_index} is outside the materialized chart")
+    cells = _split_cells(rows[row_index], columns)
+    lane = next((index for index, cell in enumerate(cells) if cell == "0"), None)
+    if lane is None:
+        raise SscExportError(f"runtime control {token} has no empty lane at row {row_index}")
+    cells[lane] = token
+    rows[row_index] = "".join(cells)
+
+
+def materialize_segmented_random(
+    report: SscRandomExportReport,
+) -> tuple[SscLabeledChart, ...]:
+    """Materialize full helpers and opportunistically add safe O0/T redraws."""
+
+    runtime = list(_materialize_startup_random(report))
+    if report.helper_count <= 0 or len(runtime) <= 1:
+        return tuple(runtime)
+
+    columns = report.program.base_snapshot.columns
+    planning_base = _dense_rows(report.charts[0].chart.notes, columns)
+    planning_wraps = _control_cells(planning_base, columns, _WRAP)
+    if len(planning_wraps) <= 1:
+        return tuple(runtime)
+
+    planning_returns: list[tuple[tuple[int, int], ...]] = []
+    for item in report.charts[1:]:
+        controls = _control_cells(_dense_rows(item.chart.notes, columns), columns, _RETURN)
+        if len(controls) != len(planning_wraps):
+            raise SscExportError(
+                "compiled helper contains a different number of Wrap0 planning markers than "
+                "the base Wrap count"
+            )
+        planning_returns.append(controls)
+
+    runtime_rows = [_dense_rows(item.chart.notes, columns) for item in runtime]
+    safe = _combined_safe_blank_mask(tuple(runtime_rows), columns)
+
+    for boundary in range(len(planning_wraps) - 1):
+        previous_return = max(controls[boundary][0] for controls in planning_returns)
+        next_planning_wrap = planning_wraps[boundary + 1][0]
+        corridor = _find_handoff_corridor(
+            safe,
+            after_row=previous_return,
+            latest_wrap_row=next_planning_wrap,
+        )
+        if corridor is None:
+            # Correctness beats independence: keep the current helper active if
+            # there is no demonstrably quiet place to swap twice.
+            continue
+
+        return_row, wrap_row = corridor
+        for rows in runtime_rows[1:]:
+            _put_control(rows, columns, return_row, _RETURN)
+        _put_control(runtime_rows[0], columns, wrap_row, _WRAP)
+
+    for index, rows in enumerate(runtime_rows):
+        runtime[index] = replace(
+            runtime[index],
+            chart=replace(runtime[index].chart, notes=_measure_rows(rows, columns)),
+        )
+    return tuple(runtime)
+
+
+def render_compiled_simfile(report: SscRandomExportReport, song: SscSongInfo) -> str:
+    """Render one report using experimental safe Wrap0/T group handoffs."""
+
+    charts = materialize_segmented_random(report)
+    if not charts:
+        raise SscExportError("a compiled simfile needs at least one chart")
+    text = render_simfile([item.chart for item in charts], song)
+    return _decorate_runtime_metadata(text, charts, random_mode=report.helper_count > 0)
+
+
+def render_compiled_reports(
+    reports: tuple[SscRandomExportReport, ...] | list[SscRandomExportReport],
+    song: SscSongInfo,
+) -> str:
+    """Render several source charts with experimental safe random handoffs."""
+
+    frozen = tuple(reports)
+    if not frozen:
+        raise SscExportError("a combined simfile needs at least one source chart")
+    _validate_combined_random_pools(frozen)
+
+    runtime_groups = tuple(materialize_segmented_random(report) for report in frozen)
+    charts = tuple(item for group in runtime_groups for item in group)
+    if not charts:
+        raise SscExportError("a combined simfile needs at least one chart section")
+    text = render_simfile([item.chart for item in charts], song)
+    return _decorate_runtime_metadata(
+        text,
+        charts,
+        random_mode=any(report.helper_count > 0 for report in frozen),
+        chart_names=_combined_chart_names(frozen),
+    )
+
+
+__all__ = [
+    "materialize_segmented_random",
+    "render_compiled_simfile",
+    "render_compiled_reports",
+]
