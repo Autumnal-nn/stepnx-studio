@@ -34,7 +34,7 @@ _RANDOM_SPECIAL_LINE = "#SPECIAL:LEVEL,RANDOM;"
 def _chart_name(item: SscLabeledChart) -> str:
     if item.helper_index is None:
         return "STEPNX_BASE"
-    return f"STEPNX_RANDOM_{item.helper_index + 1:04d}"
+    return f"STEPNX_RANDOM_{item.helper_index + 1:03d}"
 
 
 def _decorate_runtime_metadata(
