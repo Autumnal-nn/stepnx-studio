@@ -16,9 +16,10 @@ uses both native mechanisms: bank-0/random slots are preserved, a corpus-backed
 RandomSkinList is emitted, and Header-19 RSK additionally remains compatible
 with the ordinary ``randomskin`` player option.
 
-The runtime also proved that Steps swaps can crash when the destination needs a
-noteskin that was not already loaded. Random Skin therefore preloads every skin
-in the emitted list on all runtime-switchable Steps sections.
+All corpus files with a non-empty ``#RANDOMSKINLIST`` use the ``0.83 StepPrime``
+profile, while StepPrime also contains T/O and Division charts. When Random Skin
+is requested we therefore promote the generated 0.83 header to StepPrime rather
+than relying on an unproven cross-profile parser path.
 """
 
 from __future__ import annotations
@@ -38,16 +39,11 @@ from stepnx.exporters.ssc_header_semantics import (
 _RANDOM_SKIN_HEADER_ID = 19
 _RANDOM_SKIN_VALUE = 254
 _RANDOM_SKIN_DIAGNOSTIC = "ssc.random-noteskin-header"
+_STEPPRIME_VERSION = "#VERSION:0.83 StepPrime;"
 
-# Exact non-empty RANDOMSKINLIST used by official Fiesta EX EF1603. Unlike the
-# ten-skin EF1475 preload family, this is direct evidence for the runtime list
-# grammar itself, so it is the conservative default when NX only says "random"
-# without carrying a candidate list.
 RANDOM_SKIN_RUNTIME_LIST = ("nx", "old", "music", "poker", "flower")
 
-# Every observed Arcade ``randomskin`` attack uses a finite 180-second window.
-# Using the corpus value is safer than the previous guessed LEN=9999, which the
-# target accepted syntactically but did not reproduce EF1329's skin changes.
+# All three observed Arcade randomskin attacks use this exact finite window.
 _RANDOM_SKIN_ATTACK = "#ATTACKS:TIME=0.000000:LEN=180.000000:MODS=randomskin;"
 
 
@@ -131,15 +127,7 @@ def random_skin_flags(
 
 
 def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
-    """Insert native RandomSkinList plus the XSanity randomskin player option.
-
-    ``#RANDOMSKINLIST`` is inserted before DIFFICULTY, matching official
-    StepPrime mission ordering. ``#ATTACKS`` remains immediately before NOTES,
-    matching the Arcade NXA files that use the player option. Keeping both is
-    intentional: direct NX skin 254 is a per-note/list semantic, while Header 19
-    is also an RSK gameplay modifier. The target safely accepts the combination
-    and it avoids converting either source into one fixed skin at export time.
-    """
+    """Insert StepPrime RandomSkinList plus the XSanity randomskin option."""
 
     frozen = tuple(bool(flag) for flag in flags)
     if not any(frozen):
@@ -150,7 +138,14 @@ def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
     chart_index = -1
     list_inserted: set[int] = set()
     attack_inserted: set[int] = set()
+    version_seen = False
+
     for line in text.splitlines():
+        if line.startswith("#VERSION:") and not version_seen:
+            output.append(_STEPPRIME_VERSION)
+            version_seen = True
+            continue
+
         if line == "#NOTEDATA:;":
             chart_index += 1
 
@@ -172,6 +167,10 @@ def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
 
         output.append(line)
 
+    if not version_seen:
+        raise ssc.SscExportError(
+            "rendered simfile is missing #VERSION for Random Skin StepPrime projection"
+        )
     if chart_index + 1 != len(frozen):
         raise ssc.SscExportError(
             f"rendered simfile contains {chart_index + 1} chart sections but "
