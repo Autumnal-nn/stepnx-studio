@@ -2,8 +2,8 @@
 
 This layer sits above the validated random/Division lifetime renderer. It adds
 runtime-wide semantics that do not belong to the low-level note writer:
-Random Skin / RSK, Division-200 playfield OFFSET controls, and Division-999
-AUTOPLAYON/OFF controls.
+Random Skin / RSK compatibility metadata, Division-200 playfield OFFSET
+controls, and Division-999 AUTOPLAYON/OFF controls.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from stepnx.exporters.ssc_autoplay_labels import (
 from stepnx.exporters.ssc_random import SscRandomExportReport
 from stepnx.exporters.ssc_random_skin import (
     add_random_skin_preloads,
-    inject_random_skin_attacks,
+    inject_random_skin_metadata,
     random_skin_flags,
     random_skin_projection_context,
 )
@@ -34,8 +34,8 @@ from stepnx.exporters.ssc_xsanity_lifetime import (
 def _bundle(report: SscRandomExportReport, *, prefix: str):
     snapshot = report.program.base_snapshot
     # Alternate Division routes are projected lazily inside the lifetime pass.
-    # Keep Random Skin materialization active there too so direct 254 and RSK
-    # notes receive explicit runtime-safe banks on every possible route.
+    # Keep Random Skin's bank-0 compatibility semantics active there too so
+    # direct 254/Header19 behave the same on every possible route.
     with random_skin_projection_context(snapshot):
         bundle = _lifetime_bundle(report, prefix=prefix)
     return add_random_skin_preloads(bundle, snapshot)
@@ -64,7 +64,7 @@ def render_compiled_simfile(report: SscRandomExportReport, song: SscSongInfo) ->
     )
     divided = _inject_division_tables_runtime_order(decorated, bundle.division_tables)
     controlled = inject_steps_labels(divided, _control_labels(report, bundle))
-    return inject_random_skin_attacks(
+    return inject_random_skin_metadata(
         controlled,
         random_skin_flags(report.program.base_snapshot, len(bundle.charts)),
     )
@@ -112,7 +112,7 @@ def render_compiled_reports(
         for report, bundle in zip(frozen, bundles, strict=True)
         for flag in random_skin_flags(report.program.base_snapshot, len(bundle.charts))
     )
-    return inject_random_skin_attacks(controlled, flags)
+    return inject_random_skin_metadata(controlled, flags)
 
 
 __all__ = ["render_compiled_simfile", "render_compiled_reports"]
