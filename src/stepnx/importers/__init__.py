@@ -25,6 +25,10 @@ from .legacy import (
 from .see import SEEChartResult, SEEImportResult, SEEMode, SEE_MODES, import_bytes as import_see_bytes, load as load_see
 from .ucs import load_ucs, parse_ucs
 from .dispatch import LEGACY_IMPORT_SUFFIXES, load_importable
+from .ssc_escape import install_ssc_escape_support
+
+install_ssc_escape_support()
+
 from .authoring_import import (
     AuthoringImportCandidate,
     load_authoring_import_candidates,
