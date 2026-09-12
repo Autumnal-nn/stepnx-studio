@@ -16,26 +16,33 @@ def _meta(meta_id: int, minimum: int, maximum: int) -> SimpleNamespace:
     return SimpleNamespace(meta_id=meta_id, value=(maximum << 16) | minimum)
 
 
-def _block(index: int, divisions=()) -> SimpleNamespace:
+def _block(
+    index: int,
+    divisions=(),
+    *,
+    row_count: int = 0,
+    beat_split: int = 8,
+    scroll: float = 1.0,
+) -> SimpleNamespace:
     return SimpleNamespace(
         index=index,
         divisions=tuple(divisions),
-        row_count=0,
+        row_count=row_count,
         rows=(),
         start_time=268_539.0,
         bpm=140.0,
-        scroll=1.0,
+        scroll=scroll,
         offset_or_delay=0.0,
         speed_or_freeze=1.0,
-        beat_split=8,
+        beat_split=beat_split,
         beat_measure=4,
         smooth_speed=0,
         raw_flag=0,
     )
 
 
-def _report(blocks) -> SimpleNamespace:
-    split = SimpleNamespace(index=219, blocks=tuple(blocks))
+def _report(blocks, *, raw_select: int = 0) -> SimpleNamespace:
+    split = SimpleNamespace(index=219, raw_select=raw_select, blocks=tuple(blocks))
     snapshot = SimpleNamespace(splits=(split,))
     analysis = SimpleNamespace(random_split_indices=(), bank_episodes=())
     return SimpleNamespace(
@@ -70,7 +77,7 @@ def test_ef662_style_g_w_wg_compiles_to_native_division_table() -> None:
     )
 
 
-def test_asymmetric_g_w_range_is_rejected_instead_of_inventing_wg_rule() -> None:
+def test_direct_pair_common_prefix_asymmetric_wg_is_supported() -> None:
     report = _report(
         (
             _block(0),
@@ -78,8 +85,45 @@ def test_asymmetric_g_w_range_is_rejected_instead_of_inventing_wg_rule() -> None
         )
     )
 
-    with pytest.raises(SscExportError, match="asymmetric"):
-        compile_division_decisions(report)
+    decision = compile_division_decisions(report)[0]
+    condition = decision.conditions[1]
+    assert condition is not None
+    assert (condition.minimum, condition.maximum, condition.operator) == (1, 3, "WG")
+
+
+def test_fiesta_ex_open_ended_gw_range_is_clamped_to_999() -> None:
+    report = _report(
+        (
+            _block(0),
+            _block(1, (_meta(6, 1, 30_000),)),
+            _block(2, (_meta(5, 1, 30_000),)),
+            _block(3, (_meta(5, 1, 30_000), _meta(6, 1, 30_000))),
+        )
+    )
+
+    decision = compile_division_decisions(report)[0]
+    assert [(c.minimum, c.maximum, c.operator) for c in decision.conditions[1:]] == [
+        (1, 999, "W"),
+        (1, 999, "G"),
+        (1, 999, "WG"),
+    ]
+
+
+def test_ef1225_style_variable_row_geometry_is_not_rejected() -> None:
+    report = _report(
+        (
+            _block(0, row_count=1206, beat_split=4, scroll=0.25),
+            _block(1, (_meta(6, 1, 30_000),), row_count=38592, beat_split=128, scroll=0.0078125),
+            _block(2, (_meta(5, 1, 30_000),), row_count=9648, beat_split=32, scroll=0.03125),
+            _block(3, (_meta(5, 1, 30_000), _meta(6, 1, 30_000)), row_count=19296, beat_split=64, scroll=0.015625),
+        )
+    )
+
+    decision = compile_division_decisions(report)[0]
+    # Variable-geometry routes switch before the Split instead of pretending
+    # that every branch shares the base row grid.
+    assert decision.timestamp_seconds < 268.539
+    assert decision.route_count == 4
 
 
 def test_unknown_division_family_is_rejected_explicitly() -> None:
