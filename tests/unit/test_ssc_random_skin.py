@@ -85,11 +85,13 @@ def test_rsk_preloads_runtime_list_on_every_runtime_step() -> None:
 def test_randomskin_runtime_tags_are_per_steps_and_corpus_shaped() -> None:
     text = "\n".join(
         (
+            "#VERSION:0.83;",
             "#TITLE:fixture;",
             "#ATTACKS:;",
             "#NOTEDATA:;",
             "#DESCRIPTION:A;",
             "#DIFFICULTY:Edit;",
+            "#PRELOADNOTESKIN:nx,old,music,poker,flower;",
             "#SPEEDS:0=1=1=1,;",
             "#NOTES:",
             "00000",
@@ -97,6 +99,7 @@ def test_randomskin_runtime_tags_are_per_steps_and_corpus_shaped() -> None:
             "#NOTEDATA:;",
             "#DESCRIPTION:B;",
             "#DIFFICULTY:Edit;",
+            "#PRELOADNOTESKIN:fire;",
             "#SPEEDS:0=1=1=1,;",
             "#NOTES:",
             "00000",
@@ -105,13 +108,15 @@ def test_randomskin_runtime_tags_are_per_steps_and_corpus_shaped() -> None:
     ) + "\n"
 
     rendered = inject_random_skin_attacks(text, (True, False))
+    assert rendered.startswith("#VERSION:0.83 StepPrime;")
     assert rendered.count("MODS=randomskin") == 1
     assert "LEN=180.000000" in rendered
     assert rendered.count("#RANDOMSKINLIST:") == 1
     assert "#RANDOMSKINLIST:" + ",".join(RANDOM_SKIN_RUNTIME_LIST) + ";" in rendered
 
     first_steps = rendered.split("#NOTEDATA:;", 2)[1]
-    assert first_steps.index("#RANDOMSKINLIST:") < first_steps.index("#DIFFICULTY:")
+    assert first_steps.index("#PRELOADNOTESKIN:") < first_steps.index("#RANDOMSKINLIST:")
+    assert first_steps.index("#RANDOMSKINLIST:") < first_steps.index("#SPEEDS:")
     assert first_steps.index("MODS=randomskin") < first_steps.index("#NOTES:")
 
     second_steps = rendered.split("#NOTEDATA:;", 2)[2]
