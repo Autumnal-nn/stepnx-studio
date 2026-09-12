@@ -101,7 +101,7 @@ def _decision() -> SscDivisionDecision:
     )
 
 
-def test_tail_division_reuses_dead_random_helpers_without_cartesian_product(monkeypatch) -> None:
+def test_tail_division_keeps_random_pool_and_adds_only_native_route_suffixes(monkeypatch) -> None:
     import stepnx.exporters.ssc_division_lifetime as lifetime
 
     report, runtime = _fixture(helper_count=5)
@@ -124,8 +124,9 @@ def test_tail_division_reuses_dead_random_helpers_without_cartesian_product(monk
 
     bundle = materialize_division_routes_lifetime_aware(report, runtime, prefix="EF662")
 
-    # Base + the original five random tickets. No 5x4 route lattice is created.
-    assert len(bundle.charts) == 6
+    # The random pool stays five tickets. The terminal four-way Division needs
+    # only three small NORMAL suffix routes instead of a 5x4 Cartesian lattice.
+    assert len(bundle.charts) == 9
     assert bundle.chart_names == (
         "EF662_BASE",
         "EF662_RANDOM_001",
@@ -133,23 +134,31 @@ def test_tail_division_reuses_dead_random_helpers_without_cartesian_product(monk
         "EF662_RANDOM_003",
         "EF662_RANDOM_004",
         "EF662_RANDOM_005",
+        "EF662_DIVISION_02",
+        "EF662_DIVISION_03",
+        "EF662_DIVISION_04",
     )
     assert bundle.division_tables[0] == (
         "0=0=EF662_BASE=12.00000=WG",
-        "1=1=EF662_RANDOM_001=12.00000=W",
-        "1=1=EF662_RANDOM_002=12.00000=G",
-        "1=1=EF662_RANDOM_003=12.00000=WG",
+        "1=1=EF662_DIVISION_02=12.00000=W",
+        "1=1=EF662_DIVISION_03=12.00000=G",
+        "1=1=EF662_DIVISION_04=12.00000=WG",
     )
     assert all(not table for table in bundle.division_tables[1:])
 
-    helper_rows = [_dense_rows(item.chart.notes, 5) for item in bundle.charts[1:]]
+    random_helpers = bundle.charts[1:6]
+    helper_rows = [_dense_rows(item.chart.notes, 5) for item in random_helpers]
+    assert all(item.label_type == "DIVISION" for item in random_helpers)
     assert all("O" in rows[40] for rows in helper_rows)
+    assert all(len(rows) < 160 for rows in helper_rows)
+    assert all(len(rows) >= 40 + 16 + 1 for rows in helper_rows)
 
-    # Three tickets are recycled as late Division carriers and therefore keep a
-    # sparse late suffix. The remaining dead tickets end shortly after O0.
-    assert all(len(rows) == 160 for rows in helper_rows[:3])
-    assert all(len(rows) < 160 for rows in helper_rows[3:])
-    assert all(len(rows) >= 40 + 16 + 1 for rows in helper_rows[3:])
+    routes = bundle.charts[6:]
+    assert all(item.label_type == "NORMAL" for item in routes)
+    assert sum(item.label_type == "DIVISION" for item in bundle.charts) == 5
+    route_rows = [_dense_rows(item.chart.notes, 5) for item in routes]
+    assert all(len(rows) == 160 for rows in route_rows)
+    assert all("T" not in "".join(rows[:104]) for rows in route_rows)
 
 
 def test_division_too_close_to_final_random_return_uses_conservative_fallback(monkeypatch) -> None:
