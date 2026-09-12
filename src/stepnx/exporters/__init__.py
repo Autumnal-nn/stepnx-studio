@@ -23,6 +23,8 @@ from stepnx.exporters.ssc_random import (
     SscLabeledChart,
     SscRandomExportReport,
     SscRandomWindow,
+)
+from stepnx.exporters.ssc_runtime_compile import (
     compile_ssc_export as _compile_ssc_export,
 )
 from stepnx.exporters.ssc_xsanity_lifetime import (
@@ -36,9 +38,10 @@ def compile_ssc_export(*args, **kwargs) -> SscRandomExportReport:
 
     The random planner historically reported non-random alternate blocks as
     ``ssc.conditional-branches-pending``. Those branches are now consumed by
-    the native Division renderer, so the public report removes that obsolete
-    diagnostic. Unsupported Division grammars still fail explicitly when the
-    runtime projection is rendered/preflighted instead of being flattened.
+    the native Division renderer, while unconditional ordered multi-block
+    Splits are resolved using the original NXA/Fiesta 2 last-valid-block rule.
+    Unsupported Division grammars still fail explicitly during runtime
+    projection instead of being flattened silently.
     """
 
     report = _compile_ssc_export(*args, **kwargs)
