@@ -278,6 +278,10 @@ and Space seeks forward five seconds. P1 uses `Q E S Z C`; P2 uses
 `Home PageUp Num5 End PageDown`. These controls are independently implemented;
 no PIUTESTER code or official game assets are distributed.
 
+## Acknowledgements
+
+Special thanks to [th3y](https://github.com/th3y) for [PR #27](https://github.com/Autumnal-nn/stepnx-studio/pull/27) and the follow-up review and fixes that helped validate and harden the XSanity SSC export path, and an anonymous contributor for providing the R!SE files used for validation.
+
 ## License and trademark
 
 Code is licensed under Apache-2.0. Copyright © 2026 Autumnal and StepNX Studio
