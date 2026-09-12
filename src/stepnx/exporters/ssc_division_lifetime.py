@@ -1,21 +1,21 @@
 """Lifetime-aware XSanity Division allocation.
 
 Random helper identity is only valuable while a generated ``T``/``O`` window is
-live.  Once the final random window has returned to the initial NORMAL chart,
-those helper Steps are dead state.  A later native ``#DIVISION`` decision can
-therefore reuse a few of the existing helper chart identities as its alternate
-routes instead of multiplying every random ticket by every conditional route.
+live. Once the final random window has returned to the initial NORMAL chart, a
+later native ``#DIVISION`` decision is independent of the random helper state.
+The exporter should therefore avoid a global Cartesian product.
 
-The important case is EF662-style structure::
+The important EF662-style shape is::
 
     NORMAL --T--> random helper ... --O0--> NORMAL ... #DIVISION
 
 For a pool of N random helpers and a four-way terminal Division, the runtime
-still contains N helpers, not N*4.  Three helpers keep their original random
-prefix and are recycled as W/G/WG route carriers after the final O0.  All other
-helpers are truncated shortly after O0.  The route carriers keep only a sparse
-late suffix around the Division decision, so the optimization also removes the
-otherwise duplicated full-song payload.
+keeps exactly N random helpers. Every helper ends shortly after the final O0,
+while the three alternate Division routes are small NORMAL route charts built
+from the base suffix. Because generated T only samples ``LABELTYPE:DIVISION``,
+those NORMAL routes do not contaminate the random pool. This mirrors the corpus
+cases where T and native ``#DIVISION`` coexist while the named route Steps are
+NORMAL charts addressed by ``#CHARTNAME``.
 
 If the conditional decision overlaps a live random state, if there is no safe
 blank corridor for the final O0, or if the shape is not yet proven, this module
@@ -49,10 +49,8 @@ _WRAP = "T"
 _HOLD_HEAD_KINDS = frozenset({"2", "4"})
 _HOLD_TAIL_KIND = "3"
 
-# The runtime test that validated Wrap0 used visible breathing room around the
-# swap.  Keep two SSC beats after the final O0 and two beats before a reused
-# route's first conditional region.  On the writer's 8-row beat grid this is 16
-# rows each side.
+# Keep two SSC beats after the final O0 and two beats before a late Division
+# route becomes relevant. On the writer's 8-row beat grid this is 16 rows.
 _RETURN_TAIL_ROWS = 16
 _DIVISION_LEAD_ROWS = 16
 
@@ -172,8 +170,6 @@ def _find_final_return_row(
     columns = report.program.base_snapshot.columns
     last_wrap = _runtime_last_wrap(runtime, columns)
     if last_wrap is not None and planning_return <= last_wrap:
-        # A later runtime draw still exists.  The state is not globally dead at
-        # this semantic return, so helper reuse would alias two live purposes.
         return None
 
     first_division = _first_decision_row(report, decisions)
@@ -202,51 +198,47 @@ def _put_return(rows: list[str], columns: int, row_index: int) -> None:
     rows[row_index] = "".join(cells)
 
 
-def _with_final_return(
-    item: SscLabeledChart,
-    *,
-    columns: int,
-    row_index: int,
-) -> SscLabeledChart:
-    rows = _dense_rows(item.chart.notes, columns)
-    _put_return(rows, columns, row_index)
-    return replace(item, chart=replace(item.chart, notes=_measure_rows(rows, columns)))
-
-
-def _sparsify_after_return(
+def _trim_random_helper(
     item: SscLabeledChart,
     *,
     columns: int,
     return_row: int,
-    suffix_start: int | None = None,
 ) -> SscLabeledChart:
-    """Keep random prefix, optional Division suffix, and blank the dead middle."""
+    """End a dead random helper shortly after its final O0."""
+
+    rows = _dense_rows(item.chart.notes, columns)
+    _put_return(rows, columns, return_row)
+    end = min(len(rows), return_row + _RETURN_TAIL_ROWS + 1)
+    return replace(item, chart=replace(item.chart, notes=_measure_rows(rows[:end], columns)))
+
+
+def _sparse_tail_route(
+    item: SscLabeledChart,
+    *,
+    columns: int,
+    suffix_start: int,
+) -> SscLabeledChart:
+    """Drop route payload before the late Division lead window."""
 
     rows = _dense_rows(item.chart.notes, columns)
     blank = "0" * columns
-    prefix_end = min(len(rows), return_row + _RETURN_TAIL_ROWS + 1)
-    if suffix_start is None:
-        rows = rows[:prefix_end]
-    else:
-        suffix_start = max(prefix_end, min(len(rows), suffix_start))
-        for row_index in range(prefix_end, suffix_start):
-            rows[row_index] = blank
+    for row_index in range(min(len(rows), max(0, suffix_start))):
+        rows[row_index] = blank
     return replace(item, chart=replace(item.chart, notes=_measure_rows(rows, columns)))
 
 
-def _tail_reuse_runtime(
+def _tail_separated_runtime(
     report: SscRandomExportReport,
     runtime: tuple[SscLabeledChart, ...],
     decisions: tuple[SscDivisionDecision, ...],
     *,
     prefix: str,
 ) -> SscDivisionRuntime | None:
-    """Reuse dead random helpers for one terminal conditional decision."""
+    """Separate one terminal Division from an already-dead random pool."""
 
-    # Multiple independent conditional decisions need their own liveness graph;
-    # correlating them by one route index would be another hidden Cartesian
-    # product.  Keep the optimization intentionally narrow until that graph is
-    # implemented.
+    # More than one independent conditional decision needs a second liveness
+    # analysis of conditional route state. Avoid silently correlating them by a
+    # single route index until that graph exists.
     if report.helper_count <= 0 or len(decisions) != 1:
         return None
     if len(runtime) != report.helper_count + 1:
@@ -254,8 +246,7 @@ def _tail_reuse_runtime(
 
     decision = decisions[0]
     route_count = decision.route_count
-    alternates = route_count - 1
-    if alternates <= 0 or alternates > report.helper_count:
+    if route_count <= 1:
         return None
 
     return_row = _find_final_return_row(report, runtime, decisions)
@@ -264,61 +255,55 @@ def _tail_reuse_runtime(
 
     bounds = _split_bounds(report.program.base_snapshot)
     division_start, _ = bounds[decision.split_index]
-    suffix_start = max(return_row + _RETURN_TAIL_ROWS + 1, division_start - _DIVISION_LEAD_ROWS)
+    suffix_start = max(0, division_start - _DIVISION_LEAD_ROWS)
     columns = report.program.base_snapshot.columns
 
-    names = [prefix + "_BASE"]
+    base = runtime[0]
+    charts: list[SscLabeledChart] = [base]
+    names: list[str] = [prefix + "_BASE"]
+    tables: list[tuple[str, ...]] = [()]
+
+    # Preserve exactly the original random pool. Every helper receives the final
+    # O0 and then physically ends after a short guard instead of duplicating the
+    # rest of the song hundreds of times.
     for item in runtime[1:]:
-        assert item.helper_index is not None
-        names.append(prefix + f"_RANDOM_{item.helper_index + 1:03d}")
-
-    # Block 0 stays on the initial chart. Alternate block routes borrow existing
-    # random helper identities. They remain valid random tickets before O0, then
-    # become sparse late route carriers after their random state has died.
-    route_names = tuple([names[0], *names[1 : 1 + alternates]])
-    common_table = _table(decisions, route_names)
-
-    charts: list[SscLabeledChart] = [runtime[0]]
-    tables: list[tuple[str, ...]] = [common_table]
-    for helper_position, source in enumerate(runtime[1:], 1):
-        returned = _with_final_return(source, columns=columns, row_index=return_row)
-        route_index = helper_position if helper_position <= alternates else 0
-        if route_index:
-            helper_index = source.helper_index
-            assert helper_index is not None
-            routed = _route_variant(
-                returned,
-                report.program.helper_snapshots[helper_index],
-                decisions,
-                route_index,
-                description=(
-                    f"{runtime[0].chart.description} [StepNX random {helper_index + 1} "
-                    f"+ tail Division {route_index + 1}]"
-                ),
-                helper_index=helper_index,
+        helper_index = item.helper_index
+        assert helper_index is not None
+        charts.append(
+            _trim_random_helper(
+                item,
+                columns=columns,
+                return_row=return_row,
             )
-            charts.append(
-                _sparsify_after_return(
-                    routed,
-                    columns=columns,
-                    return_row=return_row,
-                    suffix_start=suffix_start,
-                )
-            )
-            # This is a terminal one-decision route, so only the base chart is
-            # active when the table is evaluated. Keeping the carrier table
-            # empty avoids redundant metadata on hundreds of random helpers.
-            tables.append(())
-        else:
-            charts.append(
-                _sparsify_after_return(
-                    returned,
-                    columns=columns,
-                    return_row=return_row,
-                )
-            )
-            tables.append(())
+        )
+        names.append(prefix + f"_RANDOM_{helper_index + 1:03d}")
+        tables.append(())
 
+    # The conditional routes are addressed directly by CHARTNAME and are NORMAL
+    # charts, so generated T cannot sample them as random tickets.
+    route_names = [names[0]]
+    for route_index in range(1, route_count):
+        route_name = prefix + f"_DIVISION_{route_index + 1:02d}"
+        routed = _route_variant(
+            base,
+            report.program.base_snapshot,
+            decisions,
+            route_index,
+            description=f"{base.chart.description} [StepNX Division {route_index + 1}]",
+            helper_index=None,
+        )
+        routed = replace(routed, label_type="NORMAL", helper_index=None)
+        routed = _sparse_tail_route(
+            routed,
+            columns=columns,
+            suffix_start=suffix_start,
+        )
+        charts.append(routed)
+        names.append(route_name)
+        tables.append(())
+        route_names.append(route_name)
+
+    tables[0] = _table(decisions, tuple(route_names))
     return SscDivisionRuntime(
         charts=tuple(charts),
         chart_names=tuple(names),
@@ -335,14 +320,14 @@ def materialize_division_routes_lifetime_aware(
 ) -> SscDivisionRuntime:
     """Choose the smallest proven route allocation for the report's lifetimes.
 
-    Today the optimizer recognizes the high-value EF662 shape: one conditional
-    decision strictly after the final random state can safely return to NORMAL.
-    Other shapes retain the conservative existing materializer.
+    Today the optimizer recognizes the EF662 shape: one conditional decision
+    strictly after the final random state can safely return to NORMAL. Other
+    shapes retain the conservative existing materializer.
     """
 
     decisions = compile_division_decisions(report)
     if decisions:
-        optimized = _tail_reuse_runtime(
+        optimized = _tail_separated_runtime(
             report,
             runtime_charts,
             decisions,
@@ -353,6 +338,4 @@ def materialize_division_routes_lifetime_aware(
     return materialize_division_routes(report, runtime_charts, prefix=prefix)
 
 
-__all__ = [
-    "materialize_division_routes_lifetime_aware",
-]
+__all__ = ["materialize_division_routes_lifetime_aware"]
