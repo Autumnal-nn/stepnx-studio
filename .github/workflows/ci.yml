@@ -51,8 +51,13 @@ jobs:
             python:3.11-bullseye \
             bash -lc '
               set -euo pipefail
+              printf "%s\n" \
+                "deb [check-valid-until=no] http://archive.debian.org/debian bullseye main" \
+                "deb [check-valid-until=no] http://archive.debian.org/debian bullseye-updates main" \
+                > /etc/apt/sources.list
+              rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
               for attempt in 1 2 3; do
-                if apt-get update && apt-get install -y --no-install-recommends \
+                if apt-get -o Acquire::Check-Valid-Until=false update && apt-get install -y --no-install-recommends \
                   libasound2 \
                   libegl1 \
                   libgl1 \
@@ -67,10 +72,10 @@ jobs:
                   break
                 fi
                 if [ "$attempt" -eq 3 ]; then
-                  echo "apt dependency installation failed after 3 attempts" >&2
+                  echo "archived Bullseye dependency installation failed after 3 attempts" >&2
                   exit 1
                 fi
-                echo "apt mirror changed during install; refreshing package lists and retrying ($attempt/3)" >&2
+                echo "archive access failed; refreshing package lists and retrying ($attempt/3)" >&2
                 rm -rf /var/lib/apt/lists/*
                 sleep 5
               done
