@@ -15,8 +15,10 @@ and in every materialized helper, with a quiet guard after each control. If no
 such corridor exists, the boundary is skipped and the neighboring random groups
 remain correlated rather than risking gameplay corruption.
 
-This module is intentionally a test layer over :mod:`stepnx.exporters.ssc_xsanity`.
-The known-good single-startup materializer remains available there as a fallback.
+Conditional NX branches are compiled after this stage into full backing routes
+with native XSanity #DIVISION metadata. A Wrap0/T handoff is never inserted
+across one of those conditional regions, so the active random helper identity
+remains available to the Division route lattice.
 """
 
 from __future__ import annotations
@@ -24,9 +26,12 @@ from __future__ import annotations
 from dataclasses import replace
 
 from stepnx.exporters.ssc import SscExportError, SscSongInfo, render_simfile
+from stepnx.exporters.ssc_division import (
+    inject_division_tables,
+    materialize_division_routes,
+)
 from stepnx.exporters.ssc_random import SscLabeledChart, SscRandomExportReport
 from stepnx.exporters.ssc_xsanity import (
-    _combined_chart_names,
     _control_cells,
     _decorate_runtime_metadata,
     _dense_rows,
@@ -41,7 +46,7 @@ _RETURN = "O"  # bare O is Wrap0: return to the initial/base Steps
 _HOLD_HEAD_KINDS = frozenset({"2", "4"})
 _HOLD_TAIL_KIND = "3"
 
-# Runtime-test guard. O0 gets eight completely empty rows before the next T;
+# Runtime-tested guard. O0 gets eight completely empty rows before the next T;
 # the new T then gets sixteen completely empty rows before any chart content.
 # With the writer's eight-row beat grid, the latter is two SSC beats of dead air.
 _EMPTY_ROWS_AFTER_RETURN = 8
@@ -121,13 +126,7 @@ def _find_handoff_corridor(
     after_row: int,
     latest_wrap_row: int,
 ) -> tuple[int, int] | None:
-    """Choose O0/T inside the best dead-air run before the next random window.
-
-    The T row may not be later than the semantic compiler's planning T because
-    that marker already represents the latest point with two visual beats of
-    lead to the next random divergence. The quiet run itself is allowed to
-    extend beyond that marker so the post-T guard can be verified directly.
-    """
+    """Choose O0/T inside the best dead-air run before the next random window."""
 
     search_start = after_row + 1
     search_end = min(len(safe) - 1, latest_wrap_row + _EMPTY_ROWS_AFTER_WRAP)
@@ -139,8 +138,6 @@ def _find_handoff_corridor(
         earliest_t = run_start + 1 + _EMPTY_ROWS_AFTER_RETURN
         if latest_t < earliest_t:
             continue
-        # Prefer the longest dead-air corridor, then put T as late as possible
-        # while preserving its post-swap quiet guard.
         candidates.append((run_end - run_start + 1, run_start, latest_t))
 
     if not candidates:
@@ -158,6 +155,49 @@ def _put_control(rows: list[str], columns: int, row_index: int, token: str) -> N
         raise SscExportError(f"runtime control {token} has no empty lane at row {row_index}")
     cells[lane] = token
     rows[row_index] = "".join(cells)
+
+
+def _conditional_row_bounds(report: SscRandomExportReport) -> tuple[tuple[int, int], ...]:
+    """Locate non-random multi-block regions without validating their condition grammar."""
+
+    program = getattr(report, "program", None)
+    snapshot = getattr(program, "base_snapshot", None)
+    splits = getattr(snapshot, "splits", ())
+    if not splits:
+        return ()
+
+    analysis = getattr(program, "analysis", None)
+    handled = set(getattr(analysis, "random_split_indices", ()))
+    for episode in getattr(analysis, "bank_episodes", ()):
+        handled.update(getattr(episode, "follower_split_indices", ()))
+
+    result: list[tuple[int, int]] = []
+    cursor = 0
+    for split_index, split in enumerate(splits):
+        blocks = getattr(split, "blocks", ())
+        if not blocks:
+            continue
+        try:
+            block = snapshot.active_block(split.stable_id)
+        except (AttributeError, KeyError):
+            block = blocks[0]
+        start = cursor
+        cursor += int(block.row_count)
+        if len(blocks) > 1 and split_index not in handled:
+            result.append((start, cursor))
+    return tuple(result)
+
+
+def _crosses_conditional_region(
+    bounds: tuple[tuple[int, int], ...],
+    *,
+    previous_return: int,
+    next_wrap: int,
+) -> bool:
+    return any(
+        start <= next_wrap and end > previous_return
+        for start, end in bounds
+    )
 
 
 def materialize_segmented_random(
@@ -187,18 +227,26 @@ def materialize_segmented_random(
 
     runtime_rows = [_dense_rows(item.chart.notes, columns) for item in runtime]
     safe = _combined_safe_blank_mask(tuple(runtime_rows), columns)
+    conditional_bounds = _conditional_row_bounds(report)
 
     for boundary in range(len(planning_wraps) - 1):
         previous_return = max(controls[boundary][0] for controls in planning_returns)
         next_planning_wrap = planning_wraps[boundary + 1][0]
+        if _crosses_conditional_region(
+            conditional_bounds,
+            previous_return=previous_return,
+            next_wrap=next_planning_wrap,
+        ):
+            # Keep the current helper identity alive across a conditional branch;
+            # the later #DIVISION table will switch only among sibling routes of
+            # that same random state.
+            continue
         corridor = _find_handoff_corridor(
             safe,
             after_row=previous_return,
             latest_wrap_row=next_planning_wrap,
         )
         if corridor is None:
-            # Correctness beats independence: keep the current helper active if
-            # there is no demonstrably quiet place to swap twice.
             continue
 
         return_row, wrap_row = corridor
@@ -215,37 +263,52 @@ def materialize_segmented_random(
 
 
 def render_compiled_simfile(report: SscRandomExportReport, song: SscSongInfo) -> str:
-    """Render one report using experimental safe Wrap0/T group handoffs."""
+    """Render one report with safe random redraws and native Division routes."""
 
-    charts = materialize_segmented_random(report)
-    if not charts:
-        raise SscExportError("a compiled simfile needs at least one chart")
-    text = render_simfile([item.chart for item in charts], song)
-    return _decorate_runtime_metadata(text, charts, random_mode=report.helper_count > 0)
+    runtime = materialize_segmented_random(report)
+    bundle = materialize_division_routes(report, runtime, prefix="STEPNX")
+    text = render_simfile([item.chart for item in bundle.charts], song)
+    decorated = _decorate_runtime_metadata(
+        text,
+        bundle.charts,
+        random_mode=report.helper_count > 0,
+        chart_names=bundle.chart_names,
+    )
+    return inject_division_tables(decorated, bundle.division_tables)
 
 
 def render_compiled_reports(
     reports: tuple[SscRandomExportReport, ...] | list[SscRandomExportReport],
     song: SscSongInfo,
 ) -> str:
-    """Render several source charts with experimental safe random handoffs."""
+    """Render several source charts with safe random and Division StepSwap routes."""
 
     frozen = tuple(reports)
     if not frozen:
         raise SscExportError("a combined simfile needs at least one source chart")
     _validate_combined_random_pools(frozen)
 
-    runtime_groups = tuple(materialize_segmented_random(report) for report in frozen)
-    charts = tuple(item for group in runtime_groups for item in group)
+    bundles = tuple(
+        materialize_division_routes(
+            report,
+            materialize_segmented_random(report),
+            prefix=f"STEPNX_{report_index:02d}",
+        )
+        for report_index, report in enumerate(frozen, 1)
+    )
+    charts = tuple(item for bundle in bundles for item in bundle.charts)
+    names = tuple(name for bundle in bundles for name in bundle.chart_names)
+    tables = tuple(table for bundle in bundles for table in bundle.division_tables)
     if not charts:
         raise SscExportError("a combined simfile needs at least one chart section")
     text = render_simfile([item.chart for item in charts], song)
-    return _decorate_runtime_metadata(
+    decorated = _decorate_runtime_metadata(
         text,
         charts,
         random_mode=any(report.helper_count > 0 for report in frozen),
-        chart_names=_combined_chart_names(frozen),
+        chart_names=names,
     )
+    return inject_division_tables(decorated, tables)
 
 
 __all__ = [
