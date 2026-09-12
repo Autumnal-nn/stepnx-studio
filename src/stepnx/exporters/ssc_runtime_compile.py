@@ -13,7 +13,7 @@ as conditional routes.  EF334 contains several such Splits.
 This module applies that runtime rule to the authoring snapshot before the
 existing random compiler and SSC projection run. It also resolves header-level
 SSC semantics that the low-level writer intentionally does not own: noteskin
-slots 900..905 and mission difficulty 1101.
+slots 900..905, Random Skin materialization, and mission difficulty 1101.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from stepnx.exporters.ssc_header_semantics import (
     header_noteskin_context,
     resolved_meter,
 )
+from stepnx.exporters.ssc_random_skin import random_skin_projection_context
 from stepnx.exporters.ssc_random import (
     SscLabeledChart,
     SscRandomExportReport,
@@ -98,9 +99,9 @@ def _project_runtime(
     meter: int | None,
     credit: str | None,
 ):
-    """Project one snapshot with its header noteskin slot table active."""
+    """Project one snapshot with its complete header/runtime skin semantics active."""
 
-    with header_noteskin_context(snapshot):
+    with random_skin_projection_context(snapshot), header_noteskin_context(snapshot):
         chart, diagnostics = _project(
             document,
             snapshot,
