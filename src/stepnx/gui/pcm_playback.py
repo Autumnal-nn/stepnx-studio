@@ -11,6 +11,21 @@ except ImportError:  # Older supported PySide6 releases expose only QAudio.
 from stepnx.authoring.pcm import CanonicalPcm
 
 
+_PCM_UI_REFRESH_MS = 16
+_PCM_OUTPUT_BUFFER_MS = 100
+_PCM_CHANNELS = 2
+_PCM_BYTES_PER_SAMPLE = 2
+
+
+def _pcm_output_buffer_bytes(sample_rate: int) -> int:
+    """Return a playback ringbuffer large enough to survive ordinary GUI stalls."""
+
+    if sample_rate <= 0:
+        raise ValueError("PCM sample rate must be positive")
+    frames = max(1, round(sample_rate * _PCM_OUTPUT_BUFFER_MS / 1000.0))
+    return frames * _PCM_CHANNELS * _PCM_BYTES_PER_SAMPLE
+
+
 class PcmPlayback(QObject):
     """Play the analysis PCM, with a device-processed sample clock.
 
@@ -39,7 +54,10 @@ class PcmPlayback(QObject):
         self._mixed_configuration = None
         self._mixed_data = None
         self._timer = QTimer(self)
-        self._timer.setInterval(10)
+        # Canonical PCM used to refresh at 100 Hz while the ordinary transport
+        # refreshes around 60 Hz. The extra UI traffic buys no clock precision:
+        # position_frames still reads QAudioSink.processedUSecs() on demand.
+        self._timer.setInterval(_PCM_UI_REFRESH_MS)
         self._timer.timeout.connect(self._poll)
 
     @property
@@ -87,14 +105,19 @@ class PcmPlayback(QObject):
         device = QMediaDevices.defaultAudioOutput()
         audio_format = QAudioFormat()
         audio_format.setSampleRate(self.pcm.sample_rate)
-        audio_format.setChannelCount(2)
+        audio_format.setChannelCount(_PCM_CHANNELS)
         audio_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
         if device.isNull() or not device.isFormatSupported(audio_format):
             self.errorOccurred.emit("PCM playback requires a 48 kHz stereo output device; waveform analysis remains available.")
             return False
         self._sink = QAudioSink(device, audio_format, self)
         self._sink.setVolume(0.8)
-        self._sink.setBufferSize(4096)
+        # 4096 bytes at 48 kHz stereo S16 is only ~21 ms. Qt's QIODevice mode
+        # feeds the audio thread through a ringbuffer, so a single expensive
+        # timeline paint could exhaust that queue and inject silence. Keep a
+        # deterministic but still modest 100 ms queue. This does not change
+        # the transport clock, which remains processedUSecs().
+        self._sink.setBufferSize(_pcm_output_buffer_bytes(self.pcm.sample_rate))
         self._sink.stateChanged.connect(self._sink_state_changed)
         return True
 
