@@ -7,6 +7,7 @@ from stepnx.authoring.mp3_gapless import (
     Mp3GaplessAnalysis,
     analyze_ffmpeg_lame_gapless,
 )
+from stepnx.authoring.mp3_probe import detect_mp3_sample_rate
 from stepnx.authoring.nxa_startup import (
     NxaStartupAnalysis,
     NxaStartupError,
@@ -15,6 +16,7 @@ from stepnx.authoring.nxa_startup import (
 
 _NXA_PROFILES = frozenset({"nxa-native", "nxa-step5-patched"})
 _MP3_SUFFIXES = frozenset({".mp3"})
+_EXPECTED_MP3_SAMPLE_RATE = 48_000
 
 
 def effective_nxa_audio_offset_ms(
@@ -43,6 +45,57 @@ def effective_nxa_audio_offset_ms(
     # modifying the MP3 or synthesizing discarded samples.
     presentation = -(gapless.ffmpeg_start_skip_ms if gapless is not None else 0.0)
     return manual + startup + presentation
+
+
+def loaded_mp3_sample_rate(transport) -> int | None:
+    """Return the source MPEG rate for the audio currently loaded by transport."""
+
+    pcm = getattr(transport, "canonical_pcm", None)
+    if pcm is not None:
+        rate = getattr(pcm, "mpeg_sample_rate", None)
+        return int(rate) if rate else None
+
+    source = getattr(transport, "playback_source", None)
+    if source is None:
+        return None
+    path = Path(source)
+    if path.suffix.casefold() not in _MP3_SUFFIXES:
+        return None
+    return detect_mp3_sample_rate(path)
+
+
+def mp3_sample_rate_warning(sample_rate: int | None) -> str | None:
+    if sample_rate is None or sample_rate == _EXPECTED_MP3_SAMPLE_RATE:
+        return None
+    return (
+        "StepNX Studio expects MP3 audio at 48,000 Hz for timing-accurate "
+        f"playback. The loaded MPEG audio is {sample_rate:,} Hz. Playback, "
+        "waveform timing, or synchronization may not work correctly. Re-encode "
+        "or resample the audio to 48,000 Hz before relying on timing."
+    )
+
+
+def _warn_unexpected_mp3_sample_rate(window) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    transport = window.audio_transport
+    sample_rate = loaded_mp3_sample_rate(transport)
+    message = mp3_sample_rate_warning(sample_rate)
+    if message is None:
+        return
+
+    source = getattr(transport, "original_source", None)
+    if source is None:
+        source = getattr(transport, "playback_source", None)
+    key = (str(Path(source).resolve()) if source is not None else "", sample_rate)
+    warned = getattr(window, "_mp3_sample_rate_warnings", None)
+    if warned is None:
+        warned = set()
+        window._mp3_sample_rate_warnings = warned
+    if key in warned:
+        return
+    warned.add(key)
+    QMessageBox.warning(window, "Unexpected MP3 sample rate", message)
 
 
 def _selected_profile(window) -> str:
@@ -188,6 +241,7 @@ def install_nxa_audio_alignment(window) -> None:
     window._nxa_startup_analysis = None
     window._nxa_gapless_analysis = None
     window._nxa_startup_analysis_error = None
+    window._mp3_sample_rate_warnings = set()
     window.audio_transport.pcm_prepare_playback = lambda: _refresh_pcm_metronome(window)
 
     original_load_audio = window._load_audio
@@ -197,6 +251,7 @@ def install_nxa_audio_alignment(window) -> None:
         original_load_audio(path)
         if window.audio_transport.playback_source is None:
             window.waveform = None
+        _warn_unexpected_mp3_sample_rate(window)
         _refresh_analysis(window, announce=True)
 
     window._load_audio = load_audio_with_nxa_alignment
@@ -216,6 +271,7 @@ def install_nxa_audio_alignment(window) -> None:
             if source is not None:
                 window._load_audio(source)
                 return
+        _warn_unexpected_mp3_sample_rate(window)
         _refresh_analysis(window, announce=False)
 
     for action in getattr(window, "profile_actions", {}).values():
