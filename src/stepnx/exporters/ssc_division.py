@@ -1,8 +1,8 @@
 """Compile non-random NX branch splits into XSanity ``#DIVISION`` routes.
 
-This layer sits after the random/Wrap materializer.  Random helper identity is
+This layer sits after the random/Wrap materializer. Random helper identity is
 kept as the backing state, while each supported conditional block index becomes
-a route variant of that state.  XSanity ``#DIVISION`` then switches among the
+a route variant of that state. XSanity ``#DIVISION`` then switches among the
 variants by ``#CHARTNAME`` without flattening the alternate NX blocks.
 
 The first implementation deliberately covers the branch family for which the
@@ -15,7 +15,7 @@ NX/SSC corpus is strong enough to generate rather than guess:
 * the fourth ``#DIVISION`` field is an absolute timestamp in seconds.
 
 Asymmetric G/W ranges and other condition families remain explicit export
-errors until their synthesis rule is established.  This is preferable to
+errors until their synthesis rule is established. This is preferable to
 silently widening a branch condition.
 """
 
@@ -23,14 +23,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from stepnx.authoring.snapshot import AuthoringSnapshot, BlockSnapshot
+from stepnx.authoring.snapshot import BlockSnapshot
 from stepnx.core.model import EmptyRow, LightmapRow, NoteRow, PackedNoteRow
-from stepnx.exporters.ssc import SscDiagnostic, SscExportError
-from stepnx.exporters.ssc_random import (
-    SscLabeledChart,
-    SscRandomExportReport,
-    _project,
+from stepnx.exporters.ssc import (
+    SscExportError,
+    _ExportState,
+    _brain_char,
+    _render_cell,
+    _row_cells,
 )
+from stepnx.exporters.ssc_random import SscLabeledChart, SscRandomExportReport
 from stepnx.exporters.ssc_xsanity import (
     _control_cells,
     _dense_rows,
@@ -40,6 +42,7 @@ from stepnx.exporters.ssc_xsanity import (
 
 _G_ID = 5
 _W_ID = 6
+_WRAP = "T"
 _RETURN = "O"
 
 
@@ -74,10 +77,8 @@ def _range(value: int) -> tuple[int, int]:
     maximum = (int(value) >> 16) & 0xFFFF
     if maximum == 0 and minimum:
         maximum = minimum
-    if minimum < 0 or maximum < minimum:
-        raise SscExportError(
-            f"unsupported NX Division range {minimum}..{maximum}"
-        )
+    if maximum < minimum:
+        raise SscExportError(f"unsupported NX Division range {minimum}..{maximum}")
     return minimum, maximum
 
 
@@ -135,34 +136,33 @@ def _row_key(row: object) -> object:
     return repr(row)
 
 
+def _timing_signature(block: BlockSnapshot) -> tuple[object, ...]:
+    return (
+        block.start_time,
+        block.bpm,
+        block.scroll,
+        block.offset_or_delay,
+        block.speed_or_freeze,
+        block.beat_split,
+        block.beat_measure,
+        block.smooth_speed,
+        block.raw_flag,
+    )
+
+
 def _first_route_divergence(split) -> int:
     blocks = split.blocks
     if len(blocks) <= 1:
         return 0
 
     reference = blocks[0]
-    timing_signature = (
-        reference.bpm,
-        reference.scroll,
-        reference.offset_or_delay,
-        reference.speed_or_freeze,
-        reference.beat_split,
-        reference.beat_measure,
-        reference.smooth_speed,
-        reference.raw_flag,
-    )
+    signature = _timing_signature(reference)
     for block in blocks[1:]:
-        if (
-            block.bpm,
-            block.scroll,
-            block.offset_or_delay,
-            block.speed_or_freeze,
-            block.beat_split,
-            block.beat_measure,
-            block.smooth_speed,
-            block.raw_flag,
-        ) != timing_signature:
-            return 0
+        if _timing_signature(block) != signature:
+            raise SscExportError(
+                f"conditional split {split.index} changes timing between blocks; "
+                "the current XSanity Division route splicer only supports note-equivalent timing"
+            )
 
     common = min(block.row_count for block in blocks)
     for row_index in range(common):
@@ -171,9 +171,6 @@ def _first_route_divergence(split) -> int:
             return row_index
     if any(block.row_count != reference.row_count for block in blocks[1:]):
         return common
-    # Semantically different conditions can still point at byte-identical note
-    # payload.  There is then no note seam to protect, so evaluating at the
-    # Split start is the least surprising deterministic position.
     return 0
 
 
@@ -235,45 +232,124 @@ def compile_division_decisions(
     return tuple(decisions)
 
 
-def _route_snapshot(
-    snapshot: AuthoringSnapshot,
+def _split_bounds(snapshot) -> dict[int, tuple[int, int]]:
+    cursor = 0
+    bounds: dict[int, tuple[int, int]] = {}
+    for split_index, split in enumerate(snapshot.splits):
+        if not split.blocks:
+            continue
+        block = snapshot.active_block(split.stable_id)
+        start = cursor
+        cursor += block.row_count
+        bounds[split_index] = (start, cursor)
+    return bounds
+
+
+def _render_block_rows(
+    block: BlockSnapshot,
+    *,
+    columns: int,
+    split_index: int,
+) -> tuple[list[str], tuple[str, ...]]:
+    blank = "0" * columns
+    state = _ExportState()
+    brain = _brain_char(block)
+    rows: list[str] = []
+    for row_index, row in enumerate(block.rows):
+        cells = _row_cells(row, columns)
+        if cells is None:
+            rows.append(blank)
+            continue
+        rendered: list[str] = []
+        for lane in range(columns):
+            if lane >= len(cells):
+                rendered.append("0")
+                continue
+            rendered.append(
+                _render_cell(
+                    state,
+                    cells[lane],
+                    brain,
+                    (split_index, block.index, row_index, lane),
+                )
+            )
+        rows.append("".join(rendered))
+    if state.diagnostics:
+        first = state.diagnostics[0]
+        raise SscExportError(
+            "alternate Division route introduces an SSC projection warning: "
+            f"{first.code}: {first.message}"
+        )
+    return rows, tuple(sorted(state.banks))
+
+
+def _put_control(rows: list[str], columns: int, row_index: int, preferred_lane: int, token: str) -> None:
+    if row_index >= len(rows):
+        raise SscExportError(f"Division route ends before runtime {token} row {row_index}")
+    cells = _split_cells(rows[row_index], columns)
+    lane = preferred_lane if cells[preferred_lane] == "0" else next(
+        (index for index, cell in enumerate(cells) if cell == "0"),
+        None,
+    )
+    if lane is None:
+        raise SscExportError(
+            f"Division route has no empty lane for runtime {token} at row {row_index}"
+        )
+    cells[lane] = token
+    rows[row_index] = "".join(cells)
+
+
+def _route_variant(
+    source: SscLabeledChart,
+    snapshot,
     decisions: tuple[SscDivisionDecision, ...],
     route_index: int,
-) -> AuthoringSnapshot:
-    result = snapshot
-    for decision in decisions:
-        split = result.splits[decision.split_index]
-        block_index = route_index if route_index < len(split.blocks) else 0
-        result = result.with_active_block(
-            split.stable_id,
-            split.blocks[block_index].stable_id,
-        )
-    return result
-
-
-def _copy_returns(source: SscLabeledChart, target: SscLabeledChart, columns: int) -> SscLabeledChart:
+    *,
+    description: str,
+    helper_index: int | None,
+) -> SscLabeledChart:
+    columns = snapshot.columns
     source_rows = _dense_rows(source.chart.notes, columns)
-    target_rows = _dense_rows(target.chart.notes, columns)
-    for row_index, preferred_lane in _control_cells(source_rows, columns, _RETURN):
-        if row_index >= len(target_rows):
-            raise SscExportError(
-                f"Division route ends before runtime Wrap0 row {row_index}"
-            )
-        cells = _split_cells(target_rows[row_index], columns)
-        lane = preferred_lane if cells[preferred_lane] == "0" else next(
-            (index for index, cell in enumerate(cells) if cell == "0"),
-            None,
-        )
-        if lane is None:
-            raise SscExportError(
-                f"Division route has no empty lane for Wrap0 at row {row_index}"
-            )
-        cells[lane] = _RETURN
-        target_rows[row_index] = "".join(cells)
-    return replace(
-        target,
-        chart=replace(target.chart, notes=_measure_rows(target_rows, columns)),
+    controls = tuple(
+        (*item, token)
+        for token in (_WRAP, _RETURN)
+        for item in _control_cells(source_rows, columns, token)
     )
+    rows = list(source_rows)
+    bounds = _split_bounds(snapshot)
+    banks = list(source.chart.noteskin_banks)
+
+    for decision in decisions:
+        split = snapshot.splits[decision.split_index]
+        block_index = route_index if route_index < len(split.blocks) else 0
+        if block_index == 0:
+            continue
+        start, end = bounds[decision.split_index]
+        replacement_rows, replacement_banks = _render_block_rows(
+            split.blocks[block_index],
+            columns=columns,
+            split_index=decision.split_index,
+        )
+        if len(replacement_rows) != end - start:
+            raise SscExportError(
+                f"conditional split {decision.split_index} route {route_index} changed row geometry"
+            )
+        rows[start:end] = replacement_rows
+        for bank in replacement_banks:
+            if bank not in banks:
+                banks.append(bank)
+
+    for row_index, lane, token in controls:
+        _put_control(rows, columns, row_index, lane, token)
+
+    chart = replace(
+        source.chart,
+        description=description,
+        difficulty="Edit",
+        notes=_measure_rows(rows, columns),
+        noteskin_banks=tuple(banks),
+    )
+    return SscLabeledChart(chart, "DIVISION", helper_index)
 
 
 def _table(
@@ -295,50 +371,13 @@ def _table(
     return tuple(entries)
 
 
-def _new_route_chart(
-    report: SscRandomExportReport,
-    snapshot: AuthoringSnapshot,
-    *,
-    description: str,
-    helper_index: int | None,
-    source_controls: SscLabeledChart | None,
-) -> SscLabeledChart:
-    document = report.source_document
-    if document is None:
-        raise SscExportError(
-            "Division route materialization requires the source NX document"
-        )
-    chart, diagnostics = _project(
-        document,
-        snapshot,
-        description=description,
-        difficulty="Edit",
-        meter=report.source_meter,
-        credit=report.source_credit,
-    )
-    known = {(item.code, item.message) for item in report.diagnostics}
-    unexpected = [
-        item for item in diagnostics if (item.code, item.message) not in known
-    ]
-    if unexpected:
-        first: SscDiagnostic = unexpected[0]
-        raise SscExportError(
-            "alternate Division route introduces an unreported SSC projection warning: "
-            f"{first.code}: {first.message}"
-        )
-    item = SscLabeledChart(chart, "DIVISION", helper_index)
-    if source_controls is not None:
-        item = _copy_returns(source_controls, item, snapshot.columns)
-    return item
-
-
 def materialize_division_routes(
     report: SscRandomExportReport,
     runtime_charts: tuple[SscLabeledChart, ...],
     *,
     prefix: str = "STEPNX",
 ) -> SscDivisionRuntime:
-    """Expand a materialized random state into conditional route variants."""
+    """Expand materialized random states into XSanity conditional routes."""
 
     if not runtime_charts:
         raise SscExportError("Division materializer received no runtime charts")
@@ -363,6 +402,7 @@ def materialize_division_routes(
     charts: list[SscLabeledChart] = [base]
     names: list[str] = [prefix + "_BASE"]
     tables: list[tuple[str, ...]] = [()]
+    base_description = base.chart.description
 
     if report.helper_count <= 0:
         route_names = tuple(
@@ -372,20 +412,18 @@ def materialize_division_routes(
         common_table = _table(decisions, route_names)
         tables[0] = common_table
         for route in range(1, route_count):
-            snapshot = _route_snapshot(report.program.base_snapshot, decisions, route)
-            item = _new_route_chart(
-                report,
-                snapshot,
-                description=f"{report.source_description} [StepNX Division {route + 1}]",
+            item = _route_variant(
+                base,
+                report.program.base_snapshot,
+                decisions,
+                route,
+                description=f"{base_description} [StepNX Division {route + 1}]",
                 helper_index=None,
-                source_controls=None,
             )
             charts.append(item)
             names.append(route_names[route])
             tables.append(common_table)
-        return SscDivisionRuntime(
-            tuple(charts), tuple(names), tuple(tables), route_count
-        )
+        return SscDivisionRuntime(tuple(charts), tuple(names), tuple(tables), route_count)
 
     if len(runtime_charts) != report.helper_count + 1:
         raise SscExportError(
@@ -393,33 +431,30 @@ def materialize_division_routes(
         )
 
     # Replicate every random ticket by the same number of conditional routes.
-    # XSanity T can therefore see the whole DIVISION pool without biasing the
-    # original random-state probability distribution.
+    # XSanity T can therefore see the entire LABELTYPE:DIVISION pool without
+    # changing the random-state marginal distribution.
     for helper_index, route0 in enumerate(runtime_charts[1:]):
         route_names = tuple(
-            prefix
-            + f"_RANDOM_{helper_index + 1:03d}_ROUTE_{route + 1:02d}"
+            prefix + f"_RANDOM_{helper_index + 1:03d}_ROUTE_{route + 1:02d}"
             for route in range(route_count)
         )
         common_table = _table(decisions, route_names)
-
-        route0 = replace(route0, helper_index=helper_index)
         charts.append(route0)
         names.append(route_names[0])
         tables.append(common_table)
 
         helper_snapshot = report.program.helper_snapshots[helper_index]
         for route in range(1, route_count):
-            snapshot = _route_snapshot(helper_snapshot, decisions, route)
-            item = _new_route_chart(
-                report,
-                snapshot,
+            item = _route_variant(
+                route0,
+                helper_snapshot,
+                decisions,
+                route,
                 description=(
-                    f"{report.source_description} [StepNX random {helper_index + 1} "
+                    f"{base_description} [StepNX random {helper_index + 1} "
                     f"Division {route + 1}]"
                 ),
                 helper_index=helper_index,
-                source_controls=route0,
             )
             charts.append(item)
             names.append(route_names[route])
