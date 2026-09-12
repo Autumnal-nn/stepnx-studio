@@ -127,7 +127,12 @@ def random_skin_flags(
 
 
 def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
-    """Insert StepPrime RandomSkinList plus the XSanity randomskin option."""
+    """Insert StepPrime RandomSkinList plus the XSanity randomskin option.
+
+    The list is emitted immediately after PRELOADNOTESKIN so every candidate is
+    already registered before the legacy RandomSkinList consumer sees it. The
+    attack stays immediately before NOTES, matching the Arcade corpus.
+    """
 
     frozen = tuple(bool(flag) for flag in flags)
     if not any(frozen):
@@ -149,8 +154,10 @@ def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
         if line == "#NOTEDATA:;":
             chart_index += 1
 
+        output.append(line)
+
         if (
-            line.startswith("#DIFFICULTY:")
+            line.startswith("#PRELOADNOTESKIN:")
             and 0 <= chart_index < len(frozen)
             and frozen[chart_index]
         ):
@@ -162,10 +169,12 @@ def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
             and 0 <= chart_index < len(frozen)
             and frozen[chart_index]
         ):
+            # The attack must precede NOTES, so move the just-appended NOTES
+            # marker behind it without disturbing the note body that follows.
+            output.pop()
             output.append(_RANDOM_SKIN_ATTACK)
+            output.append(line)
             attack_inserted.add(chart_index)
-
-        output.append(line)
 
     if not version_seen:
         raise ssc.SscExportError(
@@ -182,7 +191,7 @@ def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
     ]
     if missing_list:
         raise ssc.SscExportError(
-            "rendered simfile is missing #DIFFICULTY for Random Skin chart section(s): "
+            "rendered simfile is missing #PRELOADNOTESKIN for Random Skin chart section(s): "
             + ", ".join(str(index + 1) for index in missing_list)
         )
 
