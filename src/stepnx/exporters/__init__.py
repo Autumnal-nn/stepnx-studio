@@ -24,10 +24,11 @@ from stepnx.exporters.ssc_random import (
     SscRandomExportReport,
     SscRandomWindow,
 )
+from stepnx.exporters.ssc_random_skin import random_skin_requested
 from stepnx.exporters.ssc_runtime_compile import (
     compile_ssc_export as _compile_ssc_export,
 )
-from stepnx.exporters.ssc_xsanity_lifetime import (
+from stepnx.exporters.ssc_runtime_final import (
     render_compiled_reports,
     render_compiled_simfile,
 )
@@ -42,14 +43,19 @@ def compile_ssc_export(*args, **kwargs) -> SscRandomExportReport:
     Splits are resolved using the original NXA/Fiesta 2 last-valid-block rule.
     Unsupported Division grammars still fail explicitly during runtime
     projection instead of being flattened silently.
+
+    Direct noteskin 254 used to report ``ssc.random-noteskin-header`` because
+    the low-level writer could not reproduce native Random Skin by itself. The
+    final runtime renderer now maps both 254 and Header 19 / RSK to XSanity's
+    real ``randomskin`` modifier, so that diagnostic is no longer a loss when
+    the source actually requests Random Skin.
     """
 
     report = _compile_ssc_export(*args, **kwargs)
-    diagnostics = tuple(
-        item
-        for item in report.diagnostics
-        if item.code != "ssc.conditional-branches-pending"
-    )
+    ignored = {"ssc.conditional-branches-pending"}
+    if random_skin_requested(report.program.base_snapshot):
+        ignored.add("ssc.random-noteskin-header")
+    diagnostics = tuple(item for item in report.diagnostics if item.code not in ignored)
     if diagnostics == report.diagnostics:
         return report
     return replace(report, diagnostics=diagnostics)
