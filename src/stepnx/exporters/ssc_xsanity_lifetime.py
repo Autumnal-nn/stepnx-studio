@@ -6,12 +6,21 @@ active ``#DIVISION`` table, alternate target Steps do not repeat that same event
 and the fallback is implicit: if no conditional entry matches, the engine keeps
 its current Steps.
 
-Runtime A/B testing established two non-obvious XSanity requirements. First,
+Runtime A/B testing established three non-obvious XSanity requirements. First,
 the legacy Division parser is order-sensitive enough to crash when ``#DIVISION``
 is inserted near the beginning of a Steps section. Second, a Steps swap can
 crash when the destination introduces a noteskin that was not preloaded before
-the swap. Keep Division after the timing block and give every runtime-switchable
-Steps the union of its bundle's noteskin preloads.
+the swap. Third, backing routes must not remain ``LABELTYPE:NORMAL`` in Arcade
+exports or they appear as separately selectable charts. Keep Division after the
+timing block, give every runtime-switchable Steps the union of its bundle's
+noteskin preloads, and hide route-only Steps with ``LABELTYPE:DIVISION``.
+
+For a chart that already owns a random DIVISION pool, adding separate DIVISION
+route charts would contaminate T's ticket pool. The late-Division optimizer
+therefore grafts those route suffixes onto random helpers whose random lifetime
+has already ended at O0. The same helper remains one random ticket at startup,
+then later doubles as a named #DIVISION destination after the base chart has
+resumed. That hides the route without adding any new T candidate.
 """
 
 from __future__ import annotations
@@ -21,6 +30,7 @@ from dataclasses import replace
 from stepnx.exporters.ssc import SscExportError, SscSongInfo, render_simfile
 from stepnx.exporters.ssc_division import (
     SscDivisionRuntime,
+    _table,
     compile_division_decisions,
 )
 from stepnx.exporters.ssc_division_lifetime import (
@@ -31,9 +41,11 @@ from stepnx.exporters.ssc_header_semantics import (
     header_noteskin_context,
     unify_runtime_preloads,
 )
-from stepnx.exporters.ssc_random import SscRandomExportReport
+from stepnx.exporters.ssc_random import SscLabeledChart, SscRandomExportReport
 from stepnx.exporters.ssc_xsanity import (
     _decorate_runtime_metadata,
+    _dense_rows,
+    _measure_rows,
     _validate_combined_random_pools,
 )
 from stepnx.exporters.ssc_xsanity_segmented import materialize_segmented_random
@@ -83,6 +95,113 @@ def _normalize_single_decision_bundle(
         tables = (source,) + tuple(() for _ in tables[1:])
 
     return replace(bundle, division_tables=tables)
+
+
+def _graft_route_suffix_onto_helper(
+    helper: SscLabeledChart,
+    route: SscLabeledChart,
+    *,
+    columns: int,
+) -> SscLabeledChart:
+    """Reuse one dead random helper as a late named Division destination.
+
+    Lifetime-aware route charts are blank before the Division lead window, while
+    the random helper physically ends shortly after its final O0. Their live
+    payloads must therefore be disjoint. Preserve the helper's random prefix,
+    take the route chart's timing metadata and suffix, and keep the existing
+    helper identity/label so T's startup pool size is unchanged.
+    """
+
+    helper_rows = _dense_rows(helper.chart.notes, columns)
+    route_rows = _dense_rows(route.chart.notes, columns)
+    blank = "0" * columns
+    length = max(len(helper_rows), len(route_rows))
+    merged: list[str] = []
+    for row_index in range(length):
+        helper_row = helper_rows[row_index] if row_index < len(helper_rows) else blank
+        route_row = route_rows[row_index] if row_index < len(route_rows) else blank
+        if helper_row != blank and route_row != blank and helper_row != route_row:
+            raise SscExportError(
+                "late Division route overlaps a live random helper at row "
+                f"{row_index}; refusing to create an unsafe shared Steps stream"
+            )
+        merged.append(helper_row if helper_row != blank else route_row)
+
+    banks = tuple(dict.fromkeys(helper.chart.noteskin_banks + route.chart.noteskin_banks))
+    chart = replace(
+        route.chart,
+        description=helper.chart.description,
+        difficulty=helper.chart.difficulty,
+        meter=helper.chart.meter,
+        credit=helper.chart.credit,
+        notes=_measure_rows(merged, columns),
+        noteskin_banks=banks,
+    )
+    return replace(helper, chart=chart, label_type="DIVISION")
+
+
+def _hide_runtime_routes(
+    report: SscRandomExportReport,
+    bundle: SscDivisionRuntime,
+) -> SscDivisionRuntime:
+    """Keep route backing Steps out of the Arcade chart selector.
+
+    Pure Division charts have no T pool, so alternate routes can simply be
+    LABELTYPE:DIVISION. For the optimized EF662 shape, route-only NORMAL charts
+    would be visible but converting them directly to DIVISION would add extra T
+    tickets. Instead reuse the first dead random helpers as those named targets
+    and remove the extra route charts entirely.
+    """
+
+    if bundle.route_count <= 1 or len(bundle.charts) <= 1:
+        return bundle
+
+    if report.helper_count <= 0:
+        charts = (bundle.charts[0],) + tuple(
+            replace(item, label_type="DIVISION", helper_index=None)
+            for item in bundle.charts[1:]
+        )
+        return replace(bundle, charts=charts)
+
+    extra_routes = bundle.route_count - 1
+    expected_tail_shape = 1 + report.helper_count + extra_routes
+    if (
+        extra_routes <= 0
+        or report.helper_count < extra_routes
+        or len(bundle.charts) != expected_tail_shape
+    ):
+        # The conservative Cartesian materializer already labels every helper
+        # route DIVISION, so it is hidden and its duplicated ticket weighting is
+        # intentional. Only the lifetime-optimized tail shape has extra NORMAL
+        # route charts that need compaction.
+        return bundle
+
+    columns = report.program.base_snapshot.columns
+    kept_charts = list(bundle.charts[: 1 + report.helper_count])
+    kept_names = list(bundle.chart_names[: 1 + report.helper_count])
+    route_charts = bundle.charts[1 + report.helper_count :]
+
+    for route_offset, route in enumerate(route_charts, start=1):
+        kept_charts[route_offset] = _graft_route_suffix_onto_helper(
+            kept_charts[route_offset],
+            route,
+            columns=columns,
+        )
+
+    decisions = compile_division_decisions(report)
+    route_names = (kept_names[0],) + tuple(
+        kept_names[index]
+        for index in range(1, 1 + extra_routes)
+    )
+    tables: list[tuple[str, ...]] = [() for _ in kept_charts]
+    tables[0] = _table(decisions, route_names)
+
+    return SscDivisionRuntime(
+        charts=tuple(kept_charts),
+        chart_names=tuple(kept_names),
+        division_tables=tuple(tables),
+        route_count=bundle.route_count,
+    )
 
 
 def _inject_division_tables_runtime_order(
@@ -176,6 +295,7 @@ def _bundle(
             runtime,
             prefix=prefix,
         )
+    bundle = _hide_runtime_routes(report, bundle)
     bundle = _normalize_single_decision_bundle(report, bundle)
     return _apply_runtime_noteskins(report, bundle)
 
