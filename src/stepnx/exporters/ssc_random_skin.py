@@ -7,19 +7,22 @@ Two native NX encodings reach Random Skin behavior:
   native Random sentinel 254.
 * Header noteskin values 900..905 may contain 254 directly.
 
-The Sanity corpus exposes two mechanisms relevant to those sources. Arcade NXA
-charts use the player option ``randomskin`` through ``#ATTACKS``. Fiesta EX
-mission charts also prove a dedicated per-Steps ``#RANDOMSKINLIST`` that changes
-bank-0 notes among a preloaded skin list. Runtime testing showed that emitting
-only the attack is insufficient for a direct-254 Fiesta 2 chart, so the exporter
-uses both native mechanisms: bank-0/random slots are preserved, a corpus-backed
-RandomSkinList is emitted, and Header-19 RSK additionally remains compatible
-with the ordinary ``randomskin`` player option.
+Runtime testing on the target XSanity build showed that merely emitting the
+``randomskin`` PlayerOption or a non-empty ``#RANDOMSKINLIST`` leaves affected
+notes on the default skin. The Sanity Fiesta EX corpus explains why: charts with
+non-empty ``#RANDOMSKINLIST`` already carry explicit per-note noteskin banks;
+the list describes the candidate family rather than replacing those banks for
+us.
 
-All corpus files with a non-empty ``#RANDOMSKINLIST`` use the ``0.83 StepPrime``
-profile, while StepPrime also contains T/O and Division charts. When Random Skin
-is requested we therefore promote the generated 0.83 header to StepPrime rather
-than relying on an unproven cross-profile parser path.
+The exporter therefore materializes Random Skin into deterministic per-note
+banks from a corpus-proven five-skin family. This preserves the visible
+skin-changing behavior without depending on an engine-side randomizer that is
+not active in the tested loader. The exact native RNG stream is intentionally
+not claimed: repeated exports are stable, while the original game may choose a
+different random sequence each play.
+
+Every materialized skin is preloaded before T/O0/#DIVISION swaps, following the
+runtime rule established by the Division Access-Violation tests.
 """
 
 from __future__ import annotations
@@ -27,9 +30,11 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Iterable, Iterator
+import zlib
 
 from stepnx.authoring.snapshot import AuthoringSnapshot
 from stepnx.exporters import ssc
+from stepnx.exporters import ssc_header_semantics as header_semantics
 from stepnx.exporters.ssc_division import SscDivisionRuntime
 from stepnx.exporters.ssc_header_semantics import (
     RANDOM_SKIN_CORPUS_POOL,
@@ -39,11 +44,15 @@ from stepnx.exporters.ssc_header_semantics import (
 _RANDOM_SKIN_HEADER_ID = 19
 _RANDOM_SKIN_VALUE = 254
 _RANDOM_SKIN_DIAGNOSTIC = "ssc.random-noteskin-header"
-_STEPPRIME_VERSION = "#VERSION:0.83 StepPrime;"
 
+# Exact non-empty RANDOMSKINLIST used by official Fiesta EX EF1603. These five
+# skins also have stable XSanity bank characters and are safe to materialize.
 RANDOM_SKIN_RUNTIME_LIST = ("nx", "old", "music", "poker", "flower")
 
-# All three observed Arcade randomskin attacks use this exact finite window.
+# Keep the historical modifier in the generated file as metadata/compatibility,
+# but correctness no longer depends on it because affected notes now carry an
+# explicit bank. 180 seconds is the exact window used by the Arcade Sanity
+# randomskin examples D02/D03.
 _RANDOM_SKIN_ATTACK = "#ATTACKS:TIME=0.000000:LEN=180.000000:MODS=randomskin;"
 
 
@@ -71,26 +80,92 @@ def random_skin_header_enabled(snapshot: AuthoringSnapshot) -> bool:
     return value is not None and value not in (0, 0xFFFFFFFF)
 
 
+def _seed(snapshot: AuthoringSnapshot) -> int:
+    identity = f"{snapshot.source_name or ''}|{snapshot.document_stable_id}".encode(
+        "utf-8", "surrogatepass"
+    )
+    return zlib.crc32(identity) & 0xFFFFFFFF
+
+
+def _random_skin_name(seed: int, where: tuple[int, int, int, int]) -> str:
+    """Choose one stable candidate for a source note location.
+
+    Python's process-randomized ``hash`` is deliberately avoided so exporting
+    the same chart twice yields identical SSC bytes.
+    """
+
+    split_index, block_index, row_index, lane = where
+    value = seed
+    value ^= ((split_index + 1) * 0x9E3779B1) & 0xFFFFFFFF
+    value ^= ((block_index + 1) * 0x85EBCA6B) & 0xFFFFFFFF
+    value ^= ((row_index + 1) * 0xC2B2AE35) & 0xFFFFFFFF
+    value ^= ((lane + 1) * 0x27D4EB2F) & 0xFFFFFFFF
+    value ^= value >> 16
+    value = (value * 0x7FEB352D) & 0xFFFFFFFF
+    value ^= value >> 15
+    value = (value * 0x846CA68B) & 0xFFFFFFFF
+    value ^= value >> 16
+    return RANDOM_SKIN_RUNTIME_LIST[value % len(RANDOM_SKIN_RUNTIME_LIST)]
+
+
 @contextmanager
 def random_skin_projection_context(snapshot: AuthoringSnapshot) -> Iterator[None]:
-    """Suppress the obsolete direct-254 lossy diagnostic while projecting."""
+    """Materialize native Random Skin while the low-level note writer runs.
+
+    The header-semantic layer normally resolves 901..905 and delegates 254 to a
+    runtime modifier. Here we temporarily extend that resolver in two ways:
+
+    * slot 0 is read from header 900, which is the actual source for notes whose
+      player byte is zero;
+    * any resolved value 254 is replaced by a deterministic explicit XSanity
+      bank chosen per note.
+
+    Header 19 keeps the recovered native behavior: every unspecified slot,
+    including slot 0, becomes 254. All monkeypatches are exporter-local and are
+    restored immediately after projection.
+    """
 
     if not random_skin_requested(snapshot):
         yield
         return
 
-    previous = ssc._ExportState.note
+    previous_note = ssc._ExportState.note
+    previous_slots = header_semantics.player_slot_skin_values
+    previous_bank = header_semantics._player_bank_char
+    seed = _seed(snapshot)
 
     def note(self, code: str, message: str, *args, **kwargs):
         if code == _RANDOM_SKIN_DIAGNOSTIC:
             return None
-        return previous(self, code, message, *args, **kwargs)
+        return previous_note(self, code, message, *args, **kwargs)
+
+    def player_slots(active_snapshot: AuthoringSnapshot) -> dict[int, int]:
+        configured = dict(previous_slots(active_snapshot))
+        values = _header_values(active_snapshot)
+        if 900 in values:
+            configured[0] = values[900]
+        if random_skin_header_enabled(active_snapshot):
+            for player in range(6):
+                configured.setdefault(player, _RANDOM_SKIN_VALUE)
+        return configured
+
+    def player_bank(state, player: int, where, configured: dict[int, int]) -> str:
+        value = configured.get(player)
+        if value == _RANDOM_SKIN_VALUE:
+            name = _random_skin_name(seed, where)
+            state.banks.add(name)
+            return XSANITY_BANK_CHARS[name]
+        return previous_bank(state, player, where, configured)
 
     ssc._ExportState.note = note
+    header_semantics.player_slot_skin_values = player_slots
+    header_semantics._player_bank_char = player_bank
     try:
         yield
     finally:
-        ssc._ExportState.note = previous
+        header_semantics._player_bank_char = previous_bank
+        header_semantics.player_slot_skin_values = previous_slots
+        ssc._ExportState.note = previous_note
 
 
 def _preload_order(names: set[str]) -> tuple[str, ...]:
@@ -103,7 +178,7 @@ def add_random_skin_preloads(
     runtime: SscDivisionRuntime,
     snapshot: AuthoringSnapshot,
 ) -> SscDivisionRuntime:
-    """Preload every skin needed by RandomSkinList before any Steps swap."""
+    """Preload every skin needed by materialized Random Skin notes."""
 
     if not random_skin_requested(snapshot):
         return runtime
@@ -127,11 +202,13 @@ def random_skin_flags(
 
 
 def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
-    """Insert StepPrime RandomSkinList plus the XSanity randomskin option.
+    """Emit corpus-shaped Random Skin metadata for materialized charts.
 
-    The list is emitted immediately after PRELOADNOTESKIN so every candidate is
-    already registered before the legacy RandomSkinList consumer sees it. The
-    attack stays immediately before NOTES, matching the Arcade corpus.
+    Explicit note banks are the functional representation. ``RANDOMSKINLIST``
+    records the candidate family used by the materializer, while the historical
+    ``randomskin`` attack is retained for compatibility with XSanity builds that
+    implement it. Either may be ignored by a loader without losing the visible
+    skin variation because the cells themselves already select skins.
     """
 
     frozen = tuple(bool(flag) for flag in flags)
@@ -143,21 +220,12 @@ def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
     chart_index = -1
     list_inserted: set[int] = set()
     attack_inserted: set[int] = set()
-    version_seen = False
-
     for line in text.splitlines():
-        if line.startswith("#VERSION:") and not version_seen:
-            output.append(_STEPPRIME_VERSION)
-            version_seen = True
-            continue
-
         if line == "#NOTEDATA:;":
             chart_index += 1
 
-        output.append(line)
-
         if (
-            line.startswith("#PRELOADNOTESKIN:")
+            line.startswith("#DIFFICULTY:")
             and 0 <= chart_index < len(frozen)
             and frozen[chart_index]
         ):
@@ -169,17 +237,11 @@ def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
             and 0 <= chart_index < len(frozen)
             and frozen[chart_index]
         ):
-            # The attack must precede NOTES, so move the just-appended NOTES
-            # marker behind it without disturbing the note body that follows.
-            output.pop()
             output.append(_RANDOM_SKIN_ATTACK)
-            output.append(line)
             attack_inserted.add(chart_index)
 
-    if not version_seen:
-        raise ssc.SscExportError(
-            "rendered simfile is missing #VERSION for Random Skin StepPrime projection"
-        )
+        output.append(line)
+
     if chart_index + 1 != len(frozen):
         raise ssc.SscExportError(
             f"rendered simfile contains {chart_index + 1} chart sections but "
@@ -191,7 +253,7 @@ def inject_random_skin_attacks(text: str, flags: Iterable[bool]) -> str:
     ]
     if missing_list:
         raise ssc.SscExportError(
-            "rendered simfile is missing #PRELOADNOTESKIN for Random Skin chart section(s): "
+            "rendered simfile is missing #DIFFICULTY for Random Skin chart section(s): "
             + ", ".join(str(index + 1) for index in missing_list)
         )
 
