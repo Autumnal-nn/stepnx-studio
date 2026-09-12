@@ -7,6 +7,7 @@ from stepnx.exporters.ssc import SscChart
 from stepnx.exporters.ssc_division import SscDivisionRuntime
 from stepnx.exporters.ssc_header_semantics import (
     RANDOM_SKIN_CORPUS_POOL,
+    XSANITY_BANK_CHARS,
     header_noteskin_context,
 )
 from stepnx.exporters.ssc_random import SscLabeledChart
@@ -21,10 +22,12 @@ from stepnx.exporters.ssc_random_skin import (
 
 def _snapshot(*pairs: tuple[int, int]):
     return SimpleNamespace(
+        document_stable_id=123,
+        source_name="EF_TEST.NX",
         header_metadata=tuple(
             SimpleNamespace(meta_id=meta_id, value=value)
             for meta_id, value in pairs
-        )
+        ),
     )
 
 
@@ -47,6 +50,13 @@ def _chart(*banks: str) -> SscChart:
     )
 
 
+def _render_random_note(snapshot, *, player: int, where):
+    state = ssc._ExportState()
+    with random_skin_projection_context(snapshot), header_noteskin_context(snapshot):
+        rendered = ssc._render_cell(state, bytes((0x43, 3, player, 0)), "0", where)
+    return rendered, state
+
+
 def test_rsk_header_19_and_direct_254_both_request_random_skin() -> None:
     assert random_skin_requested(_snapshot((19, 6)))
     assert random_skin_requested(_snapshot((900, 254)))
@@ -56,14 +66,35 @@ def test_rsk_header_19_and_direct_254_both_request_random_skin() -> None:
     assert not random_skin_requested(_snapshot((900, 8), (901, 2)))
 
 
-def test_direct_254_no_longer_reports_loss_inside_runtime_projection() -> None:
-    snapshot = _snapshot((901, 254))
-    state = ssc._ExportState()
+def test_direct_900_254_materializes_explicit_varying_banks() -> None:
+    snapshot = _snapshot((900, 254))
+    rendered = []
+    banks = set()
+    for row in range(24):
+        cell, state = _render_random_note(snapshot, player=0, where=(0, 0, row, 0))
+        rendered.append(cell)
+        assert not state.diagnostics
+        assert cell.startswith("{1") and cell.endswith("0}")
+        banks.add(cell[2])
 
-    with random_skin_projection_context(snapshot), header_noteskin_context(snapshot):
-        assert ssc._render_cell(state, bytes((0x43, 3, 1, 0)), "0", (0, 0, 0, 0)) == "1"
+    allowed = {XSANITY_BANK_CHARS[name] for name in RANDOM_SKIN_RUNTIME_LIST}
+    assert banks <= allowed
+    assert len(banks) > 1
 
-    assert not state.diagnostics
+    # Export is deterministic: the same source location gets the same explicit bank.
+    repeated, _state = _render_random_note(snapshot, player=0, where=(0, 0, 7, 0))
+    assert repeated == rendered[7]
+
+
+def test_header19_materializes_unconfigured_player_slots_including_slot_zero() -> None:
+    snapshot = _snapshot((19, 6))
+    slot0, state0 = _render_random_note(snapshot, player=0, where=(0, 0, 1, 0))
+    slot1, state1 = _render_random_note(snapshot, player=1, where=(0, 0, 2, 0))
+
+    assert slot0.startswith("{1") and slot0.endswith("0}")
+    assert slot1.startswith("{1") and slot1.endswith("0}")
+    assert not state0.diagnostics
+    assert not state1.diagnostics
 
 
 def test_rsk_preloads_runtime_list_on_every_runtime_step() -> None:
@@ -82,7 +113,7 @@ def test_rsk_preloads_runtime_list_on_every_runtime_step() -> None:
     assert all(set(item.chart.noteskin_banks) == expected for item in result.charts)
 
 
-def test_randomskin_runtime_tags_are_per_steps_and_corpus_shaped() -> None:
+def test_randomskin_runtime_tags_are_retained_as_compatibility_metadata() -> None:
     text = "\n".join(
         (
             "#VERSION:0.83;",
@@ -108,15 +139,13 @@ def test_randomskin_runtime_tags_are_per_steps_and_corpus_shaped() -> None:
     ) + "\n"
 
     rendered = inject_random_skin_attacks(text, (True, False))
-    assert rendered.startswith("#VERSION:0.83 StepPrime;")
     assert rendered.count("MODS=randomskin") == 1
     assert "LEN=180.000000" in rendered
     assert rendered.count("#RANDOMSKINLIST:") == 1
     assert "#RANDOMSKINLIST:" + ",".join(RANDOM_SKIN_RUNTIME_LIST) + ";" in rendered
 
     first_steps = rendered.split("#NOTEDATA:;", 2)[1]
-    assert first_steps.index("#PRELOADNOTESKIN:") < first_steps.index("#RANDOMSKINLIST:")
-    assert first_steps.index("#RANDOMSKINLIST:") < first_steps.index("#SPEEDS:")
+    assert first_steps.index("#RANDOMSKINLIST:") < first_steps.index("#DIFFICULTY:")
     assert first_steps.index("MODS=randomskin") < first_steps.index("#NOTES:")
 
     second_steps = rendered.split("#NOTEDATA:;", 2)[2]
