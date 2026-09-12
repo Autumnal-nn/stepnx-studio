@@ -36,4 +36,9 @@ def load_importable(
         return load_see(source, profile=profile)
     if suffix == ".ksf":
         return load_ksf(source, profile=profile)
-    raise UnsupportedFormatError(f"unsupported import suffix: {source.suffix}")
+    raise UnsupportedFormatError(
+        0,
+        "import source",
+        f"unsupported chart-source extension {source.suffix or '<none>'!r}",
+        str(source),
+    )
