@@ -11,8 +11,9 @@ block.  These are not XSanity ``#DIVISION`` decisions and must not be exported
 as conditional routes.  EF334 contains several such Splits.
 
 This module applies that runtime rule to the authoring snapshot before the
-existing random compiler and SSC projection run.  It stays exporter-local so we
-do not silently change editor authoring semantics elsewhere in StepNX Studio.
+existing random compiler and SSC projection run. It also resolves header-level
+SSC semantics that the low-level writer intentionally does not own: noteskin
+slots 900..905 and mission difficulty 1101.
 """
 
 from __future__ import annotations
@@ -24,6 +25,11 @@ from stepnx.authoring.random_state import RandomPoolPolicy
 from stepnx.authoring.snapshot import AuthoringSnapshot, create_authoring_snapshot
 from stepnx.core.model import NX20Document
 from stepnx.exporters.ssc import SscExportError
+from stepnx.exporters.ssc_header_semantics import (
+    apply_header_preloads,
+    header_noteskin_context,
+    resolved_meter,
+)
 from stepnx.exporters.ssc_random import (
     SscLabeledChart,
     SscRandomExportReport,
@@ -47,10 +53,10 @@ def resolve_ordered_unconditional_snapshot(snapshot: AuthoringSnapshot) -> Autho
 
     Reverse engineering of both ``piu_nxa`` and ``piuf2_160_io`` shows the same
     rule: after condition evaluation, a non-random selector chooses
-    ``candidate[count - 1]``.  With selector 0x00 and no per-block Division
+    ``candidate[count - 1]``. With selector 0x00 and no per-block Division
     metadata, every block is a candidate, hence the final block wins.
 
-    Only that proven shape is collapsed here.  Banked selectors and Splits with
+    Only that proven shape is collapsed here. Banked selectors and Splits with
     actual Division metadata keep their full topology for the dedicated
     Division compiler.
     """
@@ -83,6 +89,29 @@ def resolve_ordered_unconditional_snapshot(snapshot: AuthoringSnapshot) -> Autho
     return replace(snapshot, splits=split_tuple, active_blocks=active_blocks)
 
 
+def _project_runtime(
+    document: NX20Document,
+    snapshot: AuthoringSnapshot,
+    *,
+    description: str,
+    difficulty: str | None,
+    meter: int | None,
+    credit: str | None,
+):
+    """Project one snapshot with its header noteskin slot table active."""
+
+    with header_noteskin_context(snapshot):
+        chart, diagnostics = _project(
+            document,
+            snapshot,
+            description=description,
+            difficulty=difficulty,
+            meter=meter,
+            credit=credit,
+        )
+    return apply_header_preloads(chart, snapshot), diagnostics
+
+
 def compile_ssc_export(
     document: NX20Document,
     *,
@@ -103,12 +132,14 @@ def compile_ssc_export(
     _validate_row_geometry(program)
     windows = _plan_windows(program)
     base_description = description or _default_description(document)
-    base, base_diagnostics = _project(
+    target_meter = resolved_meter(snapshot, meter)
+
+    base, base_diagnostics = _project_runtime(
         document,
         program.base_snapshot,
         description=base_description,
         difficulty=difficulty,
-        meter=meter,
+        meter=target_meter,
         credit=credit,
     )
     base, wrap_rows = _inject_wraps(base, program, windows)
@@ -117,12 +148,12 @@ def compile_ssc_export(
     diagnostic_groups = [base_diagnostics]
     for helper_index, helper_snapshot in enumerate(program.helper_snapshots):
         helper_description = f"{base_description} [StepNX random {helper_index + 1}]"
-        helper, helper_diagnostics = _project(
+        helper, helper_diagnostics = _project_runtime(
             document,
             helper_snapshot,
             description=helper_description,
             difficulty="Edit",
-            meter=meter,
+            meter=target_meter,
             credit=credit,
         )
         helper, return_rows = _inject_returns(
