@@ -2,23 +2,22 @@
 
 NX load-time random choices may be compressed into a reusable helper pool. A
 single startup Wrap is runtime-safe but correlates every random decision in the
-song to one helper index. This projection reuses the semantic compiler's random
-windows to introduce a small number of fresh draws:
+song to one helper index. For charts without conditional routes this projection
+can reuse the semantic compiler's random windows to introduce a small number of
+fresh draws:
 
     NORMAL --T--> DIVISION --O0--> NORMAL --T--> DIVISION
 
-The handoff is emitted only when a conservative dead-air corridor exists. Both
-Wrap and Wrap0 perform StepSwap operations in XSanity, and runtime testing has
-shown that swapping near visible taps or an active hold can drop notes. A
+Both Wrap and Wrap0 perform StepSwap operations in XSanity, and runtime testing
+has shown that swapping near visible taps or an active hold can drop notes. A
 candidate corridor must therefore be blank and hold-free in the NORMAL chart
-and in every materialized helper, with a quiet guard after each control. If no
-such corridor exists, the boundary is skipped and the neighboring random groups
-remain correlated rather than risking gameplay corruption.
+and in every materialized helper, with a quiet guard after each control.
 
 Conditional NX branches are compiled after this stage into full backing routes
-with native XSanity #DIVISION metadata. A Wrap0/T handoff is never inserted
-across one of those conditional regions, so the active random helper identity
-remains available to the Division route lattice.
+with native XSanity #DIVISION metadata. When such routes exist, the selected
+random helper is deliberately kept active for the whole chart. This gives the
+Division compiler a stable helper identity to move among sibling routes and
+avoids trying to map O0/T rows across branch-specific BeatSplit/row geometry.
 """
 
 from __future__ import annotations
@@ -203,10 +202,17 @@ def _crosses_conditional_region(
 def materialize_segmented_random(
     report: SscRandomExportReport,
 ) -> tuple[SscLabeledChart, ...]:
-    """Materialize full helpers and opportunistically add safe O0/T redraws."""
+    """Materialize helpers, using redraw handoffs only when no Division routes exist."""
 
     runtime = list(_materialize_startup_random(report))
     if report.helper_count <= 0 or len(runtime) <= 1:
+        return tuple(runtime)
+
+    conditional_bounds = _conditional_row_bounds(report)
+    if conditional_bounds:
+        # Division route siblings can have completely different row grids. Keep
+        # the startup-selected helper identity stable rather than trying to map
+        # O0/T redraw controls through those incompatible coordinate systems.
         return tuple(runtime)
 
     columns = report.program.base_snapshot.columns
@@ -227,20 +233,10 @@ def materialize_segmented_random(
 
     runtime_rows = [_dense_rows(item.chart.notes, columns) for item in runtime]
     safe = _combined_safe_blank_mask(tuple(runtime_rows), columns)
-    conditional_bounds = _conditional_row_bounds(report)
 
     for boundary in range(len(planning_wraps) - 1):
         previous_return = max(controls[boundary][0] for controls in planning_returns)
         next_planning_wrap = planning_wraps[boundary + 1][0]
-        if _crosses_conditional_region(
-            conditional_bounds,
-            previous_return=previous_return,
-            next_wrap=next_planning_wrap,
-        ):
-            # Keep the current helper identity alive across a conditional branch;
-            # the later #DIVISION table will switch only among sibling routes of
-            # that same random state.
-            continue
         corridor = _find_handoff_corridor(
             safe,
             after_row=previous_return,
