@@ -9,6 +9,7 @@ from stepnx.exporters.ssc_header_semantics import (
     apply_header_preloads,
     header_noteskin_context,
     header_preload_noteskins,
+    player_slot_skin_values,
     resolved_meter,
     unify_runtime_preloads,
 )
@@ -71,15 +72,27 @@ def test_player_bank_uses_901_905_but_special_bank_keeps_legacy_semantics() -> N
     state = ssc._ExportState()
 
     with header_noteskin_context(snapshot):
-        # Normal tap, player slot 2 -> header 902 == 13 == fire -> XSanity bank k.
         assert ssc._render_cell(state, bytes((0x43, 3, 2, 0)), "0", (0, 0, 0, 0)) == "{1k0}"
-        # Player slot 4 -> header 904 == 3 == easy -> bank a.
         assert ssc._render_cell(state, bytes((0x43, 3, 4, 0)), "0", (0, 0, 1, 0)) == "{1a0}"
-        # 0x47 takes its bank from the *special* byte. Header remapping must not
-        # reinterpret that direct legacy selector; special 4 remains soccer.
         assert ssc._render_cell(state, bytes((0x47, 3, 0, 4)), "0", (0, 0, 2, 0)) == "{440}"
 
     assert {"fire", "easy", "soccer"}.issubset(state.banks)
+
+
+def test_header19_fills_only_missing_player_slots_with_random_sentinel() -> None:
+    configured = player_slot_skin_values(_snapshot((19, 6), (902, 13)))
+    assert configured == {1: 254, 2: 13, 3: 254, 4: 254, 5: 254}
+
+
+def test_header19_random_slot_stays_unbanked_for_runtime_randomskin() -> None:
+    snapshot = _snapshot((19, 6))
+    state = ssc._ExportState()
+
+    with header_noteskin_context(snapshot):
+        rendered = ssc._render_cell(state, bytes((0x43, 3, 1, 0)), "0", (0, 0, 0, 0))
+
+    assert rendered == "1"
+    assert state.diagnostics[0].code == "ssc.random-noteskin-header"
 
 
 def test_meter_prefers_1001_then_falls_back_to_mission_1101() -> None:
