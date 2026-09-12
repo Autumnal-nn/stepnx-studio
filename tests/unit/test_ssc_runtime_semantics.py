@@ -6,6 +6,7 @@ from stepnx.authoring.snapshot import AuthoringSnapshot, BlockSnapshot, SplitSna
 from stepnx.exporters.ssc_division import SscDivisionRuntime
 from stepnx.exporters.ssc_runtime_compile import resolve_ordered_unconditional_snapshot
 from stepnx.exporters.ssc_xsanity_lifetime import (
+    _inject_division_tables_runtime_order,
     _normalize_single_decision_bundle,
     _single_decision_entries,
 )
@@ -122,3 +123,52 @@ def test_nonrandom_single_division_table_belongs_only_to_base(monkeypatch) -> No
         "1=999=STEP3=6.00000=G",
     )
     assert normalized.division_tables[1:] == ((), (), ())
+
+
+def test_division_metadata_is_inserted_after_speeds_not_after_tickcounts() -> None:
+    text = "\n".join(
+        (
+            "#NOTEDATA:;",
+            "#DESCRIPTION:S;",
+            "#TICKCOUNTS:0.000000=8;",
+            "#SCROLLS:0=1,;",
+            "#SPEEDS:0=1=1=1,;",
+            "#NOTES:",
+            "00000",
+            ";",
+        )
+    ) + "\n"
+    rendered = _inject_division_tables_runtime_order(
+        text,
+        (("1=999=STEP2=6.00000=W",),),
+    )
+
+    assert rendered.index("#TICKCOUNTS:") < rendered.index("#SPEEDS:")
+    assert rendered.index("#SPEEDS:") < rendered.index("#DIVISION:")
+    assert rendered.index("#DIVISION:") < rendered.index("#NOTES:")
+
+
+def test_division_destination_gets_empty_runtime_tags_at_same_position() -> None:
+    text = "\n".join(
+        (
+            "#NOTEDATA:;",
+            "#DESCRIPTION:STEP1;",
+            "#SPEEDS:0=1=1=1,;",
+            "#NOTES:",
+            "00000",
+            ";",
+            "#NOTEDATA:;",
+            "#DESCRIPTION:STEP2;",
+            "#SPEEDS:0=1=1=1,;",
+            "#NOTES:",
+            "00000",
+            ";",
+        )
+    ) + "\n"
+    rendered = _inject_division_tables_runtime_order(
+        text,
+        (("1=999=STEP2=6.00000=W",), ()),
+    )
+
+    assert rendered.count("#DIVISION:") == 2
+    assert "#DIVISION:;\n#SPECIALDIVISION:;" in rendered
