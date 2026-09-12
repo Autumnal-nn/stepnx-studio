@@ -28,9 +28,11 @@ class AdaptiveWaveformChannelSummary:
     pixels retain the full 16-frame base resolution.
     """
 
-    __slots__ = ("minima", "maxima", "_levels")
+    __slots__ = ("minima", "maxima", "_levels", "sample_rate", "frames_per_summary")
 
-    def __init__(self, minima, maxima) -> None:
+    def __init__(self, minima, maxima, *, sample_rate=0, frames_per_summary=0) -> None:
+        self.sample_rate = sample_rate
+        self.frames_per_summary = frames_per_summary
         if len(minima) != len(maxima):
             raise ValueError("waveform min/max series must have the same length")
         self.minima = (
@@ -100,8 +102,12 @@ class AdaptiveWaveformChannelSummary:
         if high_time <= low_time:
             high_time = min(duration_ms, low_time + duration_ms / count)
 
-        first = min(count - 1, max(0, math.floor(low_time / duration_ms * count)))
-        last = min(count, max(first + 1, math.ceil(high_time / duration_ms * count)))
+        scale = (
+            self.sample_rate / (1000.0 * self.frames_per_summary)
+            if self.sample_rate and self.frames_per_summary else count / duration_ms
+        )
+        first = min(count - 1, max(0, math.floor(low_time * scale)))
+        last = min(count, max(first + 1, math.ceil(high_time * scale)))
         return self._range_indices(first, last)
 
 
@@ -180,6 +186,13 @@ def install_phase11_waveform_precision(window) -> None:
             original_start(path)
 
         decoder.start = timed_start
+        original_start_pcm = decoder.start_pcm
+
+        def timed_start_pcm(pcm) -> None:
+            decoder._phase11_precision_started = perf_counter()
+            original_start_pcm(pcm)
+
+        decoder.start_pcm = timed_start_pcm
 
         def report_cost(waveform) -> None:
             started = getattr(decoder, "_phase11_precision_started", None)

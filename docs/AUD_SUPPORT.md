@@ -1,9 +1,11 @@
 # Andamiro AUD support
 
 StepNX Studio recognizes Andamiro `.AUD` / `.A` files as encrypted audio
-candidates. It never rewrites the source. A supported wrapper is decoded to an
-MP3 inside a temporary application directory and that temporary file is passed
-to Qt for playback and waveform decoding.
+candidates. It never rewrites the source. For NXA profiles, a supported wrapper
+is decoded from one immutable snapshot to MP3 bytes, then to the
+[canonical PCM timeline](NXA_PCM_CONTRACT.md) shared by playback and waveform.
+Other profiles stage the decoded MP3 in a temporary application directory for
+the existing Qt playback and waveform path.
 
 ## ENC1
 

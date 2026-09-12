@@ -237,6 +237,28 @@ class MetronomeClock:
             block.beat_measure > 0 and beat % block.beat_measure == 0,
         )
 
+    def times_between(self, start_ms: float, end_ms: float) -> tuple[float, ...]:
+        """Return beat boundaries on the active route in a half-open range."""
+        times = set()
+        for split in self._snapshot.splits:
+            if not split.blocks:
+                continue
+            block = self._snapshot.active_block(split.stable_id)
+            if block.bpm <= 0 or block.beat_split <= 0 or self._projection.is_skip(block):
+                continue
+            duration = 60_000.0 / block.bpm
+            first = max(0, math.ceil((start_ms - block.start_time) / duration))
+            last = min(math.ceil(block.row_count / block.beat_split),
+                       math.ceil((end_ms - block.start_time) / duration))
+            if last - first > 1_000_000:
+                raise ValueError("metronome schedule exceeds the event limit")
+            for index in range(first, last):
+                time = block.start_time + index * duration
+                beat = self.beat_at(time)
+                if beat is not None and beat.block_id == block.stable_id:
+                    times.add(time)
+        return tuple(sorted(times))
+
 
 class NoteMetronomeClock:
     """Arrow clock using native per-row judgment time, including bSkip."""
@@ -274,6 +296,12 @@ class NoteMetronomeClock:
     def note_at(self, chart_time_ms: float) -> MetronomeNote | None:
         index = bisect_right(self._times, chart_time_ms) - 1
         return None if index < 0 else self._events[index]
+
+    def times_between(self, start_ms: float, end_ms: float) -> tuple[float, ...]:
+        """Return native judgment times, including coincident bSkip events."""
+        from bisect import bisect_left
+
+        return self._times[bisect_left(self._times, start_ms):bisect_left(self._times, end_ms)]
 
 
 @dataclass(frozen=True, slots=True)

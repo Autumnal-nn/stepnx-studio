@@ -25,6 +25,10 @@ class _BeatClockLookahead:
     def beat_at(self, chart_time_ms: float):
         return self._clock.beat_at(chart_time_ms + self._lookahead_ms)
 
+    def times_between(self, start_ms: float, end_ms: float):
+        # PCM mixing has no separate metronome queue to compensate.
+        return self._clock.times_between(start_ms, end_ms)
+
 
 class _NoteClockLookahead:
     def __init__(self, clock, lookahead_ms: float) -> None:
@@ -33,6 +37,9 @@ class _NoteClockLookahead:
 
     def note_at(self, chart_time_ms: float):
         return self._clock.note_at(chart_time_ms + self._lookahead_ms)
+
+    def times_between(self, start_ms: float, end_ms: float):
+        return self._clock.times_between(start_ms, end_ms)
 
 
 def _stable_linux_pump(self) -> None:

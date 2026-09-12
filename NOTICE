@@ -8,3 +8,5 @@ from the StepMania 5.1 pump/cmd noteskin by shujito, distributed under the MIT
 License. The bundled BEAT.wav metronome sample is from Pixabay, credited to
 freesound_community, and released under CC0. See src/stepnx/assets/ASSETS.md for
 asset provenance details.
+The pinned minimp3 decoder is distributed under CC0-1.0.
+Its full license and provenance are in stepnx/_vendor/minimp3/.

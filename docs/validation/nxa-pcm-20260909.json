@@ -1,0 +1,2023 @@
+{
+  "environment": {
+    "base_commit": "d0607f482caf5e0796be9dd52a5666d2a1e0c56f",
+    "libmad_archive_sha256": "4ed652d0ad25f3e8c35f0d8b658d2987bfd77a319aa27bdb07b6e0572cfff9db",
+    "oracle_libmad": "Debian 0.15.1b-10.1+b1",
+    "platform": "Linux-6.18.35-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "qt": "6.11.2",
+    "supplied_nxa_sha256": "005ed94244bdcf11a7d68eb0c609348131caf91c838849458e72cb7d59db3e18"
+  },
+  "files": [
+    {
+      "chart_time_of_pcm_frame_zero_ms": -144.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 89856.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 3744,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 7232,
+      "oracle_frames": 4307328,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 4306176,
+        "max_absolute_s16_difference": 5,
+        "reference_end_frame": 4306176,
+        "reference_first_frame": 0,
+        "reference_prefix_outside_source_mapping": 0,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.06849550056670582
+      },
+      "oracle_startup_samples": 3456,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999295126,
+          "reference_start_frame": 214606,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999879788,
+          "reference_start_frame": 1073032,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999838444,
+          "reference_start_frame": 2146064,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999785367,
+          "reference_start_frame": 3219096,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999998563801,
+          "reference_start_frame": 4077521,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "1e51e0eceb7236262d67ce28082c8a6828d468a5648d987cf7cfa57cc3d330cd",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 4313088,
+      "pcm_sha256": "c5eed689545678046db86079fcc7ac6d8a38aad70aab83bf0a764a74c7f1809d",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 2158592,
+      "source_name": "F08-runtime.mp3",
+      "source_sha256": "1e51e0eceb7236262d67ce28082c8a6828d468a5648d987cf7cfa57cc3d330cd",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 7232,
+        "net_source_lead_samples": 6912,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "CRC check failed",
+            "offset": 127,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "forbidden bit allocation value",
+            "offset": 5927,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "lost synchronization",
+            "offset": 6171,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "bad main_data_begin pointer",
+            "offset": 6656,
+            "synthesized_samples": 1152
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 10368,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 3456
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 176856.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 7369,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 8491776,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 8489088,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 8490624,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.05571394515970003
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.999999999756823,
+          "reference_start_frame": 423828,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999880812,
+          "reference_start_frame": 2119144,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999906117,
+          "reference_start_frame": 4238288,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999885183,
+          "reference_start_frame": 6357432,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999878854,
+          "reference_start_frame": 8052747,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "c75743ef675ae50eda8a39e56e078f6350f8c47a2ac76a568ae59d02bde5553f",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 8489088,
+      "pcm_sha256": "0060209b362fe86b9751494fc4345d0c8dfbde972fbe677444a31bc12cfe2eac",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4246592,
+      "source_name": "F50.AUD",
+      "source_sha256": "7f425719be60ef9e6105a7d13f02380b73a62dd0ffa78f1aca4e051270dbbf9a",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 40.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 175968.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 7332,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 8449536,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 8446464,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 8448384,
+        "reference_first_frame": 1920,
+        "reference_prefix_outside_source_mapping": 1920,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.055986667492067335
+      },
+      "oracle_startup_samples": 1920,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999866532,
+          "reference_start_frame": 421716,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999909088,
+          "reference_start_frame": 2108584,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999305935,
+          "reference_start_frame": 4217168,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999991571,
+          "reference_start_frame": 6325752,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999549494,
+          "reference_start_frame": 8012619,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "17e62e380d6de6869293a81bc63fa80491604fcd60d2b29dfba60f20bf573390",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 8446464,
+      "pcm_sha256": "ade6c65ef52e8093b635306872aeba5c7ea7e9bc270ad8c90be28505b01d03ed",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4225280,
+      "source_name": "F51.AUD",
+      "source_sha256": "abb53eca66053dd6bc39e5d6a334838c8a6442e2efd985355f744c8d01966048",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1920,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 152,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1920
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 204168.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 8507,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 9802752,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 9800064,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 9801600,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.05410101349265859
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.99999999998114,
+          "reference_start_frame": 489377,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999858047,
+          "reference_start_frame": 2446888,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999706564,
+          "reference_start_frame": 4893776,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999518641,
+          "reference_start_frame": 7340664,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999920698,
+          "reference_start_frame": 9298174,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "d08d9cbac84b4e58a8a72317b7a14de6451d54b3d1c5e462e3bc093f07ae6f05",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 9800064,
+      "pcm_sha256": "795e39aae0f733b364b056d1f5c6400b80d10123670d117267d49ea507a259b5",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4902080,
+      "source_name": "F52.AUD",
+      "source_sha256": "7c8020463adb7d9a8bd8450840ff5bd9b42af74ba48b31baf7c1532ac0db9ce3",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 215088.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 8962,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 10326912,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 10324224,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 10325760,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.054205938675766834
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999635408,
+          "reference_start_frame": 515585,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999864536,
+          "reference_start_frame": 2577928,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999867872,
+          "reference_start_frame": 5155856,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999998191063,
+          "reference_start_frame": 7733784,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999897207,
+          "reference_start_frame": 9796126,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "026aa8bde31c9bc44429bda5e2037f42745bf5bfb3e5b3c50ff40c0662ae2e40",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 10324224,
+      "pcm_sha256": "5aeb4b972450abd54c2b7bf80f9a342d5c640ef15714e6915eed8b8aaf695832",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 5164160,
+      "source_name": "F53.AUD",
+      "source_sha256": "0d387f072f39ba13a499b38a6b69fa0ea92df08bb916231ffa1fb28dae3c84a5",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 191712.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 7988,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 9204864,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 9202176,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 9203712,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.05379631731454425
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999627943,
+          "reference_start_frame": 459483,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999844372,
+          "reference_start_frame": 2297416,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999857829,
+          "reference_start_frame": 4594832,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999649423,
+          "reference_start_frame": 6892248,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999794784,
+          "reference_start_frame": 8730180,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "3cdc4444ba51c1e2b0dee0e79cf50ea674d457768e205d18abe1163e6025c114",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 9202176,
+      "pcm_sha256": "5263b7d236f28072e62d68daa5e64f4fdb47a92d0b42cfc39f20a2e60dfbee13",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4603136,
+      "source_name": "F54.AUD",
+      "source_sha256": "9be5d82e659eca3f9667772fa1c7edce5f2ad655809f4d238b884035c509cc06",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 222984.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 9291,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 10705920,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 10703232,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 10704768,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.05685039744592384
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999917184,
+          "reference_start_frame": 534536,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999918497,
+          "reference_start_frame": 2672680,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999919281,
+          "reference_start_frame": 5345360,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999737634,
+          "reference_start_frame": 8018040,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999904087,
+          "reference_start_frame": 10156184,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "e46fab5bfa6d2dfef7ace805d53079da0206fc14f810661a158d08020a55a4d5",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 10703232,
+      "pcm_sha256": "f7cba93606ecb22d3f6fa87b11da9d05eeab2b00aa7aed4aae47f980af99e418",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 5353664,
+      "source_name": "F55.AUD",
+      "source_sha256": "2d209d08486332acba6ec5afa326d6cb89f8a571440582c43d98948f01263557",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 165984.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 6916,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 7969920,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 7967232,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 7968768,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.05633102932849613
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999998607974,
+          "reference_start_frame": 397736,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999725021,
+          "reference_start_frame": 1988680,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999867165,
+          "reference_start_frame": 3977360,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999832533,
+          "reference_start_frame": 5966040,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999998451541,
+          "reference_start_frame": 7556984,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "93b078aa880eb864d8b54927508ee65769290c910c0ce8a9d91df8b7d9525452",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 7967232,
+      "pcm_sha256": "ae200f98e5b48808c0660697d093ba861795931adec8677aadc2b42155eded0e",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 3985664,
+      "source_name": "F56.AUD",
+      "source_sha256": "cf262331fa80f58c6efc0c55a676fb1f29637455bce7bb5667cb96de584a1fb7",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 236928.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 9872,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 11375232,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 11372544,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 11374080,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.05239515315147416
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999998721784,
+          "reference_start_frame": 568001,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999834142,
+          "reference_start_frame": 2840008,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999855617,
+          "reference_start_frame": 5680016,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999883881,
+          "reference_start_frame": 8520024,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999889864,
+          "reference_start_frame": 10792030,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "6b8746cc5a2ce458c9e323d9196c9bcb590614ac6ae942d6cc8c630270d4336a",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 11372544,
+      "pcm_sha256": "84c038a0806504e40eff58f93aadfe8a9bc9e0ac353d239e27c2c271b3f5abc5",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 5688320,
+      "source_name": "F57.AUD",
+      "source_sha256": "1429f0aa22baf768457f31b87b20840771c0d0144b2415f1d9ee00526e092fa4",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 162768.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 6782,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 7815552,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 7812864,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 7814400,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.06864334245038556
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999951893,
+          "reference_start_frame": 390017,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999944178,
+          "reference_start_frame": 1950088,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999948905,
+          "reference_start_frame": 3900176,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999943542,
+          "reference_start_frame": 5850264,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999716999,
+          "reference_start_frame": 7410334,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "9a461377f756512ea83280155030559269c1c7ac1ec5f3698c5dfe88a39b12bf",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 7812864,
+      "pcm_sha256": "d2a9102476566e084df9eae38b5d22c2c01d4c810a4fec65770f14d3941a7af7",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 3908480,
+      "source_name": "F58.AUD",
+      "source_sha256": "567c97091b3423abbf03b9bfdf435b50e1dc68ddd49d1999ed75a77eeeeb79d6",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 40.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 192360.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 8015,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 9236352,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 9233280,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 9235200,
+        "reference_first_frame": 1920,
+        "reference_prefix_outside_source_mapping": 1920,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.06840082773047142
+      },
+      "oracle_startup_samples": 1920,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999748932,
+          "reference_start_frame": 461057,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999987261,
+          "reference_start_frame": 2305288,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999692992,
+          "reference_start_frame": 4610576,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999909823,
+          "reference_start_frame": 6915864,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999839648,
+          "reference_start_frame": 8760094,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "e1d62d1bae04f239362522e29528f07c9d1d8bf6e8c9271ebf435b73e501acb0",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 9233280,
+      "pcm_sha256": "52e13fb4400b7e5278c4b4a7f63d1356fcef379f23a23d3f2776556c44e503ff",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4618688,
+      "source_name": "F59.AUD",
+      "source_sha256": "4d48aef3d8e47b370b8cbcaddb50476edd1e9243aabd3cfd132bca7d559836c2",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1920,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 123,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1920
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 228504.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 9521,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 10970880,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 10968192,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 10969728,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.0567116319495409
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999686013,
+          "reference_start_frame": 547784,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999822744,
+          "reference_start_frame": 2738920,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999693278,
+          "reference_start_frame": 5477840,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999125331,
+          "reference_start_frame": 8216760,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999815557,
+          "reference_start_frame": 10407896,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "cb74a08dfc0a2c254af599a9520baf5469d7834bf4c9827b2defafc20549ba24",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 10968192,
+      "pcm_sha256": "7aea7a257e1672a7c6aed864d2afc353e3fcc52bc6d5112729bfcaf539d6c2ea",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 5486144,
+      "source_name": "F60.AUD",
+      "source_sha256": "7de10bb45ff042f7b416390a58a00efb2615105549801a3f7065d8e242d221ac",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 196152.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 8173,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 9417984,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 9415296,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 9416832,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.054027525865281104
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999853,
+          "reference_start_frame": 470139,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999871205,
+          "reference_start_frame": 2350696,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999825305,
+          "reference_start_frame": 4701392,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999650955,
+          "reference_start_frame": 7052088,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999916745,
+          "reference_start_frame": 8932644,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "7b4fe288fe4774da93e4c12d10ff7c657e9866188b531dc9fb495bcf2be245af",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 9415296,
+      "pcm_sha256": "a6f4aee3349f702c8cba31d8e8792f0fa959f9340b158f9ea296f6856fab6d13",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4709696,
+      "source_name": "F61.AUD",
+      "source_sha256": "0c21ed9f5c512c9e72e97af87fd537d5f70ba96686b1ac4d959f78f16305baff",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 248112.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 10338,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 11912064,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 11909376,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 11910912,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.062124038502006616
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999919108,
+          "reference_start_frame": 594843,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999995135,
+          "reference_start_frame": 2974216,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999961042,
+          "reference_start_frame": 5948432,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999954365,
+          "reference_start_frame": 8922648,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999931823,
+          "reference_start_frame": 11302020,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "81896a42eaed647f903bf8cdb932a9aaccf910dc2ac7f4ecce57111a0e2ef724",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 11909376,
+      "pcm_sha256": "2b63981231c882b0640df5835d63b5cd3c3c7f7c8a7dcff697da563744b2f92d",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 5956736,
+      "source_name": "F62.AUD",
+      "source_sha256": "052d53977bbfa5a635d2d537905a1c56b8b41a66e378a7cb3832e7e261ca57b3",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 193800.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 8075,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 9305088,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 9302400,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 9303936,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.0529615078205815
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999930388,
+          "reference_start_frame": 464494,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999980176,
+          "reference_start_frame": 2322472,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999774231,
+          "reference_start_frame": 4644944,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999932053,
+          "reference_start_frame": 6967416,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999913423,
+          "reference_start_frame": 8825393,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "b30ed8ece1cff2be3e2f1b7a82e05dcf1ca55899905fee364ba6211be9835eb8",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 9302400,
+      "pcm_sha256": "35dfe9eac5f111c8c8ea7b6750bccb24f8aae278d9e7def949fe8648f25a5517",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4653248,
+      "source_name": "F63.AUD",
+      "source_sha256": "0a6bacee93482ba0a3c3c5a6f989777ea3373ea2386b537bbbeeabe6bc345782",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 79,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 226104.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 9421,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 10855680,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 10852992,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 10854528,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.06354280768799718
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999989870593,
+          "reference_start_frame": 542024,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999931405,
+          "reference_start_frame": 2710120,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999938564,
+          "reference_start_frame": 5420240,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999991592,
+          "reference_start_frame": 8130360,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999929962,
+          "reference_start_frame": 10298456,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "9f9877034cb83e9d963663509da9c9995b432df9b265598b2a1310a391b709eb",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 10852992,
+      "pcm_sha256": "78fd9c360ea2b3c37fb1bab5368fed62ee4b75b10ade0f147e40cf671b94c831",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 5428544,
+      "source_name": "F64.AUD",
+      "source_sha256": "33ef1da8ccdb74caea0111ff582ac53813faead10e0e6611cd1374778d650f07",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 32.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 303840.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 12660,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 14587008,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 14584320,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 14585856,
+        "reference_first_frame": 1536,
+        "reference_prefix_outside_source_mapping": 1536,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.0519244548823805
+      },
+      "oracle_startup_samples": 1536,
+      "oracle_windows": [
+        {
+          "correlation": 0.999999999975131,
+          "reference_start_frame": 728590,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999969155,
+          "reference_start_frame": 3642952,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999779065,
+          "reference_start_frame": 7285904,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999742405,
+          "reference_start_frame": 10928856,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999656252,
+          "reference_start_frame": 13843217,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "7623e0b549e07731fb65697aaa8a0a2db060f33f0b3ba53fdf53ba339b915945",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 14584320,
+      "pcm_sha256": "62307265634658b815803bfdd10901bfc10f6f7f1adab50131734264c4e4b60e",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 7294208,
+      "source_name": "F65.AUD",
+      "source_sha256": "82c79a56d82c00f0d3deb83d83dc37a62dc20aa2ebb285ff4a7253e1fe2daa88",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1536,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1536
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 40.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 174744.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 7281,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 8390784,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 8387712,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 8389632,
+        "reference_first_frame": 1920,
+        "reference_prefix_outside_source_mapping": 1920,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.05258607450534854
+      },
+      "oracle_startup_samples": 1920,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999862206,
+          "reference_start_frame": 418779,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999908696,
+          "reference_start_frame": 2093896,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999984949,
+          "reference_start_frame": 4187792,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999979127,
+          "reference_start_frame": 6281688,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999903261,
+          "reference_start_frame": 7956804,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "f5a103958c81c92ff18d689721624450b9206674e035dc581808b9313221ea48",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 8387712,
+      "pcm_sha256": "8049a058deec8224b394f9fccc19edc4e5c94445e086e4e3c550d547416f9455",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4195904,
+      "source_name": "F70.AUD",
+      "source_sha256": "7d7d0ebcc8b8a6cbc9c7dfcae720232d964877ae151e0e956c0d31d9403116a5",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1920,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 123,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1920
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 40.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 168072.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 7003,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 8070528,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 8067456,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 8069376,
+        "reference_first_frame": 1920,
+        "reference_prefix_outside_source_mapping": 1920,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.055224851466178705
+      },
+      "oracle_startup_samples": 1920,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999860546,
+          "reference_start_frame": 402766,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999768109,
+          "reference_start_frame": 2013832,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999854841,
+          "reference_start_frame": 4027664,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999516417,
+          "reference_start_frame": 6041496,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999801431,
+          "reference_start_frame": 7652561,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "281bfa2544aca622edcc202ba23bd13e3d99748b5c93838d38199c8f94533fb8",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 8067456,
+      "pcm_sha256": "77e990e04d55fc0ff10cca4f6775cb31a03fbd14cf2858649b82f1e7dd8e6851",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 4035776,
+      "source_name": "F71.AUD",
+      "source_sha256": "62f73af47710c4177718e46c973f87951663caddc32155052830da359d7223e0",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1920,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 21,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 123,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1920
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 48.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 131304.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 5471,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 6306048,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 6302592,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 6304896,
+        "reference_first_frame": 2304,
+        "reference_prefix_outside_source_mapping": 2304,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.055045646541320346
+      },
+      "oracle_startup_samples": 2304,
+      "oracle_windows": [
+        {
+          "correlation": 0.9999999999907302,
+          "reference_start_frame": 314542,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999605677,
+          "reference_start_frame": 1572712,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999916039,
+          "reference_start_frame": 3145424,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999843026,
+          "reference_start_frame": 4718136,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999906487,
+          "reference_start_frame": 5976305,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "483cb6e9e3770391af9a16b22ff833bb03eced35109e5602f1c8f2e30c22b63a",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 6302592,
+      "pcm_sha256": "f40770df3860911412700af50e49a8778579824fa1e2968704a22fcab075d304",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 3153344,
+      "source_name": "F72.AUD",
+      "source_sha256": "5a06060b2087e05dc41b96929b6e8a32105296a2909cade6e417426fd14436bf",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -2304,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 50,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 123,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 148,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 2304
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    },
+    {
+      "chart_time_of_pcm_frame_zero_ms": 40.0,
+      "decoder": "minimp3-ea99364f61c14656440e8d77e9c233ccf3124633-scalar-s16-v1",
+      "duration_ms": 103992.0,
+      "gapless_trim_samples": 0,
+      "mapping": "chart_ms = pcm_frame * 1000 / 48000 - startup_offset_ms - manual_offset_ms",
+      "missing_frame_offsets": [],
+      "mpeg_frames": 4333,
+      "mpeg_sample_rate": 48000,
+      "oracle_first_decoded_offset": 2048,
+      "oracle_frames": 4994688,
+      "oracle_full_overlap": {
+        "compared_stereo_frames": 4991616,
+        "max_absolute_s16_difference": 2,
+        "reference_end_frame": 4993536,
+        "reference_first_frame": 1920,
+        "reference_prefix_outside_source_mapping": 1920,
+        "reference_tail_outside_source_mapping": 1152,
+        "rms_s16_difference": 0.061063510969951044
+      },
+      "oracle_startup_samples": 1920,
+      "oracle_windows": [
+        {
+          "correlation": 0.99999999997942,
+          "reference_start_frame": 248974,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.999999999989132,
+          "reference_start_frame": 1244872,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999913292,
+          "reference_start_frame": 2489744,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999856554,
+          "reference_start_frame": 3734616,
+          "residual_samples": 0
+        },
+        {
+          "correlation": 0.9999999999651872,
+          "reference_start_frame": 4730513,
+          "residual_samples": 0
+        }
+      ],
+      "output_sample_rate": 48000,
+      "parity": "deterministic sample timeline; runtime and device residual require measurement",
+      "passed": true,
+      "payload_sha256": "6952650061815c86ad8bcb4ef3f39ff7efe24aaf84ccc097e545aca4bb297a79",
+      "pcm_format": "s16le-stereo",
+      "pcm_frames": 4991616,
+      "pcm_sha256": "1159ae9c455e5e9161f6c53fd8880f3453c77885401dc3ec763c22144c7a99c1",
+      "repeat_verified": true,
+      "resampled": false,
+      "schema": "nxa-mpeg-pcm-v1",
+      "source_channels": 2,
+      "source_end": 2497856,
+      "source_name": "F80.AUD",
+      "source_sha256": "29be25eb343e8d248e30bf5cf224c08bd9552c56abcb7c3954d656fe5c10d3c8",
+      "source_start": 2048,
+      "startup": {
+        "first_decoded_offset": 2048,
+        "net_source_lead_samples": -1920,
+        "recoveries": [
+          {
+            "error": "lost synchronization",
+            "offset": 0,
+            "synthesized_samples": 1152
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 21,
+            "synthesized_samples": 384
+          },
+          {
+            "error": "reserved sample frequency value",
+            "offset": 65,
+            "synthesized_samples": 384
+          }
+        ],
+        "sample_rate": 48000,
+        "source_samples_before_first_decoded": 0,
+        "source_start_offset": 2048,
+        "synthesized_samples_before_first_decoded": 1920
+      },
+      "startup_recovery_waveform_emulated": false,
+      "tail_recovery_waveform_emulated": false,
+      "trailing_bytes": 128
+    }
+  ],
+  "generated_rate_matrix": [
+    {
+      "channels": 1,
+      "correlation": 0.999999999918107,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 48000,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 2,
+      "correlation": 0.9999999998859664,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 48000,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 1,
+      "correlation": 0.999999999971265,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 44100,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 2,
+      "correlation": 0.999999999932666,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 44100,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 1,
+      "correlation": 0.9999999999383732,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 32000,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 2,
+      "correlation": 0.9999999998761632,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 32000,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 1,
+      "correlation": 0.9999999999530446,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 24000,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 2,
+      "correlation": 0.9999999999306678,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 24000,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 1,
+      "correlation": 0.999999999947602,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 22050,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 2,
+      "correlation": 0.9999999999672203,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 22050,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 1,
+      "correlation": 0.9999999999530923,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 16000,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    },
+    {
+      "channels": 2,
+      "correlation": 0.9999999998922803,
+      "lead": -1152,
+      "model_synth": 1152,
+      "rate": 16000,
+      "residual_samples": 0,
+      "startup_synth": 1152
+    }
+  ],
+  "limitations": [
+    "AUD-Corpus-2.zip and AUD_Corpus_1.zip unavailable",
+    "Local API oracle is not a run of the supplied NXA executable",
+    "No physical audio device or DAC latency measurement",
+    "Source PCM mapping does not reconstruct startup/tail error synthesis waveform",
+    "Cross-platform golden checks required before release"
+  ],
+  "nx_roundtrip": {
+    "errors": 0,
+    "exact": 12354,
+    "files": 12366,
+    "import_attention": 0,
+    "imported": 12,
+    "unsupported": 0
+  },
+  "startup_probes": {
+    "accepted_mismatches": 0,
+    "cases": 1000,
+    "matched": 985,
+    "reference": "tests/fixtures/audio/startup-oracle.json",
+    "rejected": 15,
+    "seed": 20260909
+  }
+}

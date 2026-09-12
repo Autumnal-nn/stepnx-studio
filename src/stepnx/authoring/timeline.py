@@ -21,8 +21,9 @@ class TimelineGeometry:
     minimum_row_height: float = 4.0
     # Dense NX20 divisions need substantially more headroom than a conventional
     # step editor.  At the old 96 px/beat ceiling, split-128 rows were still
-    # sub-pixel even at maximum zoom.  Keep the minimum unchanged, but allow a
-    # further 64x magnification for precise work and playback inspection.
+    # sub-pixel even at maximum zoom.  Keep the representable minimum unchanged,
+    # but allow a further 64x magnification for precise work and playback
+    # inspection.
     maximum_row_height: float = 6144.0
 
     def __post_init__(self) -> None:
@@ -36,9 +37,18 @@ class TimelineGeometry:
     def zoomed(self, factor: float) -> TimelineGeometry:
         if not math.isfinite(factor) or factor <= 0:
             raise ValueError("zoom factor must be finite and positive")
+        # Four-pixel rows remain representable for tests and explicit geometry,
+        # but the interactive Ctrl+wheel path uses zoomed(). The old 4 px floor
+        # could place an entire large chart into one viewport and overload the
+        # renderer without providing useful authoring detail. Clamp interactive
+        # zoom to 12 px while preserving any stricter caller-provided minimum.
+        interactive_minimum = min(
+            self.maximum_row_height,
+            max(self.minimum_row_height, 12.0),
+        )
         height = min(
             self.maximum_row_height,
-            max(self.minimum_row_height, self.row_height * factor),
+            max(interactive_minimum, self.row_height * factor),
         )
         return TimelineGeometry(
             row_height=height,

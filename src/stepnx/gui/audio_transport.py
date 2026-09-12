@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import struct
 import sys
 import wave
@@ -391,6 +392,12 @@ class AudioTransport(QObject):
 
         self._aud_directory: QTemporaryDir | None = None
         self._playback_source: Path | None = None
+        self.original_source: Path | None = None
+        self.nxa_timing_enabled = False
+        self.canonical_pcm = None
+        self._pcm_playback = None
+        self._pcm_metronome_sample: tuple[int, ...] = ()
+        self.pcm_prepare_playback = None
         application = QCoreApplication.instance()
         if application is not None:
             application.aboutToQuit.connect(self.cleanup_aud_staging)
@@ -414,17 +421,27 @@ class AudioTransport(QObject):
 
     @property
     def playback_source(self) -> Path | None:
-        """Exact local file currently handed to QMediaPlayer.
+        """Local playback representation; canonical NXA audio is staged PCM WAV.
 
         For ordinary formats this is the selected source. ENC1/ENC2 AUD/A is
         decoded and staged as MP3 first, so waveform decoding can consume
         precisely the same bytes as playback instead of independently repeating
-        that pipeline.
+        that pipeline. NXA PCM is played directly by PcmPlayback; the WAV is an
+        inspectable representation, not a second compressed decoding path.
         """
 
         return self._playback_source
 
     def load(self, path: str | Path | None) -> bool:
+        previous_pcm_path = self._playback_source if self.canonical_pcm is not None else None
+        self._close_pcm()
+        if previous_pcm_path is not None:
+            try:
+                previous_pcm_path.unlink(missing_ok=True)
+            except OSError:
+                pass  # QTemporaryDir retains ownership and retries at shutdown.
+        self.canonical_pcm = None
+        self.original_source = None if path is None else Path(path).resolve()
         self.player.stop()
         self.player.setSource(QUrl())
         self._playback_source = None
@@ -437,6 +454,30 @@ class AudioTransport(QObject):
                 self.cleanup_aud_staging()
             return True
         source = Path(path)
+        if self.nxa_timing_enabled and source.suffix.casefold() in {".mp3", ".aud", ".a"}:
+            from stepnx.authoring.pcm import PcmDecodeError, load_nxa_pcm
+            from stepnx.gui.pcm_playback import PcmPlayback
+
+            try:
+                pcm = load_nxa_pcm(source)
+                directory = self._ensure_aud_directory()
+                if directory is None:
+                    return False
+                self._aud_serial += 1
+                staged = Path(directory.path()) / f"canonical-{self._aud_serial}.wav"
+                pcm.write_wav(staged)
+            except (OSError, PcmDecodeError, AudDecodeError) as exc:
+                self.errorOccurred.emit(f"NXA PCM analysis unavailable: {exc}")
+                return False
+            self.canonical_pcm = pcm
+            self._pcm_playback = PcmPlayback(pcm, self)
+            self._pcm_playback.positionChanged.connect(self.positionChanged.emit)
+            self._pcm_playback.playbackChanged.connect(self.playbackChanged.emit)
+            self._pcm_playback.errorOccurred.connect(self.errorOccurred.emit)
+            self._playback_source = staged.resolve()
+            self.durationChanged.emit(math.ceil(pcm.duration_ms))
+            self.positionChanged.emit(0)
+            return True
         if source.suffix.casefold() in {".aud", ".a"}:
             try:
                 payload = decode_aud(source)
@@ -459,12 +500,20 @@ class AudioTransport(QObject):
         return True
 
     def toggle(self) -> None:
+        if self._pcm_playback is not None:
+            if not self._pcm_playback.playing and self.pcm_prepare_playback is not None:
+                self.pcm_prepare_playback()
+            self._pcm_playback.toggle()
+            return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
         else:
             self.player.play()
 
     def seek(self, milliseconds: int) -> None:
+        if self._pcm_playback is not None:
+            self._pcm_playback.seek(milliseconds)
+            return
         position = max(0, milliseconds)
         # Publish an explicit seek immediately, including backwards seeks, then
         # let subsequent backend callbacks pass through the monotonic live gate.
@@ -487,6 +536,7 @@ class AudioTransport(QObject):
         return directory
 
     def cleanup_aud_staging(self) -> bool:
+        self._close_pcm()
         directory = self._aud_directory
         if directory is None:
             return True
@@ -498,7 +548,21 @@ class AudioTransport(QObject):
         self._aud_directory = None
         return bool(directory.remove())
 
+    def _close_pcm(self) -> None:
+        if self._pcm_playback is not None:
+            playback = self._pcm_playback
+            self._pcm_playback = None
+            playback.close()
+
     def load_metronome(self, path: str | Path | None) -> None:
+        self._pcm_metronome_sample = ()
+        if path is not None:
+            try:
+                self._pcm_metronome_sample = _load_metronome_pcm(
+                    path, target_rate=48_000, target_channels=2
+                )
+            except ValueError as exc:
+                self.errorOccurred.emit(str(exc))
         if self._linux_metronome is not None:
             if not self._linux_metronome.load(path):
                 self.errorOccurred.emit(
@@ -516,6 +580,9 @@ class AudioTransport(QObject):
             voice.setSource(source)
 
     def play_metronome(self) -> bool:
+        if self._pcm_playback is not None:
+            # NXA clicks are already mixed at their scheduled sample indices.
+            return bool(self._pcm_metronome_sample)
         if self._linux_metronome is not None:
             return self._linux_metronome.trigger()
 
@@ -535,6 +602,8 @@ class AudioTransport(QObject):
         return loaded
 
     def _position_changed(self, milliseconds: int) -> None:
+        if self._pcm_playback is not None:
+            return
         candidate = int(milliseconds)
         playing = (
             self.player.playbackState()
@@ -582,9 +651,13 @@ class AudioTransport(QObject):
         self._emit_position(estimate)
 
     def _duration_changed(self, milliseconds: int) -> None:
+        if self._pcm_playback is not None:
+            return
         self.durationChanged.emit(int(milliseconds))
 
     def _playback_state(self, state) -> None:
+        if self._pcm_playback is not None:
+            return
         playing = state == QMediaPlayer.PlaybackState.PlayingState
         if playing:
             self._position_anchor = int(self.player.position())

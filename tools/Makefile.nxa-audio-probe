@@ -1,0 +1,11 @@
+CC ?= gcc
+CFLAGS ?= -O2 -Wall -Wextra -fPIC -m32
+LDFLAGS ?= -shared -m32
+
+all: nxa_audio_probe.so
+
+nxa_audio_probe.so: nxa_audio_probe.c
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ldl -lpthread
+
+clean:
+	rm -f nxa_audio_probe.so
