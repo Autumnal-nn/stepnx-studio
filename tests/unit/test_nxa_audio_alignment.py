@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import math
 import unittest
+from types import SimpleNamespace
 
 from stepnx.authoring.mp3_gapless import Mp3GaplessAnalysis
 from stepnx.authoring.nxa_startup import NxaStartupAnalysis
-from stepnx.gui.nxa_audio_alignment import effective_nxa_audio_offset_ms
+from stepnx.gui.nxa_audio_alignment import (
+    effective_nxa_audio_offset_ms,
+    loaded_mp3_sample_rate,
+    mp3_sample_rate_warning,
+)
 
 
 class NxaAudioAlignmentTests(unittest.TestCase):
@@ -59,6 +64,22 @@ class NxaAudioAlignmentTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     effective_nxa_audio_offset_ms(value, None, nxa_profile=True)
+
+    def test_canonical_pcm_exposes_original_mpeg_rate(self) -> None:
+        transport = SimpleNamespace(
+            canonical_pcm=SimpleNamespace(mpeg_sample_rate=44_100),
+            playback_source=None,
+        )
+        self.assertEqual(loaded_mp3_sample_rate(transport), 44_100)
+
+    def test_only_non_48khz_audio_generates_warning(self) -> None:
+        self.assertIsNone(mp3_sample_rate_warning(None))
+        self.assertIsNone(mp3_sample_rate_warning(48_000))
+        warning = mp3_sample_rate_warning(44_100)
+        self.assertIsNotNone(warning)
+        self.assertIn("44,100 Hz", warning)
+        self.assertIn("48,000 Hz", warning)
+        self.assertIn("may not work correctly", warning)
 
 
 if __name__ == "__main__":
