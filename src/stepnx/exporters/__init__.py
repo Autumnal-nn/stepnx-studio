@@ -13,6 +13,7 @@ from stepnx.exporters.ssc import (
     render_extension,
     render_simfile,
 )
+from stepnx.exporters.ssc_item_semantics import install_item_semantics
 from stepnx.exporters.ssc_division import (
     SscDivisionCondition,
     SscDivisionDecision,
@@ -32,6 +33,10 @@ from stepnx.exporters.ssc_runtime_final import (
     render_compiled_reports,
     render_compiled_simfile,
 )
+
+# PR #27's original low-level table stopped at item 21. Exact Fiesta 2/Sanity
+# pairs prove the remaining official item symbols (22=Nuke -> n, 23=HyPot -> t).
+install_item_semantics()
 
 
 def compile_ssc_export(*args, **kwargs) -> SscRandomExportReport:
