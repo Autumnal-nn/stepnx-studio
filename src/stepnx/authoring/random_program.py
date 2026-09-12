@@ -36,14 +36,9 @@ class CompiledRandomProgram:
     """Target-independent materialization of NX random state.
 
     ``helper_snapshots`` are ordinary authoring snapshots with every random and
-    bank-follow block choice already materialized for one helper identity. They
-    deliberately contain no SSC-specific cells.
-
-    ``controls`` retains the primitive per-decision T/O boundaries discovered
-    from NX state. A target exporter may coalesce several decisions into one
-    larger execution window when a runtime cannot safely switch charts between
-    them. This is how dense load-time random sequences can be represented by a
-    joint helper state without losing bank followers.
+    random-bank-follow block choice already materialized for one helper identity.
+    Conditional selector banks are intentionally left unresolved here so the
+    target's Division compiler can preserve them as runtime branches.
     """
 
     base_snapshot: AuthoringSnapshot
@@ -75,21 +70,54 @@ def _store_for_follower(
     return None
 
 
+def _conditional_store_before(
+    snapshot: AuthoringSnapshot,
+    analysis: RandomStructureAnalysis,
+    follower_split_index: int,
+    bank_id: int,
+) -> int | None:
+    """Find the latest non-random selector that can establish ``bank_id``.
+
+    NX uses the low selector bits for more than random state.  In official
+    Fiesta EX charts, for example, raw 0x01 selects a conditional Block and
+    stores its index in bank 1, while later 0x41 Splits reuse that same index.
+    Those followers are not random orphans and belong to the Division compiler.
+    """
+
+    latest: int | None = None
+    for split_index in range(follower_split_index):
+        selector = analysis.selectors[split_index]
+        if selector.bank_id != bank_id:
+            continue
+        if selector.random_start or selector.follow_bank:
+            continue
+        if not snapshot.splits[split_index].blocks:
+            continue
+        latest = split_index
+    return latest
+
+
 def _validate_materializable(
     snapshot: AuthoringSnapshot,
     analysis: RandomStructureAnalysis,
 ) -> None:
-    if analysis.diagnostics:
-        first = analysis.diagnostics[0]
-        raise RandomCompileError(f"{first.code} at split {first.split_index}: {first.message}")
+    for diagnostic in analysis.diagnostics:
+        if diagnostic.code == "random.orphan-bank-follow":
+            selector = analysis.selectors[diagnostic.split_index]
+            if _conditional_store_before(
+                snapshot,
+                analysis,
+                diagnostic.split_index,
+                selector.bank_id,
+            ) is not None:
+                continue
+        raise RandomCompileError(
+            f"{diagnostic.code} at split {diagnostic.split_index}: {diagnostic.message}"
+        )
 
-    # Overlapping live banks and a new draw while another bank is live are not
-    # intrinsically invalid once a helper identity represents the *joint* state
-    # of several load-time decisions. The SSC layer decides whether those
-    # decisions can use separate runtime Wraps or must be coalesced into one
-    # execution window. At this layer we only need every random start to have a
-    # materializable block choice and every named follower to have passed the
-    # structural analysis above.
+    # Overlapping live random banks and a new draw while another bank is live
+    # are materializable as a joint helper identity. Conditional banks are left
+    # untouched and are resolved later by the target-specific branch compiler.
     for split_index in analysis.random_split_indices:
         if not snapshot.splits[split_index].blocks:
             raise RandomCompileError(f"random split {split_index} has no blocks")
@@ -100,7 +128,7 @@ def _helper_choices(
     analysis: RandomStructureAnalysis,
     pool: RandomPoolPlan,
 ) -> tuple[dict[int, int], ...]:
-    """Return split-index -> block-index choices for every helper state."""
+    """Return split-index -> block-index random choices for every helper state."""
 
     mappings = _mapping_by_split(pool)
     choices = [dict() for _ in range(pool.helper_count)]
@@ -118,16 +146,24 @@ def _helper_choices(
             for helper_index, block_index in enumerate(mapping.helper_to_block):
                 choices[helper_index][follower_index] = block_index
 
-    # Named followers are only legal after a store, and the structure analysis
-    # has already rejected orphans. Assert that every one was materialized.
+    # A 0x4n follower without a random BankEpisode may legally follow an earlier
+    # conditional 0x0n store. True orphans have already been rejected above.
     for split_index, selector in enumerate(analysis.selectors):
         if not selector.follows_named_bank:
             continue
         episode = _store_for_follower(analysis.bank_episodes, split_index)
-        if episode is None:
-            raise RandomCompileError(
-                f"bank follower at split {split_index} could not be associated with a store"
-            )
+        if episode is not None:
+            continue
+        if _conditional_store_before(
+            snapshot,
+            analysis,
+            split_index,
+            selector.bank_id,
+        ) is not None:
+            continue
+        raise RandomCompileError(
+            f"bank follower at split {split_index} could not be associated with a store"
+        )
 
     return tuple(choices)
 
@@ -187,12 +223,7 @@ def compile_random_program(
     snapshot: AuthoringSnapshot,
     policy: RandomPoolPolicy = RandomPoolPolicy(),
 ) -> CompiledRandomProgram:
-    """Materialize NX random/bank choices into reusable helper snapshots.
-
-    A helper can encode several simultaneously-live banks or several load-time
-    random choices at once. Runtime-specific constraints, such as how much
-    visual lead XSanity needs before a Wrap, are handled later by the exporter.
-    """
+    """Materialize random choices while preserving conditional selector banks."""
 
     analysis = analyze_random_structure(snapshot)
     _validate_materializable(snapshot, analysis)
