@@ -11,6 +11,7 @@ from stepnx.exporters.ssc_header_semantics import (
 )
 from stepnx.exporters.ssc_random import SscLabeledChart
 from stepnx.exporters.ssc_random_skin import (
+    RANDOM_SKIN_RUNTIME_LIST,
     add_random_skin_preloads,
     inject_random_skin_attacks,
     random_skin_projection_context,
@@ -60,15 +61,12 @@ def test_direct_254_no_longer_reports_loss_inside_runtime_projection() -> None:
     state = ssc._ExportState()
 
     with random_skin_projection_context(snapshot), header_noteskin_context(snapshot):
-        # Header slot 901 is Random. The note intentionally keeps bank 0 because
-        # the real display behavior is supplied by the chart-level randomskin
-        # modifier in the final renderer.
         assert ssc._render_cell(state, bytes((0x43, 3, 1, 0)), "0", (0, 0, 0, 0)) == "1"
 
     assert not state.diagnostics
 
 
-def test_rsk_preloads_known_random_skin_family_on_every_runtime_step() -> None:
+def test_rsk_preloads_runtime_list_on_every_runtime_step() -> None:
     runtime = SscDivisionRuntime(
         charts=(
             SscLabeledChart(_chart("fire"), "NORMAL"),
@@ -80,23 +78,25 @@ def test_rsk_preloads_known_random_skin_family_on_every_runtime_step() -> None:
     )
 
     result = add_random_skin_preloads(runtime, _snapshot((19, 6)))
-    expected = set(RANDOM_SKIN_CORPUS_POOL) | {"fire", "ice"}
+    expected = set(RANDOM_SKIN_CORPUS_POOL) | set(RANDOM_SKIN_RUNTIME_LIST) | {"fire", "ice"}
     assert all(set(item.chart.noteskin_banks) == expected for item in result.charts)
 
 
-def test_randomskin_attack_is_per_steps_and_inserted_before_notes() -> None:
+def test_randomskin_runtime_tags_are_per_steps_and_corpus_shaped() -> None:
     text = "\n".join(
         (
             "#TITLE:fixture;",
             "#ATTACKS:;",
             "#NOTEDATA:;",
             "#DESCRIPTION:A;",
+            "#DIFFICULTY:Edit;",
             "#SPEEDS:0=1=1=1,;",
             "#NOTES:",
             "00000",
             ";",
             "#NOTEDATA:;",
             "#DESCRIPTION:B;",
+            "#DIFFICULTY:Edit;",
             "#SPEEDS:0=1=1=1,;",
             "#NOTES:",
             "00000",
@@ -106,8 +106,15 @@ def test_randomskin_attack_is_per_steps_and_inserted_before_notes() -> None:
 
     rendered = inject_random_skin_attacks(text, (True, False))
     assert rendered.count("MODS=randomskin") == 1
+    assert "LEN=180.000000" in rendered
+    assert rendered.count("#RANDOMSKINLIST:") == 1
+    assert "#RANDOMSKINLIST:" + ",".join(RANDOM_SKIN_RUNTIME_LIST) + ";" in rendered
+
     first_steps = rendered.split("#NOTEDATA:;", 2)[1]
+    assert first_steps.index("#RANDOMSKINLIST:") < first_steps.index("#DIFFICULTY:")
     assert first_steps.index("MODS=randomskin") < first_steps.index("#NOTES:")
+
     second_steps = rendered.split("#NOTEDATA:;", 2)[2]
     assert "MODS=randomskin" not in second_steps
+    assert "#RANDOMSKINLIST:" not in second_steps
     assert "#ATTACKS:;" in rendered
