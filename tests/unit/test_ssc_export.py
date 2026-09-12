@@ -5,13 +5,18 @@ import unittest
 
 from stepnx.codecs.nx20 import parse_bytes
 from stepnx.exporters.ssc import (
+    UNKNOWN_NOTE_EMPTY,
+    UNKNOWN_NOTE_MINE,
     SscExportError,
     SscSongInfo,
     difficulty_for_name,
+    escape_tag_value,
     export_chart,
     render_extension,
     render_simfile,
 )
+from stepnx.authoring.snapshot import create_authoring_snapshot
+from stepnx.codecs.nx20 import parse_bytes as _parse
 
 from tests.fixture_factory import f32, metadata, u32
 
@@ -24,7 +29,7 @@ def block(
     *,
     start_time: float = 0.0,
     bpm: float = 120.0,
-    scroll: float = 1.0,
+    scroll: float | None = None,
     offset: float = 0.0,
     speed: float = 1.0,
     beat_split: int = 8,
@@ -32,6 +37,8 @@ def block(
     smooth: int = 0,
     divisions: tuple[tuple[int, int], ...] = (),
 ) -> bytes:
+    if scroll is None:
+        scroll = 1.0 / beat_split if beat_split else 0.0
     body = bytearray()
     body += f32(start_time) + f32(bpm) + f32(scroll) + f32(offset) + f32(speed)
     body += bytes((beat_split, beat_measure, smooth, 0))
@@ -161,7 +168,7 @@ class NoteProjectionTest(unittest.TestCase):
             report.chart.notes.splitlines()[:4],
             ["{400}0000", "{403}0000", "{300}0000", "{404}0000"],
         )
-        self.assertTrue(report.lossless)
+        self.assertEqual(report.diagnostics, ())
 
     def test_vanish_low_and_appear_low_reach_the_second_threshold_layers(self) -> None:
         rows = [
@@ -184,14 +191,22 @@ class NoteProjectionTest(unittest.TestCase):
                 "{10q}0000",
             ],
         )
-        self.assertTrue(report.lossless)
+        self.assertEqual(report.diagnostics, ())
 
     def test_unknown_note_byte_is_reported_and_kept_visible(self) -> None:
-        report = export(document([[block([single_row(cell(0x53))])]]))
-        self.assertEqual(first_line(report.chart), "M0000")
+        raw = document([[block([single_row(cell(0x53))])]])
+        with self.assertRaises(SscExportError) as caught:
+            export(raw)
+        self.assertIn("0x53", str(caught.exception))
+
+        empty = export(raw, unknown_notes=UNKNOWN_NOTE_EMPTY)
+        self.assertEqual(first_line(empty.chart), "00000")
         self.assertEqual(
-            [item.code for item in report.diagnostics], ["ssc.unknown-note"]
+            [item.code for item in empty.diagnostics], ["ssc.unknown-note"]
         )
+
+        mine = export(raw, unknown_notes=UNKNOWN_NOTE_MINE)
+        self.assertEqual(first_line(mine.chart), "M0000")
 
     def test_unknown_bank_falls_back_to_the_default_skin(self) -> None:
         report = export(document([[block([single_row(cell(0x43, layer=1, player=31))])]]))
@@ -204,10 +219,11 @@ class NoteProjectionTest(unittest.TestCase):
 class TimingProjectionTest(unittest.TestCase):
     def test_bpm_is_scaled_onto_the_eighth_beat_grid(self) -> None:
         report = export(
-            document([[block([EMPTY_ROW], bpm=110.0, beat_split=16, scroll=1.0)]])
+            document([[block([EMPTY_ROW], bpm=110.0, beat_split=16)]])
         )
         self.assertEqual(report.chart.bpms, "0=220,")
         self.assertEqual(report.chart.scrolls, "0=0.5,")
+        self.assertEqual(report.route_summary, "single route")
 
     def test_matching_beat_split_leaves_bpm_untouched(self) -> None:
         report = export(document([[block([EMPTY_ROW], bpm=128.0, beat_split=8)]]))
@@ -221,6 +237,88 @@ class TimingProjectionTest(unittest.TestCase):
         report = export(document([[block([EMPTY_ROW], scroll=0.0)]]))
         self.assertEqual(report.chart.scrolls, "0=0,")
 
+    def test_scroll_keeps_its_magnitude_and_sign(self) -> None:
+        for scroll, expected in (
+            (0.125, "0=1,"),
+            (0.25, "0=2,"),
+            (0.0625, "0=0.5,"),
+            (-0.125, "0=-1,"),
+        ):
+            with self.subTest(scroll=scroll):
+                report = export(
+                    document([[block([EMPTY_ROW], beat_split=8, scroll=scroll)]])
+                )
+                self.assertEqual(report.chart.scrolls, expected)
+
+    def test_scroll_stays_independent_of_beat_split(self) -> None:
+        halved = export(
+            document([[block([EMPTY_ROW], beat_split=16, scroll=0.03125)]])
+        )
+        self.assertEqual(halved.chart.scrolls, "0=0.25,")
+
+    def test_a_smooth_speed_change_ramps_over_the_div(self) -> None:
+        report = export(
+            document([[block([EMPTY_ROW] * 16, speed=2.0, smooth=0x01)]])
+        )
+        self.assertEqual(report.chart.speeds, "0=2=2=0,")
+
+    def test_skip_and_smooth_are_independent_bits(self) -> None:
+        skip_only = export(document([[block([EMPTY_ROW], speed=2.0, smooth=0x02)]]))
+        self.assertEqual(skip_only.chart.speeds, "0=2=0=0,")
+        self.assertEqual(skip_only.chart.bpms, "0=9999999,")
+
+        both = export(document([[block([EMPTY_ROW] * 8, speed=2.0, smooth=0x03)]]))
+        self.assertEqual(both.chart.speeds, "0=2=1=0,")
+        self.assertEqual(both.chart.bpms, "0=9999999,")
+
+    def test_notes_inside_a_skip_div_are_reported(self) -> None:
+        report = export(
+            document([[block([single_row(cell(0x43))], smooth=0x02)]])
+        )
+        self.assertIn(
+            "ssc.notes-inside-skip", [item.code for item in report.diagnostics]
+        )
+
+    def test_a_warp_uses_exact_milliseconds_per_beat(self) -> None:
+        blocks = [
+            block([EMPTY_ROW] * 8, bpm=130.0),
+            block([EMPTY_ROW] * 8, bpm=130.0, offset=-461.538462),
+        ]
+        report = export(document([[item] for item in blocks]))
+        self.assertEqual(report.chart.warps, "1=1,")
+
+    def test_a_stop_lands_on_the_boundary_row_of_its_split(self) -> None:
+        blocks = [
+            block([EMPTY_ROW] * 12, bpm=120.0, beat_split=8),
+            block([EMPTY_ROW] * 8, bpm=120.0, beat_split=8, offset=250.0),
+            block([EMPTY_ROW] * 8, bpm=120.0, beat_split=8, offset=125.0),
+        ]
+        report = export(document([[item] for item in blocks]))
+        self.assertEqual(report.chart.stops, "1.5=0.25,2.5=0.125,")
+        self.assertEqual(report.chart.bpms, "0=120,1.5=120,2.5=120,")
+
+    def test_a_start_time_that_contradicts_its_rows_is_reported(self) -> None:
+        blocks = [
+            block([EMPTY_ROW] * 8, bpm=120.0, beat_split=8, start_time=0.0),
+            block([EMPTY_ROW] * 8, bpm=120.0, beat_split=8, start_time=9000.0),
+        ]
+        report = export(document([[item] for item in blocks]))
+        drift = [
+            item for item in report.diagnostics if item.code == "ssc.start-time-drift"
+        ]
+        self.assertEqual(len(drift), 1)
+        self.assertIn("8500.0 ms", drift[0].message)
+
+    def test_a_consistent_start_time_is_not_reported(self) -> None:
+        blocks = [
+            block([EMPTY_ROW] * 8, bpm=120.0, beat_split=8, start_time=0.0),
+            block([EMPTY_ROW] * 8, bpm=120.0, beat_split=8, start_time=500.0),
+        ]
+        report = export(document([[item] for item in blocks]))
+        self.assertNotIn(
+            "ssc.start-time-drift", [item.code for item in report.diagnostics]
+        )
+
     def test_speed_segments_are_written_once_per_change(self) -> None:
         blocks = [
             block([EMPTY_ROW], speed=1.0),
@@ -228,7 +326,7 @@ class TimingProjectionTest(unittest.TestCase):
             block([EMPTY_ROW], speed=2.0),
         ]
         report = export(document([[item] for item in blocks]))
-        self.assertEqual(report.chart.speeds, "0=1=1=1,0.25=2=1=1,")
+        self.assertEqual(report.chart.speeds, "0=1=0=0,0.25=2=0=0,")
 
     def test_positions_advance_by_an_eighth_beat_per_row(self) -> None:
         blocks = [
@@ -307,14 +405,43 @@ class DocumentGateTest(unittest.TestCase):
     def test_alternate_branches_are_reported_as_dropped(self) -> None:
         blocks = [block([EMPTY_ROW]), block([EMPTY_ROW])]
         report = export(document([blocks]))
-        self.assertEqual(
+        self.assertIn(
+            "ssc.alternate-branches-dropped",
             [item.code for item in report.diagnostics],
-            ["ssc.alternate-branches-dropped"],
         )
+        self.assertEqual(report.route_summary, "Split 1 branch 1/2")
+
+    def test_an_explicit_snapshot_selects_the_exported_branch(self) -> None:
+        raw = document(
+            [
+                [
+                    block([single_row(cell(0x43))]),
+                    block([single_row(cell(0x57))]),
+                ]
+            ]
+        )
+        parsed = _parse(raw)
+        snapshot = create_authoring_snapshot(parsed)
+        split = snapshot.splits[0]
+        second = snapshot.with_active_block(
+            split.stable_id, split.blocks[1].stable_id
+        )
+        first_report = export_chart(parsed, description="CR.NX")
+        second_report = export_chart(parsed, description="CR.NX", snapshot=second)
+        self.assertEqual(first_line(first_report.chart), "10000")
+        self.assertEqual(first_line(second_report.chart), "20000")
+        self.assertEqual(second_report.route_summary, "Split 1 branch 2/2")
 
     def test_a_single_branch_chart_reports_nothing(self) -> None:
         report = export(document([[block([EMPTY_ROW])]]))
-        self.assertTrue(report.lossless)
+        self.assertEqual(report.diagnostics, ())
+        self.assertEqual(report.route_summary, "single route")
+
+    def test_uncarried_metadata_is_reported(self) -> None:
+        report = export(document([[block([EMPTY_ROW])]], header=((1001, 18), (1004, 1))))
+        self.assertIn(
+            "ssc.metadata-not-carried", [item.code for item in report.diagnostics]
+        )
 
 
 class DifficultyTest(unittest.TestCase):
@@ -381,6 +508,26 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(text.count("#NOTEDATA:;"), 2)
         self.assertIn("#DESCRIPTION:NO.NX;", text)
         self.assertIn("#DESCRIPTION:CR.NX;", text)
+
+    def test_tag_values_cannot_break_out_of_their_tag(self) -> None:
+        song = SscSongInfo(
+            title="Song: The; Remix",
+            artist="A//B",
+            music="a#b.mp3",
+        )
+        chart = export(document([[block([EMPTY_ROW])]]), description="a;b.nx").chart
+        text = render_simfile([chart], song)
+        self.assertIn(r"#TITLE:Song\: The\; Remix;", text)
+        self.assertIn(r"#ARTIST:A\//B;", text)
+        self.assertIn(r"#MUSIC:a\#b.mp3;", text)
+        self.assertIn(r"#DESCRIPTION:a\;b.nx;", text)
+        for line in text.splitlines():
+            if line.startswith("#TITLE:"):
+                self.assertTrue(line.endswith(";"))
+                self.assertEqual(line.count(";"), 2)
+
+    def test_escaping_collapses_newlines(self) -> None:
+        self.assertEqual(escape_tag_value("a\nb\tc"), "a b c")
 
     def test_an_empty_simfile_is_refused(self) -> None:
         with self.assertRaises(SscExportError):

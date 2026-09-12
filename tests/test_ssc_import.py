@@ -90,6 +90,50 @@ class SscImportTests(unittest.TestCase):
         self.assertEqual(int(chart.document.columns.value), 10)
         self.assertTrue(any("ssc.style.projection" in d for d in chart.diagnostics))
 
+    def test_xsanity_frozen_bpm_reconstructs_skip_and_preserves_smooth_bit(self) -> None:
+        data = b"""#VERSION:0.83 xSanity;
+#OFFSET:0;
+#BPMS:0=120,1=9999999,2=120;
+#SPEEDS:0=1=0=0,1=2=1=0;
+#NOTEDATA:;
+#STEPSTYPE:pump-single;
+#DESCRIPTION:Skip;
+#METER:10;
+#NOTES:
+00000
+10000
+00000
+00000
+;
+"""
+        result = parse_ssc(data, source="xsanity-skip.ssc")
+        blocks = [block for split in result.charts[0].document.splits for block in split.blocks]
+        skip = [block for block in blocks if int(block.smooth_speed.value) & 0x02]
+        self.assertEqual(len(skip), 1)
+        self.assertEqual(int(skip[0].smooth_speed.value) & 0x03, 0x03)
+        self.assertLess(float(skip[0].bpm.value), 1000.0)
+        self.assertTrue(any("ssc.notes-inside-skip" in d for d in result.charts[0].diagnostics))
+
+    def test_plain_ssc_9999999_bpm_is_not_assumed_to_be_xsanity_skip(self) -> None:
+        data = b"""#VERSION:0.83;
+#OFFSET:0;
+#BPMS:0=120,1=9999999,2=120;
+#NOTEDATA:;
+#STEPSTYPE:pump-single;
+#DESCRIPTION:Generic;
+#METER:10;
+#NOTES:
+00000
+00000
+00000
+00000
+;
+"""
+        result = parse_ssc(data, source="generic-high-bpm.ssc")
+        blocks = [block for split in result.charts[0].document.splits for block in split.blocks]
+        self.assertFalse(any(int(block.smooth_speed.value) & 0x02 for block in blocks))
+        self.assertTrue(any(float(block.bpm.value) > 1_000_000 for block in blocks))
+
     def test_dispatch_loads_ssc_through_authoring_import_path(self) -> None:
         data = _ssc(
             steps_type="pump-single",

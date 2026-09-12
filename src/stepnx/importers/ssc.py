@@ -425,6 +425,8 @@ def _make_filename(description, stepstype, meter, index, used):
 
 def _build_chart(section, globals_, source, index, used, profile):
     diag = _Diagnostics()
+    version = _field(section, globals_, 'VERSION')
+    xsanity = 'xsanity' in version.casefold()
     stepstype = _field(section, globals_, 'STEPSTYPE').casefold()
     geometry = _STEPSTYPES.get(stepstype)
     notes = _field(section, globals_, 'NOTES')
@@ -532,15 +534,28 @@ def _build_chart(section, globals_, source, index, used, profile):
     blocks = []
     base_time = -offset * 1000.0
     holds = [None] * columns
+    first_real_bpm = next(
+        (float(value) for _beat, value, _extra in bpms if value > 0 and not (xsanity and math.isclose(value, 9_999_999.0, rel_tol=0.0, abs_tol=0.5))),
+        120.0,
+    )
+    last_real_bpm = first_real_bpm
     for mstart, split, token_rows, bounds in measure_data:
         for a, b in zip(bounds, bounds[1:]):
             if b <= a:
                 continue
             beat = mstart + Fraction(a, split)
-            bpm = float(_active(bpms, beat, 120.0))
-            if not math.isfinite(bpm) or bpm <= 0:
-                diag.add('ssc.timing.bpm-invalid', f'non-positive BPM at beat {float(beat):g}; 120 BPM was used')
-                bpm = 120.0
+            source_bpm = float(_active(bpms, beat, 120.0))
+            is_xsanity_skip = xsanity and math.isclose(
+                source_bpm, 9_999_999.0, rel_tol=0.0, abs_tol=0.5
+            )
+            if is_xsanity_skip:
+                bpm = last_real_bpm
+            else:
+                bpm = source_bpm
+                if not math.isfinite(bpm) or bpm <= 0:
+                    diag.add('ssc.timing.bpm-invalid', f'non-positive BPM at beat {float(beat):g}; 120 BPM was used')
+                    bpm = 120.0
+                last_real_bpm = bpm
             scroll = float(_active(scrolls, beat, 1.0))
             speed_event = None
             for e in speeds:
@@ -553,7 +568,9 @@ def _build_chart(section, globals_, source, index, used, profile):
             if speed_event and speed_event[2]:
                 duration = _number(speed_event[2][0], 0.0) or 0.0
                 if duration > 0:
-                    smooth = 1
+                    smooth |= 0x01
+            if is_xsanity_skip:
+                smooth |= 0x02
             offset_ms = 0.0
             sign = 1.0
             stop_here = _events_at(stops, beat)
@@ -594,8 +611,16 @@ def _build_chart(section, globals_, source, index, used, profile):
                         continue
                     cells.append(cell.raw)
                 raw_rows.append(tuple(cells))
+            if is_xsanity_skip and any(any(any(cell) for cell in row) for row in raw_rows):
+                diag.add(
+                    'ssc.notes-inside-skip',
+                    f'XSanity frozen BPM section at beat {float(beat):g} contains notes; all rows are retained in a zero-time NX Skip Div',
+                )
             blocks.append((start_time, bpm, scroll / split, offset_ms, abs(speed) * sign, split, 4, smooth, raw_rows))
-            base_time = start_time + (b - a) * 60000.0 / (bpm * split)
+            if is_xsanity_skip:
+                base_time = start_time
+            else:
+                base_time = start_time + (b - a) * 60000.0 / (bpm * split)
     if any(holds):
         diag.add('ssc.hold.unclosed', 'one or more hold heads have no matching tail; hold bodies were retained through chart end')
     if not blocks:
