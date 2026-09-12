@@ -28,13 +28,14 @@ from stepnx.importers.authoring_import import (
 
 
 _IMPORT_FILTER = (
-    "Pump chart sources (*.stf *.st2 *.not *.not5 *.stx *.see *.ksf *.ucs);;"
+    "Pump chart sources (*.stf *.st2 *.not *.not5 *.stx *.see *.ksf *.ucs *.ssc);;"
     "StepEdit SEE (*.see);;"
     "StepEdit STF/ST2 (*.stf *.st2);;"
     "StepEdit NOT/NOT5 (*.not *.not5);;"
     "StepEdit STX (*.stx);;"
     "KSF (*.ksf);;"
     "UCS (*.ucs);;"
+    "StepMania SSC (*.ssc);;"
     "All files (*)"
 )
 
@@ -317,7 +318,7 @@ def install_phase11_import(window) -> None:
     import_action = QAction("Import charts…", window)
     import_action.setShortcut(QKeySequence("Ctrl+I"))
     import_action.setToolTip(
-        "Import all non-empty STF/ST2, NOT/NOT5, STX, SEE, KSF, or UCS charts into a folder"
+        "Import all non-empty STF/ST2, NOT/NOT5, STX, SEE, KSF, UCS, or SSC charts into a folder"
     )
     import_action.triggered.connect(lambda *_: _choose_import_source(window))
 
