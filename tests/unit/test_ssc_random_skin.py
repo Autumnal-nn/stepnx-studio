@@ -5,16 +5,12 @@ from types import SimpleNamespace
 from stepnx.exporters import ssc
 from stepnx.exporters.ssc import SscChart
 from stepnx.exporters.ssc_division import SscDivisionRuntime
-from stepnx.exporters.ssc_header_semantics import (
-    RANDOM_SKIN_CORPUS_POOL,
-    XSANITY_BANK_CHARS,
-    header_noteskin_context,
-)
+from stepnx.exporters.ssc_header_semantics import RANDOM_SKIN_CORPUS_POOL, header_noteskin_context
 from stepnx.exporters.ssc_random import SscLabeledChart
 from stepnx.exporters.ssc_random_skin import (
     RANDOM_SKIN_RUNTIME_LIST,
     add_random_skin_preloads,
-    inject_random_skin_attacks,
+    inject_random_skin_metadata,
     random_skin_projection_context,
     random_skin_requested,
 )
@@ -50,7 +46,7 @@ def _chart(*banks: str) -> SscChart:
     )
 
 
-def _render_random_note(snapshot, *, player: int, where):
+def _render_random_note(snapshot, *, player: int, where=(0, 0, 0, 0)):
     state = ssc._ExportState()
     with random_skin_projection_context(snapshot), header_noteskin_context(snapshot):
         rendered = ssc._render_cell(state, bytes((0x43, 3, player, 0)), "0", where)
@@ -66,35 +62,26 @@ def test_rsk_header_19_and_direct_254_both_request_random_skin() -> None:
     assert not random_skin_requested(_snapshot((900, 8), (901, 2)))
 
 
-def test_direct_900_254_materializes_explicit_varying_banks() -> None:
-    snapshot = _snapshot((900, 254))
-    rendered = []
-    banks = set()
-    for row in range(24):
-        cell, state = _render_random_note(snapshot, player=0, where=(0, 0, row, 0))
-        rendered.append(cell)
-        assert not state.diagnostics
-        assert cell.startswith("{1") and cell.endswith("0}")
-        banks.add(cell[2])
+def test_direct_900_254_stays_on_bank_zero_and_reports_loader_limitation() -> None:
+    cell, state = _render_random_note(_snapshot((900, 254)), player=0)
 
-    allowed = {XSANITY_BANK_CHARS[name] for name in RANDOM_SKIN_RUNTIME_LIST}
-    assert banks <= allowed
-    assert len(banks) > 1
-
-    # Export is deterministic: the same source location gets the same explicit bank.
-    repeated, _state = _render_random_note(snapshot, player=0, where=(0, 0, 7, 0))
-    assert repeated == rendered[7]
+    assert cell == "1"
+    assert len(state.diagnostics) == 1
+    diagnostic = state.diagnostics[0]
+    assert diagnostic.code == "ssc.random-noteskin-header"
+    assert "enabled before chart selection" in diagnostic.message
+    assert "bank 0" in diagnostic.message
 
 
-def test_header19_materializes_unconfigured_player_slots_including_slot_zero() -> None:
+def test_header19_keeps_unconfigured_slots_random_compatible() -> None:
     snapshot = _snapshot((19, 6))
-    slot0, state0 = _render_random_note(snapshot, player=0, where=(0, 0, 1, 0))
-    slot1, state1 = _render_random_note(snapshot, player=1, where=(0, 0, 2, 0))
+    slot0, state0 = _render_random_note(snapshot, player=0)
+    slot1, state1 = _render_random_note(snapshot, player=1)
 
-    assert slot0.startswith("{1") and slot0.endswith("0}")
-    assert slot1.startswith("{1") and slot1.endswith("0}")
-    assert not state0.diagnostics
-    assert not state1.diagnostics
+    assert slot0 == "1"
+    assert slot1 == "1"
+    assert state0.diagnostics[0].code == "ssc.random-noteskin-header"
+    assert state1.diagnostics[0].code == "ssc.random-noteskin-header"
 
 
 def test_rsk_preloads_runtime_list_on_every_runtime_step() -> None:
@@ -113,7 +100,7 @@ def test_rsk_preloads_runtime_list_on_every_runtime_step() -> None:
     assert all(set(item.chart.noteskin_banks) == expected for item in result.charts)
 
 
-def test_randomskin_runtime_tags_are_retained_as_compatibility_metadata() -> None:
+def test_randomskin_metadata_emits_list_but_no_ineffective_enable_command() -> None:
     text = "\n".join(
         (
             "#VERSION:0.83;",
@@ -138,17 +125,16 @@ def test_randomskin_runtime_tags_are_retained_as_compatibility_metadata() -> Non
         )
     ) + "\n"
 
-    rendered = inject_random_skin_attacks(text, (True, False))
-    assert rendered.count("MODS=randomskin") == 1
-    assert "LEN=180.000000" in rendered
+    rendered = inject_random_skin_metadata(text, (True, False))
+    assert "MODS=randomskin" not in rendered
+    assert "MODS=RSK" not in rendered
+    assert "#QUESTMODS:RSK;" not in rendered
     assert rendered.count("#RANDOMSKINLIST:") == 1
     assert "#RANDOMSKINLIST:" + ",".join(RANDOM_SKIN_RUNTIME_LIST) + ";" in rendered
 
     first_steps = rendered.split("#NOTEDATA:;", 2)[1]
     assert first_steps.index("#RANDOMSKINLIST:") < first_steps.index("#DIFFICULTY:")
-    assert first_steps.index("MODS=randomskin") < first_steps.index("#NOTES:")
 
     second_steps = rendered.split("#NOTEDATA:;", 2)[2]
-    assert "MODS=randomskin" not in second_steps
     assert "#RANDOMSKINLIST:" not in second_steps
     assert "#ATTACKS:;" in rendered
