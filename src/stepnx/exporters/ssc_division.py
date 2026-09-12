@@ -1,15 +1,15 @@
 """Compile non-random NX branch splits into XSanity ``#DIVISION`` routes.
 
 Unlike load-time random helpers, native NX conditional routes are not required to
-share row geometry.  Official Fiesta EX pairs contain branches that represent the
-same wall-clock interval at wildly different BeatSplit values.  The important
+share row geometry. Official Fiesta EX pairs contain branches that represent the
+same wall-clock interval at wildly different BeatSplit values. The important
 example is EF1225: one Split has 1206/9648/19296/38592-row alternatives, and the
 matching Sanity SSC keeps them as four complete STEP streams with independent
 BPMS/SCROLLS.
 
 The exporter therefore never splices an alternate block into the already rendered
-base row grid.  It materializes a complete AuthoringSnapshot per route and projects
-that snapshot through the ordinary NX->SSC writer.  This preserves each branch's
+base row grid. It materializes a complete AuthoringSnapshot per route and projects
+that snapshot through the ordinary NX->SSC writer. This preserves each branch's
 own row count, BeatSplit, BPM and scroll while ``#DIVISION`` changes the active
 Steps by CHARTNAME at runtime.
 
@@ -90,7 +90,7 @@ def _range(value: int) -> tuple[int, int]:
         raise SscExportError(f"unsupported NX Division range {minimum}..{maximum}")
 
     # The exact Fiesta EX pairs encode e.g. 0x75300001 (1..30000) as
-    # 1=999 in Sanity.  999 is the observed open-ended G/W sentinel.
+    # 1=999 in Sanity. 999 is the observed open-ended G/W sentinel.
     minimum = min(minimum, _XSANITY_GW_MAX)
     maximum = min(maximum, _XSANITY_GW_MAX)
     return minimum, maximum
@@ -290,6 +290,21 @@ def _snapshot_for_route(
     return result
 
 
+def _split_bounds(snapshot: AuthoringSnapshot) -> dict[int, tuple[int, int]]:
+    """Compatibility row bounds for lifetime analysis on equal-grid routes."""
+
+    cursor = 0
+    bounds: dict[int, tuple[int, int]] = {}
+    for split_index, split in enumerate(snapshot.splits):
+        if not split.blocks:
+            continue
+        block = snapshot.active_block(split.stable_id)
+        start = cursor
+        cursor += block.row_count
+        bounds[split_index] = (start, cursor)
+    return bounds
+
+
 def _correct_scrolls(snapshot: AuthoringSnapshot) -> str:
     position = 0.0
     entries: list[str] = []
@@ -346,6 +361,33 @@ def _project_snapshot(
         noteskin_banks=tuple(name for name in _BANK_ORDER if name in state.banks),
     )
     return SscLabeledChart(chart, label_type, helper_index)
+
+
+def _route_variant(
+    source: SscLabeledChart,
+    snapshot: AuthoringSnapshot,
+    decisions: tuple[SscDivisionDecision, ...],
+    route_index: int,
+    *,
+    description: str,
+    helper_index: int | None,
+) -> SscLabeledChart:
+    """Compatibility adapter for lifetime-aware late Division optimization.
+
+    Older lifetime code asks for one alternate route by index. Route generation
+    is now full-snapshot projection, so this adapter deliberately avoids the old
+    equal-row splicing behavior while keeping that optimizer's API stable.
+    """
+
+    routed = _snapshot_for_route(snapshot, decisions, route_index)
+    return _project_snapshot(
+        source,
+        routed,
+        description=description,
+        difficulty="Edit",
+        label_type="DIVISION",
+        helper_index=helper_index,
+    )
 
 
 def _table(
@@ -436,7 +478,7 @@ def materialize_division_routes(
             "random Division expansion expected one materialized chart per helper state"
         )
 
-    # Keep the NORMAL startup stream (and its T) untouched.  Every random ticket
+    # Keep the NORMAL startup stream (and its T) untouched. Every random ticket
     # is replicated by the same route count, so T's marginal random distribution
     # is unchanged; #DIVISION subsequently moves only among siblings of that
     # helper state.
