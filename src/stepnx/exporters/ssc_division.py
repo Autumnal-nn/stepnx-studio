@@ -463,10 +463,58 @@ def materialize_division_routes(
     return SscDivisionRuntime(tuple(charts), tuple(names), tuple(tables), route_count)
 
 
+def inject_division_tables(
+    text: str,
+    division_tables: tuple[tuple[str, ...], ...],
+) -> str:
+    """Insert per-Steps Division metadata into an already decorated simfile."""
+
+    if not any(division_tables):
+        return text
+
+    output: list[str] = []
+    chart_index = -1
+    inserted: set[int] = set()
+    for line in text.splitlines():
+        if line == "#NOTEDATA:;":
+            chart_index += 1
+        output.append(line)
+        if not line.startswith("#TICKCOUNTS:"):
+            continue
+        if chart_index < 0 or chart_index >= len(division_tables):
+            raise SscExportError("Division table count does not match rendered chart sections")
+        entries = division_tables[chart_index]
+        if not entries:
+            continue
+        output.append("#DIVISION:" + entries[0])
+        output.extend("," + entry for entry in entries[1:])
+        output.append(";")
+        output.append("#SPECIALDIVISION:;")
+        inserted.add(chart_index)
+
+    if chart_index + 1 != len(division_tables):
+        raise SscExportError(
+            f"rendered simfile contains {chart_index + 1} chart sections but "
+            f"{len(division_tables)} Division table slots were expected"
+        )
+    missing = [
+        index
+        for index, entries in enumerate(division_tables)
+        if entries and index not in inserted
+    ]
+    if missing:
+        raise SscExportError(
+            "rendered simfile is missing #TICKCOUNTS for Division chart section(s): "
+            + ", ".join(str(index + 1) for index in missing)
+        )
+    return "\n".join(output) + "\n"
+
+
 __all__ = [
     "SscDivisionCondition",
     "SscDivisionDecision",
     "SscDivisionRuntime",
     "compile_division_decisions",
+    "inject_division_tables",
     "materialize_division_routes",
 ]
