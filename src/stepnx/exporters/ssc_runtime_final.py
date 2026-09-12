@@ -2,12 +2,17 @@
 
 This layer sits above the validated random/Division lifetime renderer. It adds
 runtime-wide semantics that do not belong to the low-level note writer:
-Random Skin / RSK and Division-200 playfield OFFSET control labels.
+Random Skin / RSK, Division-200 playfield OFFSET controls, and Division-999
+AUTOPLAYON/OFF controls.
 """
 
 from __future__ import annotations
 
 from stepnx.exporters.ssc import SscExportError, SscSongInfo, render_simfile
+from stepnx.exporters.ssc_autoplay_labels import (
+    autoplay_label_tables,
+    merge_control_label_tables,
+)
 from stepnx.exporters.ssc_random import SscRandomExportReport
 from stepnx.exporters.ssc_random_skin import (
     add_random_skin_preloads,
@@ -29,15 +34,22 @@ from stepnx.exporters.ssc_xsanity_lifetime import (
 def _bundle(report: SscRandomExportReport, *, prefix: str):
     snapshot = report.program.base_snapshot
     # Alternate Division routes are projected lazily inside the lifetime pass.
-    # Keep Random Skin's diagnostic suppression active there too so direct 254
-    # is recognized as a preserved runtime modifier, not a lossy projection.
+    # Keep Random Skin materialization active there too so direct 254 and RSK
+    # notes receive explicit runtime-safe banks on every possible route.
     with random_skin_projection_context(snapshot):
         bundle = _lifetime_bundle(report, prefix=prefix)
     return add_random_skin_preloads(bundle, snapshot)
 
 
+def _control_labels(report: SscRandomExportReport, bundle) -> tuple[tuple[str, ...], ...]:
+    return merge_control_label_tables(
+        div200_label_tables(report, bundle),
+        autoplay_label_tables(report, bundle),
+    )
+
+
 def render_compiled_simfile(report: SscRandomExportReport, song: SscSongInfo) -> str:
-    """Render one report with random, Division, style and noteskin semantics."""
+    """Render one report with random, Division, controls and noteskin semantics."""
 
     bundle = _bundle(report, prefix="STEPNX")
     if not bundle.charts:
@@ -51,9 +63,9 @@ def render_compiled_simfile(report: SscRandomExportReport, song: SscSongInfo) ->
         chart_names=bundle.chart_names,
     )
     divided = _inject_division_tables_runtime_order(decorated, bundle.division_tables)
-    styled = inject_steps_labels(divided, div200_label_tables(report, bundle))
+    controlled = inject_steps_labels(divided, _control_labels(report, bundle))
     return inject_random_skin_attacks(
-        styled,
+        controlled,
         random_skin_flags(report.program.base_snapshot, len(bundle.charts)),
     )
 
@@ -88,19 +100,19 @@ def render_compiled_reports(
     )
     divided = _inject_division_tables_runtime_order(decorated, tables)
 
-    style_tables = tuple(
+    control_tables = tuple(
         table
         for report, bundle in zip(frozen, bundles, strict=True)
-        for table in div200_label_tables(report, bundle)
+        for table in _control_labels(report, bundle)
     )
-    styled = inject_steps_labels(divided, style_tables)
+    controlled = inject_steps_labels(divided, control_tables)
 
     flags = tuple(
         flag
         for report, bundle in zip(frozen, bundles, strict=True)
         for flag in random_skin_flags(report.program.base_snapshot, len(bundle.charts))
     )
-    return inject_random_skin_attacks(styled, flags)
+    return inject_random_skin_attacks(controlled, flags)
 
 
 __all__ = ["render_compiled_simfile", "render_compiled_reports"]
