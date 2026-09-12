@@ -30,7 +30,9 @@ from dataclasses import replace
 from typing import Iterable, Iterator
 
 from stepnx.authoring.snapshot import AuthoringSnapshot
+from stepnx.exporters import ssc
 from stepnx.exporters import ssc_header_semantics as header_semantics
+from stepnx.exporters.ssc import SscExportError
 from stepnx.exporters.ssc_division import SscDivisionRuntime
 from stepnx.exporters.ssc_header_semantics import (
     RANDOM_SKIN_CORPUS_POOL,
@@ -39,6 +41,13 @@ from stepnx.exporters.ssc_header_semantics import (
 
 _RANDOM_SKIN_HEADER_ID = 19
 _RANDOM_SKIN_VALUE = 254
+_RANDOM_SKIN_DIAGNOSTIC = "ssc.random-noteskin-header"
+_RANDOM_SKIN_WARNING = (
+    "NX requests Random Skin. The tested XSanity build reproduces it only when "
+    "Display -> Random Skin is enabled before chart selection; ATTACKS/QUESTMODS "
+    "cannot enable that pre-load option from a standalone SSC. The export keeps "
+    "affected notes on bank 0 so the native modifier still works when enabled."
+)
 
 # Exact non-empty RANDOMSKINLIST used by official Fiesta EX content. Runtime
 # testing proved that the list alone does not enable Random Skin; it describes
@@ -79,9 +88,9 @@ def random_skin_projection_context(snapshot: AuthoringSnapshot) -> Iterator[None
     default slot. Header 19 mirrors the native fallback by filling every
     otherwise-unconfigured slot, including slot zero, with sentinel 254.
 
-    ``header_noteskin_context`` then resolves 254 to bank 0 and emits the
-    ``ssc.random-noteskin-header`` diagnostic. No explicit skin bank is chosen
-    here: choosing one would make the pattern fixed across runs.
+    ``header_noteskin_context`` then resolves 254 to bank 0. The diagnostic is
+    rewritten here to document the tested loader limitation rather than claiming
+    an ineffective ATTACKS/QUESTMODS path can enable RSK.
     """
 
     if not random_skin_requested(snapshot):
@@ -89,6 +98,7 @@ def random_skin_projection_context(snapshot: AuthoringSnapshot) -> Iterator[None
         return
 
     previous_slots = header_semantics.player_slot_skin_values
+    previous_note = ssc._ExportState.note
 
     def player_slots(active_snapshot: AuthoringSnapshot) -> dict[int, int]:
         configured = dict(previous_slots(active_snapshot))
@@ -100,10 +110,17 @@ def random_skin_projection_context(snapshot: AuthoringSnapshot) -> Iterator[None
                 configured.setdefault(player, _RANDOM_SKIN_VALUE)
         return configured
 
+    def note(self, code: str, message: str, *args, **kwargs):
+        if code == _RANDOM_SKIN_DIAGNOSTIC:
+            message = _RANDOM_SKIN_WARNING
+        return previous_note(self, code, message, *args, **kwargs)
+
     header_semantics.player_slot_skin_values = player_slots
+    ssc._ExportState.note = note
     try:
         yield
     finally:
+        ssc._ExportState.note = previous_note
         header_semantics.player_slot_skin_values = previous_slots
 
 
@@ -173,14 +190,14 @@ def inject_random_skin_metadata(text: str, flags: Iterable[bool]) -> str:
         output.append(line)
 
     if chart_index + 1 != len(frozen):
-        raise header_semantics.ssc.SscExportError(
+        raise SscExportError(
             f"rendered simfile contains {chart_index + 1} chart sections but "
             f"{len(frozen)} Random Skin flags were expected"
         )
 
     missing = [index for index, flag in enumerate(frozen) if flag and index not in inserted]
     if missing:
-        raise header_semantics.ssc.SscExportError(
+        raise SscExportError(
             "rendered simfile is missing #DIFFICULTY for Random Skin chart section(s): "
             + ", ".join(str(index + 1) for index in missing)
         )
