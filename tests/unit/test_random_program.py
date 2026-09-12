@@ -153,3 +153,21 @@ def test_overlapping_named_banks_materialize_both_followers() -> None:
     for helper in program.helper_snapshots:
         assert _active_index(helper, 2) == _active_index(helper, 0)
         assert _active_index(helper, 3) == _active_index(helper, 1)
+
+
+def test_nonrandom_bank_store_and_followers_are_left_for_division_compiler() -> None:
+    snapshot = _snapshot(
+        [
+            (0x01, 4),
+            (0x41, 4),
+            (0x41, 4),
+        ]
+    )
+
+    program = compile_random_program(snapshot)
+
+    assert program.helper_count == 0
+    assert program.controls == ()
+    assert _active_index(program.base_snapshot, 0) == 0
+    assert _active_index(program.base_snapshot, 1) == 0
+    assert _active_index(program.base_snapshot, 2) == 0
