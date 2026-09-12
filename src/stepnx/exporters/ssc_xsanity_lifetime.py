@@ -6,12 +6,12 @@ active ``#DIVISION`` table, alternate target Steps do not repeat that same event
 and the fallback is implicit: if no conditional entry matches, the engine keeps
 its current Steps.
 
-Runtime A/B testing established another non-obvious XSanity requirement: the
-legacy Division parser is order-sensitive enough to crash when ``#DIVISION`` is
-inserted near the beginning of a Steps section. The working corpus shape places
-``#DIVISION`` only after the chart timing block (BPMS/STOPS/DELAYS/WARPS,
-TICKCOUNTS/SCROLLS/SPEEDS). Keep that placement here rather than treating SSC
-Steps tags as freely reorderable StepMania metadata.
+Runtime A/B testing established two non-obvious XSanity requirements. First,
+the legacy Division parser is order-sensitive enough to crash when ``#DIVISION``
+is inserted near the beginning of a Steps section. Second, a Steps swap can
+crash when the destination introduces a noteskin that was not preloaded before
+the swap. Keep Division after the timing block and give every runtime-switchable
+Steps the union of its bundle's noteskin preloads.
 """
 
 from __future__ import annotations
@@ -25,6 +25,11 @@ from stepnx.exporters.ssc_division import (
 )
 from stepnx.exporters.ssc_division_lifetime import (
     materialize_division_routes_lifetime_aware,
+)
+from stepnx.exporters.ssc_header_semantics import (
+    apply_header_preloads,
+    header_noteskin_context,
+    unify_runtime_preloads,
 )
 from stepnx.exporters.ssc_random import SscRandomExportReport
 from stepnx.exporters.ssc_xsanity import (
@@ -137,18 +142,42 @@ def _inject_division_tables_runtime_order(
     return "\n".join(output) + "\n"
 
 
+def _apply_runtime_noteskins(
+    report: SscRandomExportReport,
+    bundle: SscDivisionRuntime,
+) -> SscDivisionRuntime:
+    """Apply header semantics, then preload the union on every swap target."""
+
+    snapshot = report.program.base_snapshot
+    labeled = tuple(
+        replace(item, chart=apply_header_preloads(item.chart, snapshot))
+        for item in bundle.charts
+    )
+    merged_charts = unify_runtime_preloads(tuple(item.chart for item in labeled))
+    labeled = tuple(
+        replace(item, chart=chart)
+        for item, chart in zip(labeled, merged_charts, strict=True)
+    )
+    return replace(bundle, charts=labeled)
+
+
 def _bundle(
     report: SscRandomExportReport,
     *,
     prefix: str,
 ) -> SscDivisionRuntime:
-    runtime = materialize_segmented_random(report)
-    bundle = materialize_division_routes_lifetime_aware(
-        report,
-        runtime,
-        prefix=prefix,
-    )
-    return _normalize_single_decision_bundle(report, bundle)
+    snapshot = report.program.base_snapshot
+    # Division route materialization re-renders alternate NX blocks, so keep the
+    # same 901..905 slot table active during this second projection pass too.
+    with header_noteskin_context(snapshot):
+        runtime = materialize_segmented_random(report)
+        bundle = materialize_division_routes_lifetime_aware(
+            report,
+            runtime,
+            prefix=prefix,
+        )
+    bundle = _normalize_single_decision_bundle(report, bundle)
+    return _apply_runtime_noteskins(report, bundle)
 
 
 def render_compiled_simfile(report: SscRandomExportReport, song: SscSongInfo) -> str:
