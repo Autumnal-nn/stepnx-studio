@@ -51,19 +51,29 @@ jobs:
             python:3.11-bullseye \
             bash -lc '
               set -euo pipefail
-              apt-get update
-              apt-get install -y --no-install-recommends \
-                libasound2 \
-                libegl1 \
-                libgl1 \
-                libpulse0 \
-                libxcb-cursor0 \
-                libxcb-icccm4 \
-                libxcb-image0 \
-                libxcb-keysyms1 \
-                libxcb-render-util0 \
-                libxcb-xinerama0 \
-                libxkbcommon-x11-0
+              for attempt in 1 2 3; do
+                if apt-get update && apt-get install -y --no-install-recommends \
+                  libasound2 \
+                  libegl1 \
+                  libgl1 \
+                  libpulse0 \
+                  libxcb-cursor0 \
+                  libxcb-icccm4 \
+                  libxcb-image0 \
+                  libxcb-keysyms1 \
+                  libxcb-render-util0 \
+                  libxcb-xinerama0 \
+                  libxkbcommon-x11-0; then
+                  break
+                fi
+                if [ "$attempt" -eq 3 ]; then
+                  echo "apt dependency installation failed after 3 attempts" >&2
+                  exit 1
+                fi
+                echo "apt mirror changed during install; refreshing package lists and retrying ($attempt/3)" >&2
+                rm -rf /var/lib/apt/lists/*
+                sleep 5
+              done
               python -m pip install --upgrade pip
               python -m pip install -e ".[gui]"
               python -m unittest discover -s tests -v

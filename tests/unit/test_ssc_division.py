@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+import unittest
 from types import SimpleNamespace
-
-import pytest
 
 from stepnx.exporters.ssc import SscExportError
 from stepnx.exporters.ssc_division import (
@@ -50,114 +49,124 @@ def _report(blocks, *, raw_select: int = 0) -> SimpleNamespace:
     )
 
 
-def test_ef662_style_g_w_wg_compiles_to_native_division_table() -> None:
-    report = _report(
-        (
-            _block(0),
-            _block(1, (_meta(6, 1, 1),)),
-            _block(2, (_meta(5, 1, 1),)),
-            _block(3, (_meta(5, 1, 1), _meta(6, 1, 1))),
+class SscDivisionTests(unittest.TestCase):
+    def test_ef662_style_g_w_wg_compiles_to_native_division_table(self) -> None:
+        report = _report(
+            (
+                _block(0),
+                _block(1, (_meta(6, 1, 1),)),
+                _block(2, (_meta(5, 1, 1),)),
+                _block(3, (_meta(5, 1, 1), _meta(6, 1, 1))),
+            )
         )
-    )
 
-    decisions = compile_division_decisions(report)
-    assert len(decisions) == 1
-    decision = decisions[0]
-    assert decision.timestamp_seconds == pytest.approx(268.539)
-    assert decision.conditions[0] is None
-    assert (decision.conditions[1].minimum, decision.conditions[1].maximum, decision.conditions[1].operator) == (1, 1, "W")
-    assert (decision.conditions[2].minimum, decision.conditions[2].maximum, decision.conditions[2].operator) == (1, 1, "G")
-    assert (decision.conditions[3].minimum, decision.conditions[3].maximum, decision.conditions[3].operator) == (1, 1, "WG")
-
-    assert _table(decisions, ("STEP1", "STEP2", "STEP3", "STEP4")) == (
-        "0=0=STEP1=268.53900=WG",
-        "1=1=STEP2=268.53900=W",
-        "1=1=STEP3=268.53900=G",
-        "1=1=STEP4=268.53900=WG",
-    )
-
-
-def test_direct_pair_common_prefix_asymmetric_wg_is_supported() -> None:
-    report = _report(
-        (
-            _block(0),
-            _block(1, (_meta(5, 1, 1), _meta(6, 1, 3))),
+        decisions = compile_division_decisions(report)
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertAlmostEqual(decision.timestamp_seconds, 268.539, places=6)
+        self.assertIsNone(decision.conditions[0])
+        self.assertEqual(
+            (decision.conditions[1].minimum, decision.conditions[1].maximum, decision.conditions[1].operator),
+            (1, 1, "W"),
         )
-    )
-
-    decision = compile_division_decisions(report)[0]
-    condition = decision.conditions[1]
-    assert condition is not None
-    assert (condition.minimum, condition.maximum, condition.operator) == (1, 3, "WG")
-
-
-def test_fiesta_ex_open_ended_gw_range_is_clamped_to_999() -> None:
-    report = _report(
-        (
-            _block(0),
-            _block(1, (_meta(6, 1, 30_000),)),
-            _block(2, (_meta(5, 1, 30_000),)),
-            _block(3, (_meta(5, 1, 30_000), _meta(6, 1, 30_000))),
+        self.assertEqual(
+            (decision.conditions[2].minimum, decision.conditions[2].maximum, decision.conditions[2].operator),
+            (1, 1, "G"),
         )
-    )
-
-    decision = compile_division_decisions(report)[0]
-    assert [(c.minimum, c.maximum, c.operator) for c in decision.conditions[1:]] == [
-        (1, 999, "W"),
-        (1, 999, "G"),
-        (1, 999, "WG"),
-    ]
-
-
-def test_ef1225_style_variable_row_geometry_is_not_rejected() -> None:
-    report = _report(
-        (
-            _block(0, row_count=1206, beat_split=4, scroll=0.25),
-            _block(1, (_meta(6, 1, 30_000),), row_count=38592, beat_split=128, scroll=0.0078125),
-            _block(2, (_meta(5, 1, 30_000),), row_count=9648, beat_split=32, scroll=0.03125),
-            _block(3, (_meta(5, 1, 30_000), _meta(6, 1, 30_000)), row_count=19296, beat_split=64, scroll=0.015625),
+        self.assertEqual(
+            (decision.conditions[3].minimum, decision.conditions[3].maximum, decision.conditions[3].operator),
+            (1, 1, "WG"),
         )
-    )
-
-    decision = compile_division_decisions(report)[0]
-    # Variable-geometry routes switch before the Split instead of pretending
-    # that every branch shares the base row grid.
-    assert decision.timestamp_seconds < 268.539
-    assert decision.route_count == 4
-
-
-def test_unknown_division_family_is_rejected_explicitly() -> None:
-    report = _report((_block(0), _block(1, (_meta(0, 1, 1),))))
-
-    with pytest.raises(SscExportError, match="supports only G/W"):
-        compile_division_decisions(report)
-
-
-def test_division_metadata_is_inserted_per_notedata_section() -> None:
-    text = "\n".join(
-        (
-            "#VERSION:0.83;",
-            "#NOTEDATA:;",
-            "#DESCRIPTION:BASE;",
-            "#TICKCOUNTS:0.000000=8;",
-            "#NOTES:",
-            "00000",
-            ";",
-            "#NOTEDATA:;",
-            "#DESCRIPTION:ROUTE;",
-            "#TICKCOUNTS:0.000000=8;",
-            "#NOTES:",
-            "00000",
-            ";",
-            "",
+        self.assertEqual(
+            _table(decisions, ("STEP1", "STEP2", "STEP3", "STEP4")),
+            (
+                "0=0=STEP1=268.53900=WG",
+                "1=1=STEP2=268.53900=W",
+                "1=1=STEP3=268.53900=G",
+                "1=1=STEP4=268.53900=WG",
+            ),
         )
-    )
-    table = (
-        "0=0=STEP1=12.00000=WG",
-        "1=1=STEP2=12.00000=W",
-    )
 
-    rendered = inject_division_tables(text, (table, table))
-    assert rendered.count("#DIVISION:") == 2
-    assert rendered.count("#SPECIALDIVISION:;") == 2
-    assert "#DIVISION:0=0=STEP1=12.00000=WG\n,1=1=STEP2=12.00000=W\n;" in rendered
+    def test_direct_pair_common_prefix_asymmetric_wg_is_supported(self) -> None:
+        report = _report(
+            (
+                _block(0),
+                _block(1, (_meta(5, 1, 1), _meta(6, 1, 3))),
+            )
+        )
+
+        condition = compile_division_decisions(report)[0].conditions[1]
+        self.assertIsNotNone(condition)
+        assert condition is not None
+        self.assertEqual((condition.minimum, condition.maximum, condition.operator), (1, 3, "WG"))
+
+    def test_fiesta_ex_open_ended_gw_range_is_clamped_to_999(self) -> None:
+        report = _report(
+            (
+                _block(0),
+                _block(1, (_meta(6, 1, 30_000),)),
+                _block(2, (_meta(5, 1, 30_000),)),
+                _block(3, (_meta(5, 1, 30_000), _meta(6, 1, 30_000))),
+            )
+        )
+
+        decision = compile_division_decisions(report)[0]
+        self.assertEqual(
+            [(c.minimum, c.maximum, c.operator) for c in decision.conditions[1:]],
+            [(1, 999, "W"), (1, 999, "G"), (1, 999, "WG")],
+        )
+
+    def test_ef1225_style_variable_row_geometry_is_not_rejected(self) -> None:
+        report = _report(
+            (
+                _block(0, row_count=1206, beat_split=4, scroll=0.25),
+                _block(1, (_meta(6, 1, 30_000),), row_count=38592, beat_split=128, scroll=0.0078125),
+                _block(2, (_meta(5, 1, 30_000),), row_count=9648, beat_split=32, scroll=0.03125),
+                _block(3, (_meta(5, 1, 30_000), _meta(6, 1, 30_000)), row_count=19296, beat_split=64, scroll=0.015625),
+            )
+        )
+
+        decision = compile_division_decisions(report)[0]
+        self.assertLess(decision.timestamp_seconds, 268.539)
+        self.assertEqual(decision.route_count, 4)
+
+    def test_unknown_division_family_is_rejected_explicitly(self) -> None:
+        report = _report((_block(0), _block(1, (_meta(0, 1, 1),))))
+        with self.assertRaisesRegex(SscExportError, "supports only G/W"):
+            compile_division_decisions(report)
+
+    def test_division_metadata_is_inserted_per_notedata_section(self) -> None:
+        text = "\n".join(
+            (
+                "#VERSION:0.83;",
+                "#NOTEDATA:;",
+                "#DESCRIPTION:BASE;",
+                "#TICKCOUNTS:0.000000=8;",
+                "#NOTES:",
+                "00000",
+                ";",
+                "#NOTEDATA:;",
+                "#DESCRIPTION:ROUTE;",
+                "#TICKCOUNTS:0.000000=8;",
+                "#NOTES:",
+                "00000",
+                ";",
+                "",
+            )
+        )
+        table = (
+            "0=0=STEP1=12.00000=WG",
+            "1=1=STEP2=12.00000=W",
+        )
+
+        rendered = inject_division_tables(text, (table, table))
+        self.assertEqual(rendered.count("#DIVISION:"), 2)
+        self.assertEqual(rendered.count("#SPECIALDIVISION:;"), 2)
+        self.assertIn(
+            "#DIVISION:0=0=STEP1=12.00000=WG\n,1=1=STEP2=12.00000=W\n;",
+            rendered,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
