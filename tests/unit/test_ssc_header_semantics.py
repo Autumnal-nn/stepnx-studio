@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from stepnx.exporters import ssc
+from stepnx.exporters.ssc import SscChart
 from stepnx.exporters.ssc_header_semantics import (
     NX20_NOTESKIN_NAMES,
     apply_header_preloads,
@@ -22,8 +23,23 @@ def _snapshot(*pairs: tuple[int, int]):
     )
 
 
-def _chart(*banks: str):
-    return SimpleNamespace(noteskin_banks=tuple(banks))
+def _chart(*banks: str) -> SscChart:
+    return SscChart(
+        steps_type="pump-single",
+        difficulty="Edit",
+        description="fixture",
+        meter=1,
+        credit="",
+        offset=0.0,
+        bpms="0=120,",
+        stops="",
+        delays="",
+        warps="",
+        scrolls="0=8,",
+        speeds="",
+        notes="00000\n",
+        noteskin_banks=tuple(banks),
+    )
 
 
 def test_fiesta2_header_skin_enumeration_matches_sanity_aliases() -> None:
