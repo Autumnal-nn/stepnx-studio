@@ -3,11 +3,12 @@
 StepNX Studio is a lossless NX20 chart editor for Pump It Up. It is created and
 maintained by Autumnal ([`Autumnal-nn`](https://github.com/Autumnal-nn)).
 
-Status: **0.9.5 pre-alpha release**. Practical and advanced NX20 authoring,
-legacy import, folder workflows, and the external native gameplay preview are
-implemented. The project's central contract remains unchanged: an unedited NX20
-or NFO document can be rebuilt byte for byte without normalizing metadata,
-flags, padding, note cells, floating-point payloads, or its trailer.
+Status: **0.9.6 pre-alpha release**. Practical and advanced NX20 authoring,
+legacy import, experimental SSC interoperability, folder workflows, and the
+external native gameplay preview are implemented. The project's central contract
+remains unchanged: an unedited NX20 or NFO document can be rebuilt byte for byte
+without normalizing metadata, flags, padding, note cells, floating-point
+payloads, or its trailer.
 
 ## Implemented
 
@@ -24,6 +25,11 @@ flags, padding, note cells, floating-point payloads, or its trailer.
   conversion diagnostics;
 - conservative STF, NOT/NOT5, STX, KSF, UCS, and corpus-verified SEE import
   projections through isolated one-way importer paths;
+- experimental `.ssc` import covering the currently recognized StepMania 5,
+  StepF2/StepP1, and XSanity/Sanity conventions;
+- experimental XSanity SSC folder export with runtime-aware compilation for the
+  proven NX branch, Random, Division, noteskin, item, and timing semantics, plus
+  explicit diagnostics for unsupported or unproven conversion cases;
 - complete supplied NX2 NX10 source-domain validation over 2,125 charts, with
   2,111 same-path official NXA NX20 successor conversions used as semantic
   evidence;
@@ -59,9 +65,12 @@ flags, padding, note cells, floating-point payloads, or its trailer.
 - deterministic row/beat/time projection, atomic Block timing editing, and
   chart-wide Start Time shifting;
 - session audio transport, selection-or-viewport Play seeking, shared canonical
-  PCM for NXA compressed audio and Qt decoding for other profiles, adaptive stereo min/max waveform
-  rendering, per-beat or per-arrow metronome, follow-playhead, and explicit
-  audio offset;
+  PCM for NXA compressed audio and Qt decoding for other profiles, adaptive
+  stereo min/max waveform rendering, per-beat or per-arrow metronome,
+  follow-playhead, and explicit audio offset;
+- explicit compatibility warning when an MP3 stream used by the NXA audio path
+  does not decode at 48,000 Hz, including MP3 payloads extracted from legacy AUD
+  containers;
 - bundled royalty-free noteskin atlases and metronome sound, with local
   noteskin/audio overrides;
 - declarative NXA, Fiesta, and Prime+ engine-family semantics with scope-aware
@@ -96,7 +105,33 @@ flags, padding, note cells, floating-point payloads, or its trailer.
 - deterministic generated command sequences, parser mutation fuzzing, synthetic
   fixtures, and external corpus gates.
 
-## 0.9.5 hardening scope
+## 0.9.6 release scope
+
+The 0.9.6 cycle expands the public surface in two areas: NXA audio/timing
+correctness and experimental SSC interoperability. The released build includes:
+
+1. **complete:** one canonical PCM timeline for NXA compressed-audio playback,
+   waveform analysis, seeking, and metronome scheduling;
+2. **complete:** explicit warning for source MP3 streams that are not 48,000 Hz;
+3. **complete:** experimental `.ssc` import for the currently recognized SM5,
+   StepF2/StepP1, and XSanity/Sanity conventions;
+4. **complete:** experimental XSanity SSC export with loss-aware runtime
+   compilation for the proven Random, Division, noteskin, item, branch, and
+   timing semantics;
+5. **complete:** documented R!SE-under-Prime+ `-24 ms` session calibration rather
+   than a hidden format-wide timing correction;
+6. **complete:** Windows and Linux release gates, packaged artifacts, checksums,
+   and the published `StepNX-Studio-0.9.6` release.
+
+SSC support is deliberately experimental in 0.9.6. Conversion does not claim a
+universal lossless round trip: unsupported or unproven semantics are diagnosed
+or rejected rather than silently flattened. Keep original source charts and
+validate exported content in the target engine.
+
+See [`docs/RELEASE_NOTES_0.9.6.md`](docs/RELEASE_NOTES_0.9.6.md) for the public
+release notes.
+
+## Historical 0.9.5 hardening scope
 
 The 0.9.5 cycle was a polish and hardening pass rather than a format-expansion
 release. Its work is complete:
