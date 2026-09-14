@@ -1,21 +1,25 @@
 # Implementation status
 
-Date: 2026-09-02
+Date: 2026-09-14
 
-Version: 0.9.5 pre-alpha
+Version: 0.9.6 pre-alpha
 
 ## Current state
 
-StepNX Studio has completed the six-item 0.9.5 hardening cycle. The canonical
-NX20/NFO model, practical authoring workflow, legacy import layer, folder
-publication workflow, native gameplay preview, keyboard workflow, three-channel
-Lightmap authoring, editor-field zoom and final editor UX consistency pass are
-implemented and validated.
+StepNX Studio 0.9.6 is published. It retains the completed 0.9.5 hardening
+baseline and adds the NXA audio/timing corrections plus experimental SSC
+interoperability that were developed after that cycle. The canonical NX20/NFO
+model, practical authoring workflow, legacy import layer, folder publication
+workflow, native gameplay preview, keyboard workflow, three-channel Lightmap
+authoring, editor-field zoom, and editor UX hardening remain implemented and
+validated.
 
-All six hardening items are complete. The final item-6 automated gate is green at
-**632 tests** on both Windows and the Linux/glibc-2.31 baseline, and the focused
-Windows GUI smoke passed. The branch is ready for final integration and release
-preparation.
+The 0.9.6 release gate is green on both Windows and the Linux/glibc-2.31
+baseline. The published release contains Windows and Linux artifacts plus
+checksums. SSC support is intentionally marked experimental: the current import
+path recognizes the modeled StepMania 5, StepF2/StepP1, and XSanity/Sanity
+conventions, while export targets XSanity and reports or rejects unsupported and
+unproven semantics rather than claiming a universal lossless round trip.
 
 ## Delivered
 
@@ -151,6 +155,37 @@ Delivered behavior includes:
   - Heart, Bomb, Potion, Velocity, Item and Hidden counters;
 - deterministic local Random Velocity/route RNG where matching the game's hidden
   global RNG state is not a product requirement.
+
+### NXA audio/timing and experimental SSC interoperability
+
+0.9.6 adds the following released behavior on top of the 0.9.5 authoring
+baseline:
+
+- NXA compressed audio uses one canonical PCM timeline for playback, waveform
+  analysis, seeking, and metronome scheduling;
+- canonical PCM playback follows the device-processed sample clock rather than a
+  compressed-file or GUI-timer clock;
+- practical editor zoom levels remain responsive during PCM playback and waveform
+  rendering;
+- MP3 streams used by the NXA audio path warn when the decoded source sample rate
+  is not 48,000 Hz, including MP3 payloads extracted from legacy AUD containers;
+- R!SE charts opened under Prime+ retain the documented `-24 ms` session
+  calibration instead of receiving a hidden format-wide correction;
+- experimental `.ssc` import covers the currently recognized StepMania 5,
+  StepF2/StepP1, and XSanity/Sanity conventions;
+- experimental XSanity SSC folder export compiles the proven NX branch, Random,
+  Division, noteskin, item, and timing semantics through the current runtime
+  model;
+- XSanity export preserves independent Smooth/Skip behavior, real scroll
+  magnitude/sign, Start Time drift diagnostics, precise warps, explicit unknown
+  note policy, and escaped tag values;
+- unsupported or unproven SSC semantics are diagnosed or rejected rather than
+  silently flattened;
+- Windows and Linux release workflows build the published 0.9.6 artifacts and
+  generate `SHA256SUMS.txt`.
+
+See `RELEASE_NOTES_0.9.6.md` and
+`validation/rise-audio-calibration.md`.
 
 ### Performance regression hardening
 
@@ -309,7 +344,7 @@ The largest recorded stress chart is 2,125,684 bytes with 267,264 rows. Rich
 mode used 150.7 MiB and 1.48 s for parse plus rebuild; compact mode used 31.3 MiB
 and 0.244 s with identical serialized bytes, stable IDs and source spans.
 
-## 0.9.5 hardening scope
+## Historical 0.9.5 hardening scope
 
 1. **Complete:** documentation truth pass;
 2. **Complete:** performance regression suite for sparse bulk transforms and
@@ -340,11 +375,17 @@ and 0.244 s with identical serialized bytes, stable IDs and source spans.
 - Lightmap raw byte 3 remains opaque/non-authorable because no supplied official
   row uses a nonzero value;
 - exact asset-driven Animator/material presentation is not claimed pixel-perfect
-  where the required official game assets are unavailable.
+  where the required official game assets are unavailable;
+- SSC interoperability is experimental: import covers the recognized modeled
+  dialects, export currently targets XSanity, and no universal lossless SSC
+  round trip is claimed;
+- R!SE-under-Prime+ timing uses a documented session calibration and is not
+  generalized into a hidden correction for other Prime-family charts.
 
 ## Open research, not implementation blockers
 
-The following are deliberately separated from the 0.9.5 implementation scope:
+The following are deliberately separated from the current implementation and
+release scope:
 
 - NXA Brain Division 43..49 individual semantics;
 - Fiesta 2 Brain Split metadata 11/12;
@@ -371,4 +412,4 @@ appropriate. They are not reasons to invent semantics in the editor.
 - `LM.NX` remains part of folder publication and now has three-channel cell
   authoring; physical cabinet output simulation remains outside the editor gate.
 - independent matched legacy originals may refine importers later, but missing
-  historical source pairs are not a 0.9.5 release blocker.
+  historical source pairs are not a 0.9.6 release blocker.
