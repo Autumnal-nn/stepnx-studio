@@ -314,10 +314,16 @@ def _build_nx10(mode: SEEMode, splits: tuple[tuple[_SEEBlock, ...], ...]) -> byt
                     if not any(selected):
                         row_offsets.append(0)
                         continue
-                    row_offsets.append(len(output))
                     if mode.nx10_type == 2:
+                        # StepEdit's temporary Half Double NX10 backing keeps
+                        # the ten source words, but a real NX10 Half Double row
+                        # pointer addresses the first of the six active cells.
+                        # The NX10 importer correctly no longer adds +4, so the
+                        # bridge must point directly at words[2].
+                        row_offsets.append(len(output) + 4)
                         output += struct.pack("<10H", *words[:10])
                     else:
+                        row_offsets.append(len(output))
                         output += struct.pack(f"<{mode.columns}H", *selected)
                 for row_index, row_offset in enumerate(row_offsets):
                     struct.pack_into("<I", output, row_table + row_index * 4, row_offset)
