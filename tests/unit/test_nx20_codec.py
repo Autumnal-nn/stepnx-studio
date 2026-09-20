@@ -11,6 +11,7 @@ from stepnx.core.scalars import RawU32
 from tests.fixture_factory import (
     SYNTHETIC_UNKNOWN_DIVISION_ID,
     make_implicit_lightmap,
+    make_legacy_p1_omnimix_missing_empty_row,
     make_normal_nx20,
     make_nx10,
     u32,
@@ -84,6 +85,32 @@ class NX20CodecTests(unittest.TestCase):
         self.assertIs(document.envelope.kind, EnvelopeKind.SIZED_TRAILER)
         self.assertEqual(document.envelope.marker_size, len(document.envelope.raw))
         self.assertEqual(serialize(document), source)
+
+    def test_legacy_p1_omnimix_missing_final_empty_row_is_recovered(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row()
+        document = parse_bytes(source, source="legacy-p1.NX")
+
+        rows = document.splits[0].blocks[0].rows
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[-1].raw, b"\x80\x00\x00\x00")
+        self.assertIs(document.envelope.kind, EnvelopeKind.SIZED_TRAILER)
+        self.assertEqual(document.envelope.payload, b"004\x00")
+
+        repaired = source[:-8] + b"\x80\x00\x00\x00" + source[-8:]
+        self.assertEqual(serialize(document), repaired)
+        self.assertEqual(serialize(parse_bytes(repaired)), repaired)
+
+    def test_legacy_p1_recovery_does_not_duplicate_present_final_row(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row(omit_final_empty=False)
+        document = parse_bytes(source)
+        self.assertEqual(len(document.splits[0].blocks[0].rows), 2)
+        self.assertEqual(serialize(document), source)
+
+    def test_legacy_p1_recovery_accepts_observed_numeric_footer_family(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row(footer=b"003\x00")
+        document = parse_bytes(source)
+        self.assertEqual(document.envelope.payload, b"003\x00")
+        self.assertEqual(document.splits[0].blocks[0].rows[-1].raw, b"\x80\x00\x00\x00")
 
     def test_four_byte_empty_trailer_is_valid(self) -> None:
         source = make_normal_nx20(sized_trailer=False) + u32(4)
