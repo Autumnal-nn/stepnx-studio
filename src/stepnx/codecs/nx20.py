@@ -79,16 +79,14 @@ def _sized_trailer_start(data: bytes) -> int | None:
 
 
 def _looks_like_legacy_p1_footer(data: bytes, trailer_start: int | None) -> bool:
-    """Recognize the narrow Omnimix/P1 footer shape seen in recovered legacy charts."""
+    """Recognize a structurally valid sized trailer at the physical end of the file."""
 
     if trailer_start is None:
         return False
     raw = data[trailer_start:]
     return (
-        len(raw) == 8
-        and raw[3] == 0
-        and raw[:3].isdigit()
-        and struct.unpack_from("<I", raw, 4)[0] == 8
+        len(raw) >= 4
+        and struct.unpack_from("<I", raw, len(raw) - 4)[0] == len(raw)
     )
 
 
@@ -176,11 +174,11 @@ def parse_bytes(
         for index in range(int(header_metadata_count.value))
     )
 
-    # Some legacy charts converted for Prime 1/Omnimix declare one final EmptyRow
-    # that is physically absent.  The P1 runtime accepts the omission, but a
-    # strict NX20 reader reaches the 8-byte footer and mistakes its first word
-    # for a note cell.  Recovery is deliberately narrow: the observed footer
-    # shape, metadata 20=0, and an exact final-row/footer boundary must all match.
+    # Some legacy charts converted for Prime 1/Omnimix declare one final row
+    # that is physically absent. The P1 runtime tolerates the omission, but a
+    # strict NX20 reader reaches the sized trailer and mistakes its first word
+    # for row data. Recovery is deliberately narrow: metadata 20=0, a valid
+    # sized trailer, and an exact final-row/trailer boundary must all match.
     legacy_p1_footer_start = _sized_trailer_start(data)
     legacy_p1_recovery_candidate = (
         _looks_like_legacy_p1_footer(data, legacy_p1_footer_start)
@@ -245,20 +243,29 @@ def parse_bytes(
                 for row_index in range(int(row_count.value)):
                     row_start = reader.position
                     row_prefix = f"{block_prefix} row {row_index}"
-                    missing_legacy_final_empty = (
+                    missing_legacy_final_row = (
                         recovery_block
-                        and not effective_lightmap
                         and row_index == int(row_count.value) - 1
                         and reader.position == legacy_p1_footer_start
                     )
-                    if missing_legacy_final_empty:
+                    if missing_legacy_final_row:
                         # Materialize the semantically declared row without
-                        # consuming footer bytes.  Serialization intentionally
-                        # repairs the malformed source by writing this marker.
-                        rich_rows.append(EmptyRow(ids.take(), b"\x80\x00\x00\x00", None))
+                        # consuming footer bytes. Serialization intentionally
+                        # repairs the malformed source rather than reproducing
+                        # the converter's omission.
+                        if effective_lightmap:
+                            rich_rows.append(
+                                LightmapRow(ids.take(), b"\x00\x00\x00\x00", None)
+                            )
+                            repair_bytes = "00 00 00 00"
+                        else:
+                            rich_rows.append(
+                                EmptyRow(ids.take(), b"\x80\x00\x00\x00", None)
+                            )
+                            repair_bytes = "80 00 00 00"
                         recovery_notes.append(
-                            "Recovered a declared final EmptyRow missing from a legacy Prime 1/Omnimix "
-                            "NX20 source; saving materializes the missing 80 00 00 00 row marker."
+                            "Recovered a declared final row missing from a legacy Prime 1/Omnimix "
+                            f"NX20 source; saving materializes {repair_bytes} before the trailer."
                         )
                         continue
 
