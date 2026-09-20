@@ -71,12 +71,13 @@ def _write_not5(path: Path) -> None:
     path.write_bytes(data)
 
 
-def _stx_block(*, lane: int) -> bytes:
+def _stx_block(*, lanes: tuple[int, ...]) -> bytes:
     decoded = bytearray(0x84 + 13)
     struct.pack_into("<fIIi", decoded, 0, 136.0, 4, 2, 1)
     struct.pack_into("<i", decoded, 0x60, 1000)
     struct.pack_into("<I", decoded, 0x80, 1)
-    decoded[0x84 + lane] = 1
+    for lane in lanes:
+        decoded[0x84 + lane] = 1
     return zlib.compress(decoded)
 
 
@@ -85,8 +86,8 @@ def _write_stx(path: Path) -> None:
     header[:4] = b"STF4"
     sections = []
     for mode in range(9):
-        lane = 10 if mode == 8 else (2 if mode == 6 else 0)
-        compressed = _stx_block(lane=lane)
+        lanes = (10,) if mode == 8 else ((0, 1, 2, 7, 8, 9) if mode == 6 else (0,))
+        compressed = _stx_block(lanes=lanes)
         section = bytearray(204)
         struct.pack_into("<I", section, 0, mode)
         struct.pack_into("<I", section, 4, 1)
@@ -148,6 +149,13 @@ class AndamiroLegacyImportTests(unittest.TestCase):
         self.assertEqual([chart.key for chart in result.charts], ["PR", "NO", "HD", "NM", "CR", "FR", "HF", "DV", "LM"])
         hf = result.charts[6].document
         self.assertEqual((hf.start_column.value, hf.columns.value), (2, 6))
+        hf_cells = hf.splits[0].blocks[0].rows[0].cells
+        occupied = [
+            index
+            for index, cell in enumerate(hf_cells)
+            if cell.raw != b"\x00\x00\x00\x00"
+        ]
+        self.assertEqual(occupied, [0, 5])
         self.assertTrue(result.charts[8].document.effective_lightmap)
 
     def test_authoring_gui_candidates_keep_p1_first(self) -> None:
