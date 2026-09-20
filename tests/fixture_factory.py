@@ -60,15 +60,16 @@ def make_normal_nx20(*, sized_trailer: bool = True, opaque_tail: bool = False) -
 
 
 def make_legacy_p1_omnimix_missing_empty_row(
-    *, footer: bytes = b"004\x00", omit_final_empty: bool = True
+    *,
+    footer: bytes = b"004\x00",
+    omit_final_empty: bool = True,
+    lightmap: bool = False,
 ) -> bytes:
     """Synthetic Prime 1/Omnimix legacy-conversion recovery fixture."""
 
-    if len(footer) != 4 or footer[3] != 0 or not footer[:3].isdigit():
-        raise ValueError("legacy footer must be three ASCII digits plus NUL")
-
     data = bytearray(b"NX20")
-    data += u32(0) + u32(5) + u32(0)
+    columns = 3 if lightmap else 5
+    data += u32(0) + u32(columns) + u32(1 if lightmap else 0)
     data += metadata((1000, 1), (1001, 8), (20, 0))
     data += u32(1)
     data += b"\x00\x00\x00\x00"
@@ -78,10 +79,11 @@ def make_legacy_p1_omnimix_missing_empty_row(
     data += bytes((4, 4, 0, 0))
     data += metadata()
     data += u32(2)
-    data += b"\x80\x00\x00\x00"
+    data += b"\x00\x00\x00\x00" if lightmap else b"\x80\x00\x00\x00"
     if not omit_final_empty:
-        data += b"\x80\x00\x00\x00"
-    data += footer + u32(8)
+        data += b"\x00\x00\x00\x00" if lightmap else b"\x80\x00\x00\x00"
+    data += footer
+    data += u32(len(footer) + 4)
     return bytes(data)
 
 
