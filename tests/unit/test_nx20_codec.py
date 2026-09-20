@@ -8,6 +8,7 @@ from stepnx.codecs.nx20 import parse_bytes, serialize
 from stepnx.core.errors import ModelInvariantError, ParseError, UnsupportedFormatError
 from stepnx.core.model import EnvelopeKind, LightmapRow, MetadataEntry, NoteRow, PackedNoteRow
 from stepnx.core.scalars import RawU32
+from stepnx.core.validation import validate
 from tests.fixture_factory import (
     SYNTHETIC_UNKNOWN_DIVISION_ID,
     make_implicit_lightmap,
@@ -95,6 +96,11 @@ class NX20CodecTests(unittest.TestCase):
         self.assertEqual(rows[-1].raw, b"\x80\x00\x00\x00")
         self.assertIs(document.envelope.kind, EnvelopeKind.SIZED_TRAILER)
         self.assertEqual(document.envelope.payload, b"004\x00")
+        self.assertEqual(len(document.recovery_notes), 1)
+        self.assertIn("missing", document.recovery_notes[0])
+        self.assertTrue(
+            any(issue.code == "parse.recovered-source" for issue in validate(document).warnings)
+        )
 
         repaired = source[:-8] + b"\x80\x00\x00\x00" + source[-8:]
         self.assertEqual(serialize(document), repaired)
