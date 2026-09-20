@@ -67,6 +67,29 @@ def _classify_envelope(data: bytes, body_end: int) -> Envelope:
     return Envelope(EnvelopeKind.OPAQUE_TAIL, raw, span)
 
 
+def _sized_trailer_start(data: bytes) -> int | None:
+    """Return a plausible sized-trailer start without changing normal parsing."""
+
+    if len(data) < 4:
+        return None
+    size = struct.unpack_from("<I", data, len(data) - 4)[0]
+    if size < 4 or size > len(data):
+        return None
+    return len(data) - size
+
+
+def _looks_like_legacy_p1_footer(data: bytes, trailer_start: int | None) -> bool:
+    """Recognize a structurally valid sized trailer at the physical end of the file."""
+
+    if trailer_start is None:
+        return False
+    raw = data[trailer_start:]
+    return (
+        len(raw) >= 4
+        and struct.unpack_from("<I", raw, len(raw) - 4)[0] == len(raw)
+    )
+
+
 def _compact_rows(
     reader: BinaryReader,
     ids: _IdAllocator,
@@ -151,6 +174,22 @@ def parse_bytes(
         for index in range(int(header_metadata_count.value))
     )
 
+    # Some legacy charts converted for Prime 1/Omnimix declare one final row
+    # that is physically absent. The P1 runtime tolerates the omission, but a
+    # strict NX20 reader reaches the sized trailer and mistakes its first word
+    # for row data. Recovery is deliberately narrow: metadata 20=0, a valid
+    # sized trailer, and an exact final-row/trailer boundary must all match.
+    legacy_p1_footer_start = _sized_trailer_start(data)
+    legacy_p1_recovery_candidate = (
+        _looks_like_legacy_p1_footer(data, legacy_p1_footer_start)
+        and any(
+            int(entry.meta_id.value) == 20 and int(entry.value.value) == 0
+            for entry in header_metadata
+        )
+    )
+
+    recovery_notes: list[str] = []
+
     split_count = reader.count("split count", active_limits, 12)
     splits: list[Split] = []
     for split_index in range(int(split_count.value)):
@@ -185,7 +224,12 @@ def parse_bytes(
                 for index in range(int(division_count.value))
             )
             row_count = reader.count(f"{block_prefix} row count", active_limits, 4)
-            if row_storage == "compact":
+            is_final_block = (
+                split_index == int(split_count.value) - 1
+                and block_index == int(block_count.value) - 1
+            )
+            recovery_block = legacy_p1_recovery_candidate and is_final_block
+            if row_storage == "compact" and not recovery_block:
                 rows = _compact_rows(
                     reader,
                     ids,
@@ -199,6 +243,32 @@ def parse_bytes(
                 for row_index in range(int(row_count.value)):
                     row_start = reader.position
                     row_prefix = f"{block_prefix} row {row_index}"
+                    missing_legacy_final_row = (
+                        recovery_block
+                        and row_index == int(row_count.value) - 1
+                        and reader.position == legacy_p1_footer_start
+                    )
+                    if missing_legacy_final_row:
+                        # Materialize the semantically declared row without
+                        # consuming footer bytes. Serialization intentionally
+                        # repairs the malformed source rather than reproducing
+                        # the converter's omission.
+                        if effective_lightmap:
+                            rich_rows.append(
+                                LightmapRow(ids.take(), b"\x00\x00\x00\x00", None)
+                            )
+                            repair_bytes = "00 00 00 00"
+                        else:
+                            rich_rows.append(
+                                EmptyRow(ids.take(), b"\x80\x00\x00\x00", None)
+                            )
+                            repair_bytes = "80 00 00 00"
+                        recovery_notes.append(
+                            "Recovered a declared final row missing from a legacy Prime 1/Omnimix "
+                            f"NX20 source; saving materializes {repair_bytes} before the trailer."
+                        )
+                        continue
+
                     first_raw, first_span = reader.read_exact(4, f"{row_prefix} first cell or marker")
                     if first_raw[0] & 0x80:
                         rich_rows.append(EmptyRow(ids.take(), first_raw, first_span))
@@ -266,6 +336,7 @@ def parse_bytes(
         role=NX20Document.infer_role(document_source),
         source_name=document_source,
         source_bytes=data,
+        recovery_notes=tuple(recovery_notes),
         next_stable_id=ids.next_value,
     )
 

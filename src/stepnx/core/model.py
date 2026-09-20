@@ -412,6 +412,9 @@ class NX20Document:
     role: DeploymentRole = DeploymentRole.CHART
     source_name: str | None = None
     source_bytes: bytes = field(default=b"", repr=False, compare=False)
+    # Parser recovery notes describe tolerated malformed source structures. They
+    # are editor diagnostics only and are never serialized into NX20.
+    recovery_notes: tuple[str, ...] = field(default=(), repr=False, compare=False)
     # Editor-only allocation watermark; it is never serialized into NX20.
     next_stable_id: StableId = field(default=1, repr=False)
 

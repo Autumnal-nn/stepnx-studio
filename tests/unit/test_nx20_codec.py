@@ -8,9 +8,11 @@ from stepnx.codecs.nx20 import parse_bytes, serialize
 from stepnx.core.errors import ModelInvariantError, ParseError, UnsupportedFormatError
 from stepnx.core.model import EnvelopeKind, LightmapRow, MetadataEntry, NoteRow, PackedNoteRow
 from stepnx.core.scalars import RawU32
+from stepnx.core.validation import validate
 from tests.fixture_factory import (
     SYNTHETIC_UNKNOWN_DIVISION_ID,
     make_implicit_lightmap,
+    make_legacy_p1_omnimix_missing_empty_row,
     make_normal_nx20,
     make_nx10,
     u32,
@@ -84,6 +86,54 @@ class NX20CodecTests(unittest.TestCase):
         self.assertIs(document.envelope.kind, EnvelopeKind.SIZED_TRAILER)
         self.assertEqual(document.envelope.marker_size, len(document.envelope.raw))
         self.assertEqual(serialize(document), source)
+
+    def test_legacy_p1_omnimix_missing_final_empty_row_is_recovered(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row()
+        document = parse_bytes(source, source="legacy-p1.NX")
+
+        rows = document.splits[0].blocks[0].rows
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[-1].raw, b"\x80\x00\x00\x00")
+        self.assertIs(document.envelope.kind, EnvelopeKind.SIZED_TRAILER)
+        self.assertEqual(document.envelope.payload, b"004\x00")
+        self.assertEqual(len(document.recovery_notes), 1)
+        self.assertIn("missing", document.recovery_notes[0])
+        self.assertTrue(
+            any(issue.code == "parse.recovered-source" for issue in validate(document).warnings)
+        )
+
+        repaired = source[:-8] + b"\x80\x00\x00\x00" + source[-8:]
+        self.assertEqual(serialize(document), repaired)
+        self.assertEqual(serialize(parse_bytes(repaired)), repaired)
+
+    def test_legacy_p1_recovery_does_not_duplicate_present_final_row(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row(omit_final_empty=False)
+        document = parse_bytes(source)
+        self.assertEqual(len(document.splits[0].blocks[0].rows), 2)
+        self.assertEqual(serialize(document), source)
+
+    def test_legacy_p1_recovery_accepts_observed_numeric_footer_family(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row(footer=b"003\x00")
+        document = parse_bytes(source)
+        self.assertEqual(document.envelope.payload, b"003\x00")
+        self.assertEqual(document.splits[0].blocks[0].rows[-1].raw, b"\x80\x00\x00\x00")
+
+    def test_legacy_p1_recovery_accepts_empty_sized_trailer(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row(footer=b"")
+        document = parse_bytes(source)
+        self.assertEqual(document.envelope.payload, b"")
+        self.assertEqual(document.splits[0].blocks[0].rows[-1].raw, b"\x80\x00\x00\x00")
+        repaired = source[:-4] + b"\x80\x00\x00\x00" + source[-4:]
+        self.assertEqual(serialize(document), repaired)
+
+    def test_legacy_p1_lightmap_recovery_materializes_zero_row(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row(footer=b"", lightmap=True)
+        document = parse_bytes(source, source="LM.NX")
+        row = document.splits[0].blocks[0].rows[-1]
+        self.assertIsInstance(row, LightmapRow)
+        self.assertEqual(row.raw_channels, b"\x00\x00\x00\x00")
+        repaired = source[:-4] + b"\x00\x00\x00\x00" + source[-4:]
+        self.assertEqual(serialize(document), repaired)
 
     def test_four_byte_empty_trailer_is_valid(self) -> None:
         source = make_normal_nx20(sized_trailer=False) + u32(4)
