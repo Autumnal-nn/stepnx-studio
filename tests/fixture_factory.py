@@ -59,6 +59,32 @@ def make_normal_nx20(*, sized_trailer: bool = True, opaque_tail: bool = False) -
     return bytes(data)
 
 
+def make_legacy_p1_omnimix_missing_empty_row(
+    *, footer: bytes = b"004\x00", omit_final_empty: bool = True
+) -> bytes:
+    """Synthetic Prime 1/Omnimix legacy-conversion recovery fixture."""
+
+    if len(footer) != 4 or footer[3] != 0 or not footer[:3].isdigit():
+        raise ValueError("legacy footer must be three ASCII digits plus NUL")
+
+    data = bytearray(b"NX20")
+    data += u32(0) + u32(5) + u32(0)
+    data += metadata((1000, 1), (1001, 8), (20, 0))
+    data += u32(1)
+    data += b"\x00\x00\x00\x00"
+    data += metadata()
+    data += u32(1)
+    data += f32(0.0) + f32(120.0) + f32(0.5) + f32(0.0) + f32(1.0)
+    data += bytes((4, 4, 0, 0))
+    data += metadata()
+    data += u32(2)
+    data += b"\x80\x00\x00\x00"
+    if not omit_final_empty:
+        data += b"\x80\x00\x00\x00"
+    data += footer + u32(8)
+    return bytes(data)
+
+
 def make_implicit_lightmap() -> bytes:
     data = bytearray(b"NX20")
     data += u32(0) + u32(3) + u32(0)
