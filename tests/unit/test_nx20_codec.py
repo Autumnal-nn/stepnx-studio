@@ -118,6 +118,23 @@ class NX20CodecTests(unittest.TestCase):
         self.assertEqual(document.envelope.payload, b"003\x00")
         self.assertEqual(document.splits[0].blocks[0].rows[-1].raw, b"\x80\x00\x00\x00")
 
+    def test_legacy_p1_recovery_accepts_empty_sized_trailer(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row(footer=b"")
+        document = parse_bytes(source)
+        self.assertEqual(document.envelope.payload, b"")
+        self.assertEqual(document.splits[0].blocks[0].rows[-1].raw, b"\x80\x00\x00\x00")
+        repaired = source[:-4] + b"\x80\x00\x00\x00" + source[-4:]
+        self.assertEqual(serialize(document), repaired)
+
+    def test_legacy_p1_lightmap_recovery_materializes_zero_row(self) -> None:
+        source = make_legacy_p1_omnimix_missing_empty_row(footer=b"", lightmap=True)
+        document = parse_bytes(source, source="LM.NX")
+        row = document.splits[0].blocks[0].rows[-1]
+        self.assertIsInstance(row, LightmapRow)
+        self.assertEqual(row.raw_channels, b"\x00\x00\x00\x00")
+        repaired = source[:-4] + b"\x00\x00\x00\x00" + source[-4:]
+        self.assertEqual(serialize(document), repaired)
+
     def test_four_byte_empty_trailer_is_valid(self) -> None:
         source = make_normal_nx20(sized_trailer=False) + u32(4)
         document = parse_bytes(source)
