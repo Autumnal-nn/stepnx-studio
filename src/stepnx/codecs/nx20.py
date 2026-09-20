@@ -190,6 +190,8 @@ def parse_bytes(
         )
     )
 
+    recovery_notes: list[str] = []
+
     split_count = reader.count("split count", active_limits, 12)
     splits: list[Split] = []
     for split_index in range(int(split_count.value)):
@@ -254,6 +256,10 @@ def parse_bytes(
                         # consuming footer bytes.  Serialization intentionally
                         # repairs the malformed source by writing this marker.
                         rich_rows.append(EmptyRow(ids.take(), b"\x80\x00\x00\x00", None))
+                        recovery_notes.append(
+                            "Recovered a declared final EmptyRow missing from a legacy Prime 1/Omnimix "
+                            "NX20 source; saving materializes the missing 80 00 00 00 row marker."
+                        )
                         continue
 
                     first_raw, first_span = reader.read_exact(4, f"{row_prefix} first cell or marker")
@@ -323,6 +329,7 @@ def parse_bytes(
         role=NX20Document.infer_role(document_source),
         source_name=document_source,
         source_bytes=data,
+        recovery_notes=tuple(recovery_notes),
         next_stable_id=ids.next_value,
     )
 
