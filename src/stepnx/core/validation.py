@@ -92,6 +92,9 @@ def validate(document: NX20Document) -> ValidationReport:
             f"column count {columns} is outside the structural range 1..64",
         )
 
+    for index, note in enumerate(document.recovery_notes):
+        issue(Severity.WARNING, "parse.recovered-source", f"recovery[{index}]", note)
+
     count(document.header_metadata_count, len(document.header_metadata), "header_metadata_count")
     for index, entry in enumerate(document.header_metadata):
         stable(entry.stable_id, f"header_metadata[{index}]")
