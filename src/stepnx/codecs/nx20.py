@@ -67,6 +67,31 @@ def _classify_envelope(data: bytes, body_end: int) -> Envelope:
     return Envelope(EnvelopeKind.OPAQUE_TAIL, raw, span)
 
 
+def _sized_trailer_start(data: bytes) -> int | None:
+    """Return a plausible sized-trailer start without changing normal parsing."""
+
+    if len(data) < 4:
+        return None
+    size = struct.unpack_from("<I", data, len(data) - 4)[0]
+    if size < 4 or size > len(data):
+        return None
+    return len(data) - size
+
+
+def _looks_like_legacy_p1_footer(data: bytes, trailer_start: int | None) -> bool:
+    """Recognize the narrow Omnimix/P1 footer shape seen in recovered legacy charts."""
+
+    if trailer_start is None:
+        return False
+    raw = data[trailer_start:]
+    return (
+        len(raw) == 8
+        and raw[3] == 0
+        and raw[:3].isdigit()
+        and struct.unpack_from("<I", raw, 4)[0] == 8
+    )
+
+
 def _compact_rows(
     reader: BinaryReader,
     ids: _IdAllocator,
@@ -151,6 +176,20 @@ def parse_bytes(
         for index in range(int(header_metadata_count.value))
     )
 
+    # Some legacy charts converted for Prime 1/Omnimix declare one final EmptyRow
+    # that is physically absent.  The P1 runtime accepts the omission, but a
+    # strict NX20 reader reaches the 8-byte footer and mistakes its first word
+    # for a note cell.  Recovery is deliberately narrow: the observed footer
+    # shape, metadata 20=0, and an exact final-row/footer boundary must all match.
+    legacy_p1_footer_start = _sized_trailer_start(data)
+    legacy_p1_recovery_candidate = (
+        _looks_like_legacy_p1_footer(data, legacy_p1_footer_start)
+        and any(
+            int(entry.meta_id.value) == 20 and int(entry.value.value) == 0
+            for entry in header_metadata
+        )
+    )
+
     split_count = reader.count("split count", active_limits, 12)
     splits: list[Split] = []
     for split_index in range(int(split_count.value)):
@@ -185,7 +224,12 @@ def parse_bytes(
                 for index in range(int(division_count.value))
             )
             row_count = reader.count(f"{block_prefix} row count", active_limits, 4)
-            if row_storage == "compact":
+            is_final_block = (
+                split_index == int(split_count.value) - 1
+                and block_index == int(block_count.value) - 1
+            )
+            recovery_block = legacy_p1_recovery_candidate and is_final_block
+            if row_storage == "compact" and not recovery_block:
                 rows = _compact_rows(
                     reader,
                     ids,
@@ -199,6 +243,19 @@ def parse_bytes(
                 for row_index in range(int(row_count.value)):
                     row_start = reader.position
                     row_prefix = f"{block_prefix} row {row_index}"
+                    missing_legacy_final_empty = (
+                        recovery_block
+                        and not effective_lightmap
+                        and row_index == int(row_count.value) - 1
+                        and reader.position == legacy_p1_footer_start
+                    )
+                    if missing_legacy_final_empty:
+                        # Materialize the semantically declared row without
+                        # consuming footer bytes.  Serialization intentionally
+                        # repairs the malformed source by writing this marker.
+                        rich_rows.append(EmptyRow(ids.take(), b"\x80\x00\x00\x00", None))
+                        continue
+
                     first_raw, first_span = reader.read_exact(4, f"{row_prefix} first cell or marker")
                     if first_raw[0] & 0x80:
                         rich_rows.append(EmptyRow(ids.take(), first_raw, first_span))
