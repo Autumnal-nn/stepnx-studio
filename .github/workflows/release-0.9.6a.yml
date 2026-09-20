@@ -147,7 +147,7 @@ jobs:
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-assets/* --clobber
-            gh release edit "$RELEASE_TAG" --title "StepNX Studio 0.9.6" --notes-file docs/RELEASE_NOTES_0.9.6.md
+            gh release edit "$RELEASE_TAG" --title "StepNX Studio 0.9.6a" --notes-file docs/RELEASE_NOTES_0.9.6a.md
           else
-            gh release create "$RELEASE_TAG" release-assets/* --target "$GITHUB_SHA" --title "StepNX Studio 0.9.6" --notes-file docs/RELEASE_NOTES_0.9.6.md
+            gh release create "$RELEASE_TAG" release-assets/* --target "$GITHUB_SHA" --title "StepNX Studio 0.9.6a" --notes-file docs/RELEASE_NOTES_0.9.6a.md
           fi
