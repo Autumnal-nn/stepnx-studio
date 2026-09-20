@@ -100,8 +100,13 @@ class SEEImporterTests(unittest.TestCase):
 
     def test_half_double_preserves_native_six_lane_projection(self) -> None:
         row = bytearray(13)
+        # False notes outside the Half Double field must never leak into the
+        # six active lanes. The real notes are source lanes 2 and 7, which must
+        # become HF lanes 0 and 5 respectively.
+        for lane in (0, 1, 8, 9):
+            row[lane] = 1
         row[2] = 1
-        row[7] = 10
+        row[7] = 1
         result = import_bytes(
             _make_see(section_index=6, rows=(bytes(row),)), source="half.SEE"
         )
@@ -109,7 +114,11 @@ class SEEImporterTests(unittest.TestCase):
         self.assertEqual(chart.mode.key, "HF")
         self.assertEqual(chart.document.start_column.value, 2)
         self.assertEqual(chart.document.columns.value, 6)
-        self.assertEqual(len(chart.document.splits[0].blocks[0].rows), 1)
+        rows = chart.document.splits[0].blocks[0].rows
+        self.assertEqual(len(rows), 1)
+        cells = rows[0].cells
+        occupied = [index for index, cell in enumerate(cells) if cell.raw != b"\x00\x00\x00\x00"]
+        self.assertEqual(occupied, [0, 5])
 
     def test_lightmap_uses_see_lanes_10_through_12(self) -> None:
         row = bytearray(13)
