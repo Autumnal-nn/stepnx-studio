@@ -152,17 +152,10 @@ def install_stepedit_experimental(window) -> None:
     if getattr(window, "_stepedit_experimental_installed", False):
         return
     window._stepedit_experimental_installed = True
-    preview = next(
-        (
-            action.menu()
-            for action in window.menuBar().actions()
-            if action.menu() is not None
-            and action.text().replace("&", "").strip().lower() == "preview"
-        ),
-        None,
-    )
-    menu = preview or window.menuBar().addMenu("Experimental")
-    menu.addSeparator()
+    # Keep a Python reference; short-lived QMenu wrappers can outlive their
+    # underlying C++ menu on some PySide6/offscreen configurations.
+    menu = window.menuBar().addMenu("&Experimental")
+    window.stepedit_experimental_menu = menu
     action = menu.addAction("STEPEdit-inspired editor (experimental)…")
     window.stepedit_experimental_action = action
 
