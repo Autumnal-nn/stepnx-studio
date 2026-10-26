@@ -7,7 +7,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offscreen")
 
 try:
-    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
     from PySide6.QtTest import QTest
     from PySide6.QtGui import QImage, QPainter, QWheelEvent
     from PySide6.QtWidgets import QApplication, QMainWindow, QSpinBox, QTabWidget, QWidget
@@ -22,9 +22,11 @@ try:
     )
     from stepnx.gui.stepedit_experimental_viewport import StepEditExperimentalViewport
     from stepnx.gui.stepedit_visual_style import (
-        TILE_PIXELS, NOTE_BACKGROUND, INDICATOR_BACKGROUND,
+        ATLAS_TILE_PIXELS, EDITOR_ZOOM_PRESETS,
+        NOTE_BACKGROUND, INDICATOR_BACKGROUND, SELECTION_BACKGROUND,
         VERTICAL_GRID, MINOR_GRID, MAJOR_GRID, LANE_BOUNDARY,
-        StepEditTileArtist, note_rect, wheel_notch_pixels,
+        StepEditAtlasArtist, split_background, scaled_editor_geometry,
+        wheel_notch_pixels,
     )
 except ImportError as exc:
     QApplication = None
@@ -237,33 +239,87 @@ class ExperimentalQtViewportTests(unittest.TestCase):
             ))),
         )
 
-    def test_tap_sprite_is_top_aligned_and_fixed_at_every_zoom(self) -> None:
-        doc = self.stack.execute(
-            SetNoteAt(self.block.rows[2].stable_id, 1, _RAW)
-        )
+    def test_existing_atlas_tap_is_top_aligned_and_scales_only_with_field_zoom(self) -> None:
+        self.stack.execute(SetNoteAt(self.block.rows[2].stable_id, 1, _RAW))
         self.controller.sync_external_change()
         self.widget._rebuild_layout()
-        for zoom in (1, 4, 16):
-            with self.subTest(zoom=zoom):
-                self.widget.set_zoom(zoom)
+        for percent in EDITOR_ZOOM_PRESETS:
+            with self.subTest(percent=percent):
+                self.widget.set_zoom(percent)
                 seg = self.widget.layout_model.segment(self.split.stable_id)
-                canvas = QImage(300, 300, QImage.Format.Format_ARGB32)
+                canvas = QImage(1200, 1200, QImage.Format.Format_ARGB32)
                 canvas.fill(0)
                 painter = QPainter(canvas)
                 try:
-                    with patch.object(StepEditTileArtist, "draw", wraps=StepEditTileArtist.draw) as spy:
+                    with patch.object(self.widget._artist, "draw",
+                                      wraps=self.widget._artist.draw) as spy:
                         self.widget._draw_notes(painter, seg, 2, 3, scroll=0)
                     self.assertEqual(spy.call_count, 1)
-                    args = spy.call_args.args
-                    left, top = args[1], args[2]
-                    rect = note_rect(left, top)
-                    self.assertEqual(rect.width(), TILE_PIXELS)
-                    self.assertEqual(rect.height(), TILE_PIXELS)
-                    self.assertAlmostEqual(top, seg.y_for_row(2))
-                    self.assertAlmostEqual(left, self.widget.layout_model.x_for_lane(1, center=False))
-                    self.assertNotAlmostEqual(top, seg.y_for_row(2, center=True))
+                    dest = spy.call_args.args[1]
+                    self.assertAlmostEqual(dest.x(), self.widget.layout_model.x_for_lane(1, center=False))
+                    self.assertAlmostEqual(dest.y(), seg.y_for_row(2))
+                    self.assertEqual(dest.width(), ATLAS_TILE_PIXELS * percent / 100)
+                    self.assertEqual(dest.height(), ATLAS_TILE_PIXELS * percent / 100)
+                    self.assertNotAlmostEqual(dest.y(), seg.y_for_row(2, center=True))
+                    self.assertLessEqual(seg.row_pitch, dest.height())
                 finally:
                     painter.end()
+
+    def test_default_renderer_uses_bundled_existing_noteskin(self) -> None:
+        artist = self.widget._artist
+        self.assertIsInstance(artist, StepEditAtlasArtist)
+        self.assertIsNotNone(artist.pack.bank(0))
+        atlas = artist.pack.bank(0).animation[0]
+        self.assertEqual(atlas.tile(1, 1)[2:], (96, 96))
+        canvas = QImage(240, 240, QImage.Format.Format_ARGB32)
+        canvas.fill(0)
+        painter = QPainter(canvas)
+        try:
+            with patch.object(artist, "_tile", wraps=artist._tile) as spy:
+                drawn = artist.draw(
+                    painter, QRectF(0, 0, 96, 96), 1, _RAW, 48,
+                )
+            self.assertTrue(drawn)
+            self.assertEqual(spy.call_args.args[1:3], (1, 1))
+        finally:
+            painter.end()
+
+    def test_split_background_cycles_exactly_four_colors(self) -> None:
+        expected = ("#ffffeb", "#ebffff", "#ebffeb", "#ffebff")
+        self.assertEqual(
+            tuple(split_background(index).name() for index in range(8)),
+            expected + expected,
+        )
+        self.assertEqual(SELECTION_BACKGROUND.name(), "#c8c8c8")
+
+    def test_selected_empty_cell_paints_gray_under_grid_lines(self) -> None:
+        from stepnx.authoring.selection import CellTarget, CellSelection
+        target = CellTarget(self.block.rows[2].stable_id, 1)
+        self.controller.session.selection = CellSelection(frozenset({target}), target)
+        canvas = QImage(650, 420, QImage.Format.Format_ARGB32)
+        canvas.fill(0)
+        painter = QPainter(canvas)
+        try:
+            view = self.widget.layout_model.visible_segments(0, 420)[0]
+            self.widget._draw_grid(painter, view, 0)
+        finally:
+            painter.end()
+        x = round(self.widget.layout_model.x_for_lane(1))
+        y = round(self.widget.layout_model.y_for_row(self.split.stable_id, 2) + 12)
+        self.assertEqual(canvas.pixelColor(x, y).name(), "#c8c8c8")
+        self.assertEqual(canvas.pixelColor(x + 120, y).name(), "#ffffeb")
+
+    def test_zoom_preset_preserves_linear_temporal_spacing(self) -> None:
+        self.assertEqual(EDITOR_ZOOM_PRESETS, (25, 50, 75, 100, 125, 150, 175, 200))
+        original = scaled_editor_geometry(100)
+        for percent in EDITOR_ZOOM_PRESETS:
+            with self.subTest(percent=percent):
+                g = scaled_editor_geometry(percent)
+                self.assertAlmostEqual(g.lane_pitch, 96 * percent / 100)
+                self.assertEqual(g.beat_height, original.beat_height)
+                self.assertAlmostEqual(g.vertical_zoom, percent / 100)
+        with self.assertRaises(ValueError):
+            scaled_editor_geometry(225)
 
     def test_palette_matches_stepedit_reference_screenshot(self) -> None:
         self.assertEqual(NOTE_BACKGROUND.name().lower(), "#ffffeb")
@@ -277,9 +333,10 @@ class ExperimentalQtViewportTests(unittest.TestCase):
         dialog = StepEditExperimentalDialog(self.controller, tap_raw=lambda: _RAW)
         try:
             self.assertEqual(dialog.viewport_widget.controller, self.controller)
-            idx = dialog.zoom_combo.findData(8)
+            idx = dialog.zoom_combo.findData(200)
             dialog.zoom_combo.setCurrentIndex(idx)
-            self.assertEqual(dialog.viewport_widget.layout_model.geometry.vertical_zoom, 8)
+            self.assertEqual(dialog.viewport_widget.layout_model.geometry.vertical_zoom, 2.0)
+            self.assertEqual(dialog.viewport_widget.layout_model.geometry.lane_pitch, 192)
             self.assertEqual(dialog.split_combo.count(), 1)
             self.assertEqual(dialog.block_combo.count(), 1)
         finally:
