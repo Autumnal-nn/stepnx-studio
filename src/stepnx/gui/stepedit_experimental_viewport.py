@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QAbstractScrollArea
 
@@ -383,14 +383,19 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             for lane in range(self.controller.snapshot.columns):
                 raw = _raw_cell(row, lane)
                 if isinstance(row, LightmapRow):
-                    if lane >= 3 or raw[lane] == 0:
-                        continue
-                    kind = 0x1
+                    kind = 0x1 if lane < 3 and raw[lane] != 0 else 0
                 else:
                     kind = raw[0] & 0x0F
-                    if not kind:
-                        continue
                 x = self.layout_model.x_for_lane(lane)
+                if CellTarget(row.stable_id, lane) in self.controller.session.selection.targets:
+                    painter.setPen(QPen(QColor("#ffe089"), 2))
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawRect(
+                        int(x - spacing / 2 + 1), int(y),
+                        int(spacing - 2), max(1, int(segment.row_pitch)),
+                    )
+                if not kind:
+                    continue
                 radius = min(9.0, max(2.0, segment.row_pitch * 0.36), spacing * 0.37)
                 palette = {
                     1: "#df9c45", 2: "#c88aff", 3: "#64bfff",
@@ -399,16 +404,11 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QColor(palette.get(kind, "#dbdce0")))
                 painter.drawRoundedRect(
-                    int(x - radius), int(y + segment.row_pitch / 2 - radius),
-                    int(radius * 2), int(radius * 2), 3, 3,
+                    QRectF(
+                        x - radius, y + segment.row_pitch / 2 - radius,
+                        radius * 2, radius * 2,
+                    ), 3.0, 3.0,
                 )
-                if CellTarget(row.stable_id, lane) in self.controller.session.selection.targets:
-                    painter.setPen(QPen(QColor("#ffe089"), 2))
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.drawRect(
-                        int(x - spacing / 2 + 1), int(y),
-                        int(spacing - 2), max(1, int(segment.row_pitch)),
-                    )
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self.viewport())
@@ -434,6 +434,20 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                         int(self.layout_model.grid_right + 5), caption_y,
                         f"Block {seg.block_index + 1}  BS {seg.beat_split}"
                     )
+            if self._select_anchor is not None and self._select_current is not None:
+                start, end = self._select_anchor, self._select_current
+                if (
+                    end.region is StepEditRegion.BODY
+                    and (start.split_id, start.block_id) == (end.split_id, end.block_id)
+                ):
+                    seg = self.layout_model.segment(start.split_id)
+                    left = self.layout_model.x_for_lane(min(start.lane, end.lane), center=False)
+                    right = self.layout_model.x_for_lane(max(start.lane, end.lane), center=False)
+                    top = seg.y_for_row(min(start.row_index, end.row_index)) - scroll
+                    bottom = seg.y_for_row(max(start.row_index, end.row_index)) - scroll + seg.row_pitch
+                    painter.setPen(QPen(QColor("#ffe089"), 1))
+                    painter.setBrush(QColor(255, 224, 137, 45))
+                    painter.drawRect(QRectF(left, top, right - left + self.layout_model.geometry.lane_pitch, bottom - top))
             if self._lease is not None and self.controller.session.gesture is not None:
                 painter.setBrush(QColor(63, 173, 241, 110))
                 painter.setPen(Qt.PenStyle.NoPen)
