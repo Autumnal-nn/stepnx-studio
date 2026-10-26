@@ -65,7 +65,7 @@ class StepEditMigrationBaselineTests(unittest.TestCase):
             tuple(cell.raw for cell in first_row_before.cells),
         )
         self.assertEqual(
-            changed.splits[0].blocks[1].rows[0].cell(0).raw,
+            changed.splits[0].blocks[1].rows[0].cells[0].raw,
             b"\x43\x04\x01\x00",
         )
         self.assertEqual(first.stable_id, changed.splits[0].blocks[0].stable_id)
@@ -85,7 +85,7 @@ class StepEditMigrationBaselineTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            edited.splits[0].blocks[0].rows[0].cell(4).raw,
+            edited.splits[0].blocks[0].rows[0].cells[4].raw,
             original_untouched,
         )
         final_bytes = serialize(edited)
