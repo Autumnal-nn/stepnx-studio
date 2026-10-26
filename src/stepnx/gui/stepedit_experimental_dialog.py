@@ -26,7 +26,7 @@ from stepnx.gui.stepedit_experimental_viewport import StepEditExperimentalViewpo
 class StepEditExperimentalDialog(QDialog):
     """Experimental mouse-editing session; closing does not save to disk."""
 
-    def __init__(self, controller: EditorController, *, tap_raw=None, noteskin_pack=None, parent=None) -> None:
+    def __init__(self, controller: EditorController, *, tap_raw=None, hold_raw=None, noteskin_pack=None, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("STEPEdit-inspired viewport (experimental)")
         self.setModal(True)
@@ -61,7 +61,7 @@ class StepEditExperimentalDialog(QDialog):
         toolbar.addWidget(self.zoom_combo)
 
         self.viewport_widget = StepEditExperimentalViewport(
-            controller, tap_raw=tap_raw, noteskin_pack=noteskin_pack, parent=self,
+            controller, tap_raw=tap_raw, hold_raw=hold_raw, noteskin_pack=noteskin_pack, parent=self,
         )
         root.addWidget(self.viewport_widget, 1)
 
@@ -185,8 +185,15 @@ def install_stepedit_experimental(window) -> None:
                 window._selected_function(), window._selected_visibility(),
             )
 
+        def hold_raw(part: NoteTool) -> bytes:
+            from stepnx.gui.phase10_install import _regular_note_raw
+            return _regular_note_raw(
+                window, part, window.tool_value.value(),
+                window._selected_function(), window._selected_visibility(),
+            )
+
         dialog = StepEditExperimentalDialog(
-            controller, tap_raw=tap_raw,
+            controller, tap_raw=tap_raw, hold_raw=hold_raw,
             noteskin_pack=getattr(window, "noteskin", None), parent=window,
         )
         try:
