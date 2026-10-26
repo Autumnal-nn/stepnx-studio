@@ -14,7 +14,7 @@ try:
     from stepnx.authoring.editor_controller import EditorController, InteractionTool
     from stepnx.authoring.tools import NoteFunction, NoteVisibility
     from stepnx.codecs.nx20 import parse_bytes, serialize
-    from stepnx.core.commands import CommandStack, InsertBlock
+    from stepnx.core.commands import CommandStack, InsertBlock, SetNoteAt
     from stepnx.gui.stepedit_experimental_dialog import (
         StepEditExperimentalDialog,
         install_stepedit_experimental,
@@ -85,6 +85,51 @@ class ExperimentalQtViewportTests(unittest.TestCase):
         self.widget.undo()
         self.assertEqual(serialize(self.stack.current), original)
         self.assertFalse(self.stack.can_undo)
+
+    def test_fast_paint_does_not_skip_intermediate_rows(self) -> None:
+        self.widget.set_tool(InteractionTool.ADD)
+        p0 = QPoint(self.x, self.y)
+        p1 = QPoint(
+            self.x, int(self.widget.layout_model.y_for_row(self.split.stable_id, 6, center=True))
+        )
+        QTest.mousePress(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=p0)
+        QTest.mouseMove(self.widget.viewport(), p1)
+        QTest.mouseRelease(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=p1)
+        block = self.controller.document.splits[0].blocks[0]
+        self.assertEqual(
+            [_RAW for _ in range(5)],
+            [block.rows[row].cells[1].raw for row in range(2, 7)],
+        )
+
+    def test_crossing_hold_cancels_entire_paint_stroke(self) -> None:
+        row = self.doc.splits[0].blocks[0].rows[4]
+        self.stack.execute(SetNoteAt(row.stable_id, 1, b"\\x57\\x03\\x00\\x00"))
+        self.controller.sync_external_change()
+        self.widget._rebuild_layout()
+        self.widget.set_tool(InteractionTool.ADD)
+        before = serialize(self.stack.current)
+        QTest.mousePress(
+            self.widget.viewport(), Qt.MouseButton.LeftButton,
+            pos=QPoint(self.x, self.y),
+        )
+        endpoint = QPoint(
+            self.x, int(self.widget.layout_model.y_for_row(self.split.stable_id, 6, center=True))
+        )
+        QTest.mouseMove(self.widget.viewport(), endpoint)
+        QTest.mouseRelease(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=endpoint)
+        self.assertEqual(serialize(self.stack.current), before)
+
+    def test_toggle_does_not_erase_unknown_type_zero_payload(self) -> None:
+        row = self.doc.splits[0].blocks[0].rows[2]
+        self.stack.execute(SetNoteAt(row.stable_id, 1, b"\\x00\\x02\\x03\\x04"))
+        self.controller.sync_external_change()
+        self.widget._rebuild_layout()
+        before = serialize(self.stack.current)
+        QTest.mouseClick(
+            self.widget.viewport(), Qt.MouseButton.LeftButton,
+            pos=QPoint(self.x, self.y),
+        )
+        self.assertEqual(serialize(self.stack.current), before)
 
     def test_shift_rectangle_selects_without_mutating(self) -> None:
         before = serialize(self.doc)
