@@ -68,6 +68,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._scroll_scale = 1.0
         self._lease = None
         self._pressed = None
+        self._last_paint_hit = None
         self._select_anchor = None
         self._select_current = None
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -155,6 +156,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self.controller.cancel_stroke()
         self._lease = None
         self._pressed = None
+        self._last_paint_hit = None
         self._select_anchor = None
         self._select_current = None
         self.viewport().update()
@@ -190,6 +192,29 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             )
             return True
         return False
+
+    def _extend_paint_to(self, hit) -> None:
+        """Fill intervening rows of a same-lane drag, even if Qt skips events.
+
+        Never cross Blocks or rewrite a partial Hold. Each visited target is
+        revalidated by the scoped controller before it joins the pending edit.
+        """
+        previous = self._last_paint_hit
+        if previous is not None and previous.lane == hit.lane:
+            rows = self.controller.snapshot.active_block(hit.split_id).rows
+            start = previous.row_index
+            stop = hit.row_index
+            step = 1 if stop >= start else -1
+            for index in range(start, stop + step, step):
+                raw = _raw_cell(rows[index], hit.lane)
+                if raw[0] & 0x0F in _HOLD_TYPES:
+                    raise EditorContextError("paint stroke intersects a Hold")
+                self.controller.extend_stroke(
+                    self._lease, CellTarget(_row_id(rows, index), hit.lane)
+                )
+        else:
+            self.controller.extend_stroke(self._lease, self._target(hit))
+        self._last_paint_hit = hit
 
     def _commit(self, scope, target: CellTarget, raw: bytes) -> None:
         try:
@@ -261,6 +286,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             if tool in (InteractionTool.ADD, InteractionTool.ERASE):
                 raw = self._tap_raw() if tool is InteractionTool.ADD else _EMPTY
                 self._lease = self.controller.start_stroke(scope, target, raw)
+                self._last_paint_hit = hit
             elif tool is InteractionTool.TOGGLE:
                 pass  # Commit a tap/erase only after a same-cell release.
             else:
@@ -293,7 +319,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             self._cancel_interaction()
             return
         try:
-            self.controller.extend_stroke(self._lease, self._target(hit))
+            self._extend_paint_to(hit)
         except (EditorContextError, ValueError) as exc:
             self._cancel_interaction()
             self.statusMessage.emit(str(exc))
@@ -319,7 +345,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             ) == (scope.split_id, scope.block_id):
                 if not self._reject_hold(hit):
                     try:
-                        self.controller.extend_stroke(lease, self._target(hit))
+                        self._extend_paint_to(hit)
                     except (EditorContextError, ValueError) as exc:
                         self._cancel_interaction()
                         self.statusMessage.emit(str(exc))
@@ -333,13 +359,22 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                 self._cancel_interaction()
                 self.statusMessage.emit(str(exc))
                 return
+            self._last_paint_hit = None
             self._rebuild_layout(scroll_y=self._scroll_y())
             self.documentChanged.emit(self.controller.document)
             return
         if (hit.region is StepEditRegion.BODY and hit.split_id == initial.split_id
             and hit.block_id == initial.block_id
             and hit.row_index == initial.row_index and hit.lane == initial.lane):
-            raw = _EMPTY if self._existing_raw(initial) != _EMPTY else self._tap_raw()
+            existing = self._existing_raw(initial)
+            if existing != _EMPTY and existing[0] & 0x0F == 0:
+                self.statusMessage.emit("Unknown or opaque note bytes: Toggle will not discard them.")
+                return
+            try:
+                raw = _EMPTY if existing != _EMPTY else self._tap_raw()
+            except (ValueError, IndexError) as exc:
+                self.statusMessage.emit(str(exc))
+                return
             self._commit(scope, self._target(initial), raw)
         else:
             self.statusMessage.emit("Hold dragging is reserved for a later M4 slice.")
