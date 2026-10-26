@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from stepnx.authoring.editor_controller import EditorController, InteractionTool
-from stepnx.authoring.stepedit_layout import STEPEDIT_VERTICAL_ZOOMS
+from stepnx.gui.stepedit_visual_style import EDITOR_ZOOM_PRESETS
 from stepnx.authoring.tools import NoteTool
 from stepnx.gui.stepedit_experimental_viewport import StepEditExperimentalViewport
 
@@ -26,7 +26,7 @@ from stepnx.gui.stepedit_experimental_viewport import StepEditExperimentalViewpo
 class StepEditExperimentalDialog(QDialog):
     """Experimental mouse-editing session; closing does not save to disk."""
 
-    def __init__(self, controller: EditorController, *, tap_raw=None, parent=None) -> None:
+    def __init__(self, controller: EditorController, *, tap_raw=None, noteskin_pack=None, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("STEPEdit-inspired viewport (experimental)")
         self.setModal(True)
@@ -55,12 +55,14 @@ class StepEditExperimentalDialog(QDialog):
 
         toolbar.addWidget(QLabel("Zoom"))
         self.zoom_combo = QComboBox(self)
-        for zoom in STEPEDIT_VERTICAL_ZOOMS:
-            self.zoom_combo.addItem(f"{zoom}×", zoom)
-        self.zoom_combo.setCurrentIndex(STEPEDIT_VERTICAL_ZOOMS.index(4))
+        for percent in EDITOR_ZOOM_PRESETS:
+            self.zoom_combo.addItem(f"{percent}%", percent)
+        self.zoom_combo.setCurrentIndex(EDITOR_ZOOM_PRESETS.index(100))
         toolbar.addWidget(self.zoom_combo)
 
-        self.viewport_widget = StepEditExperimentalViewport(controller, tap_raw=tap_raw, parent=self)
+        self.viewport_widget = StepEditExperimentalViewport(
+            controller, tap_raw=tap_raw, noteskin_pack=noteskin_pack, parent=self,
+        )
         root.addWidget(self.viewport_widget, 1)
 
         lower = QHBoxLayout()
@@ -78,7 +80,7 @@ class StepEditExperimentalDialog(QDialog):
             lambda _: self.viewport_widget.set_tool(self.tool_combo.currentData())
         )
         self.zoom_combo.currentIndexChanged.connect(
-            lambda _: self.viewport_widget.set_zoom(float(self.zoom_combo.currentData()))
+            lambda _: self.viewport_widget.set_zoom(int(self.zoom_combo.currentData()))
         )
         self.split_combo.currentIndexChanged.connect(self._on_split_changed)
         self.block_combo.currentIndexChanged.connect(self._on_block_changed)
@@ -183,7 +185,10 @@ def install_stepedit_experimental(window) -> None:
                 window._selected_function(), window._selected_visibility(),
             )
 
-        dialog = StepEditExperimentalDialog(controller, tap_raw=tap_raw, parent=window)
+        dialog = StepEditExperimentalDialog(
+            controller, tap_raw=tap_raw,
+            noteskin_pack=getattr(window, "noteskin", None), parent=window,
+        )
         try:
             dialog.exec()
         finally:
