@@ -38,7 +38,8 @@ class StepEditExperimentalDialog(QDialog):
         toolbar.addWidget(QLabel("Tool"))
         self.tool_combo = QComboBox(self)
         for label, tool in (
-            ("Toggle tap", InteractionTool.TOGGLE),
+            ("Toggle tap / drag Hold", InteractionTool.TOGGLE),
+            ("Draw Hold", InteractionTool.HOLD),
             ("Paint taps", InteractionTool.ADD),
             ("Erase cells", InteractionTool.ERASE),
             ("Select", InteractionTool.SELECT),
@@ -68,7 +69,7 @@ class StepEditExperimentalDialog(QDialog):
         lower = QHBoxLayout()
         root.addLayout(lower)
         self.status = QLabel(
-            "Experimental. Toggle drag creates Holds; click a Hold to erase it. Lightmap remains in Studio.",
+            "Toggle: tap / drag Hold. Draw Hold: drag to create, click Hold to erase. Lightmap stays in Studio.",
             self,
         )
         lower.addWidget(self.status, 1)
