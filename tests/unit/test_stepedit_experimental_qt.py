@@ -239,7 +239,7 @@ class ExperimentalQtViewportTests(unittest.TestCase):
             self.assertEqual(shaft.call_count, 7)
             self.assertEqual(terminal.call_count, 2)
             self.assertEqual(
-                [c.args[4][0] & 0x0F for c in terminal.call_args_list],
+                [c.args[3][0] & 0x0F for c in terminal.call_args_list],
                 [7, 15],
             )
         finally:
