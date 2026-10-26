@@ -27,6 +27,7 @@ class InteractionProfile(str, Enum):
 
 class InteractionTool(str, Enum):
     TOGGLE = "toggle"
+    HOLD = "hold"
     ADD = "add"
     ERASE = "erase"
     SELECT = "select"
