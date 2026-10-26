@@ -6,7 +6,7 @@ The current Timeline and gameplay preview remain unchanged.
 ## Trying it
 
 1. Start StepNX Studio with the normal `stepnx-studio` launcher and open a chart.
-2. Use **Preview → STEPEdit-inspired editor (experimental)…**.
+2. Use **Experimental → STEPEdit-inspired editor (experimental)…**.
 3. A **modal** editing window opens with Toggle tap, Paint taps, Erase cells, Select, Split, Block, and zoom selectors.
 4. The experimental viewport edits the **same** `CommandStack` as the normal editor. Changes stay in memory until you return to Studio and use the existing **Save All** workflow. Closing the window does not save or discard edits.
 5. Use `Ctrl+Z` / `Ctrl+Y` inside the window to undo/redo. Hit Escape to cancel an in-progress pointer gesture.
