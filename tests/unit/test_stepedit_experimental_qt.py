@@ -103,7 +103,7 @@ class ExperimentalQtViewportTests(unittest.TestCase):
 
     def test_crossing_hold_cancels_entire_paint_stroke(self) -> None:
         row = self.doc.splits[0].blocks[0].rows[4]
-        self.stack.execute(SetNoteAt(row.stable_id, 1, b"\\x57\\x03\\x00\\x00"))
+        self.stack.execute(SetNoteAt(row.stable_id, 1, b"\x57\x03\x00\x00"))
         self.controller.sync_external_change()
         self.widget._rebuild_layout()
         self.widget.set_tool(InteractionTool.ADD)
@@ -121,7 +121,7 @@ class ExperimentalQtViewportTests(unittest.TestCase):
 
     def test_toggle_does_not_erase_unknown_type_zero_payload(self) -> None:
         row = self.doc.splits[0].blocks[0].rows[2]
-        self.stack.execute(SetNoteAt(row.stable_id, 1, b"\\x00\\x02\\x03\\x04"))
+        self.stack.execute(SetNoteAt(row.stable_id, 1, b"\x00\x02\x03\x04"))
         self.controller.sync_external_change()
         self.widget._rebuild_layout()
         before = serialize(self.stack.current)
