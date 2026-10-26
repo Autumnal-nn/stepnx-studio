@@ -139,6 +139,113 @@ class ExperimentalQtViewportTests(unittest.TestCase):
         )
         self.assertEqual(serialize(self.stack.current), before)
 
+    def test_toggle_drag_creates_complete_hold_and_body_click_erases_it(self) -> None:
+        source = serialize(self.stack.current)
+        start = QPoint(self.x, self.y)
+        mid = QPoint(
+            self.x, int(self.widget.layout_model.y_for_row(self.split.stable_id, 4, center=True)),
+        )
+        stop = QPoint(
+            self.x, int(self.widget.layout_model.y_for_row(self.split.stable_id, 6, center=True)),
+        )
+        QTest.mousePress(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(self.widget.viewport(), stop)
+        self.assertEqual(serialize(self.stack.current), source)
+        QTest.mouseRelease(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=stop)
+        block = self.controller.document.splits[0].blocks[0]
+        self.assertEqual(
+            [block.rows[index].cells[1].raw[0] & 0x0F for index in range(2, 7)],
+            [7, 0xB, 0xB, 0xB, 0xF],
+        )
+        self.assertEqual(self.controller._stack.can_undo, True)
+        QTest.mouseClick(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=mid)
+        self.assertEqual(serialize(self.controller.document), source)
+        self.widget.undo()
+        self.assertNotEqual(serialize(self.controller.document), source)
+        self.widget.undo()
+        self.assertEqual(serialize(self.controller.document), source)
+
+    def test_toggle_hold_drag_over_existing_cell_is_non_destructive(self) -> None:
+        row = self.doc.splits[0].blocks[0].rows[4]
+        self.stack.execute(SetNoteAt(row.stable_id, 1, _RAW))
+        self.controller.sync_external_change()
+        self.widget._rebuild_layout()
+        before = serialize(self.stack.current)
+        start = QPoint(self.x, self.y)
+        stop = QPoint(
+            self.x, int(self.widget.layout_model.y_for_row(self.split.stable_id, 6, center=True)),
+        )
+        QTest.mousePress(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(self.widget.viewport(), stop)
+        QTest.mouseRelease(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=stop)
+        self.assertEqual(serialize(self.stack.current), before)
+
+    def test_toggle_hold_escape_cancels_preview_without_commit(self) -> None:
+        original = serialize(self.doc)
+        start = QPoint(self.x, self.y)
+        stop = QPoint(
+            self.x, int(self.widget.layout_model.y_for_row(self.split.stable_id, 6, center=True)),
+        )
+        QTest.mousePress(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(self.widget.viewport(), stop)
+        self.assertIsNotNone(self.widget._hold_preview_hit)
+        self.widget._cancel_interaction()
+        QTest.mouseRelease(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=stop)
+        self.assertEqual(serialize(self.stack.current), original)
+
+    def test_explicit_hold_tool_creates_span_and_does_not_add_taps_on_click(self) -> None:
+        self.widget.set_tool(InteractionTool.HOLD)
+        before = serialize(self.stack.current)
+        x = self.x
+        first = QPoint(x, self.y)
+        QTest.mouseClick(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=first)
+        self.assertEqual(serialize(self.stack.current), before)
+        target = QPoint(
+            x, int(self.widget.layout_model.y_for_row(self.split.stable_id, 6, center=True))
+        )
+        QTest.mousePress(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=first)
+        QTest.mouseMove(self.widget.viewport(), target)
+        QTest.mouseRelease(self.widget.viewport(), Qt.MouseButton.LeftButton, pos=target)
+        self.assertEqual(
+            [self.controller.document.splits[0].blocks[0].rows[row].cells[1].raw[0] & 0x0F
+             for row in range(2, 7)],
+            [7, 11, 11, 11, 15],
+        )
+
+    def test_hold_rendering_draws_shaft_once_per_cell_and_two_terminals(self) -> None:
+        self.widget.set_tool(InteractionTool.HOLD)
+        from stepnx.authoring.stepedit_hold import plan_hold_creation
+        from stepnx.authoring.tools import NoteTool, note_tool_raw
+        type_map = {7: NoteTool.HOLD_HEAD, 11: NoteTool.HOLD_BODY, 15: NoteTool.HOLD_TAIL}
+        block = self.controller.document.splits[0].blocks[0]
+        scope = self.controller.capture_scope(self.split.stable_id, block.stable_id)
+        edits = plan_hold_creation(
+            block, 1, 2, 8, lambda kind: note_tool_raw(type_map[kind]),
+        )
+        self.controller.apply_note_batch(scope, edits)
+        self.widget._rebuild_layout()
+        seg = self.widget.layout_model.segment(self.split.stable_id)
+        canvas = QImage(1200, 1000, QImage.Format.Format_ARGB32)
+        canvas.fill(0)
+        painter = QPainter(canvas)
+        try:
+            with (
+                patch.object(self.widget._artist, "draw_hold_shaft",
+                             wraps=self.widget._artist.draw_hold_shaft) as shaft,
+                patch.object(self.widget._artist, "draw",
+                             wraps=self.widget._artist.draw) as terminal,
+            ):
+                self.widget._draw_notes(painter, seg, 2, 9, 0)
+            # With row_pitch <= half the tile, head art already covers its row.
+            self.assertEqual(shaft.call_count, 6)
+            self.assertEqual(terminal.call_count, 2)
+            self.assertEqual(
+                [c.args[3][0] & 0x0F for c in terminal.call_args_list],
+                [7, 15],
+            )
+        finally:
+            painter.end()
+
     def test_shift_rectangle_selects_without_mutating(self) -> None:
         before = serialize(self.doc)
         x_other = int(self.widget.layout_model.x_for_lane(2))

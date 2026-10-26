@@ -18,6 +18,7 @@ from stepnx.authoring.editor_controller import (
     InteractionTool,
 )
 from stepnx.authoring.selection import CellSelection, CellTarget
+from stepnx.authoring.stepedit_hold import HoldGestureError, plan_hold_creation, plan_hold_erasure
 from stepnx.authoring.stepedit_layout import StepEditGeometry, StepEditGridLayout, StepEditRegion
 from stepnx.authoring.tools import NoteTool, note_tool_raw
 from stepnx.core.model import EmptyRow, LightmapRow, NoteRow, PackedNoteRow
@@ -64,12 +65,14 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         controller: EditorController,
         *,
         tap_raw: Callable[[], bytes] | None = None,
+        hold_raw: Callable[[NoteTool], bytes] | None = None,
         noteskin_pack=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.controller = controller
         self._tap_raw = tap_raw or (lambda: note_tool_raw(NoteTool.TAP))
+        self._hold_raw = hold_raw or (lambda part: note_tool_raw(part))
         self._zoom_percent = 100
         self._geometry = scaled_editor_geometry(self._zoom_percent)
         self._artist = StepEditAtlasArtist(noteskin_pack)
@@ -79,6 +82,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._lease = None
         self._pressed = None
         self._last_paint_hit = None
+        self._hold_preview_hit = None
         self._select_anchor = None
         self._select_current = None
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -175,6 +179,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._lease = None
         self._pressed = None
         self._last_paint_hit = None
+        self._hold_preview_hit = None
         self._select_anchor = None
         self._select_current = None
         self.viewport().update()
@@ -273,6 +278,31 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._rebuild_layout(scroll_y=self._scroll_y())
         self.documentChanged.emit(self.controller.document)
 
+    def _apply_hold_gesture(self, scope, initial, final) -> bool:
+        """Atomic create/erase via the same domain stack and snapshot guards."""
+        block = self.controller.snapshot.active_block(initial.split_id)
+        existing = self._existing_raw(initial)
+        part_map = {
+            7: NoteTool.HOLD_HEAD,
+            0xB: NoteTool.HOLD_BODY,
+            0xF: NoteTool.HOLD_TAIL,
+        }
+        try:
+            if (existing[0] & 0x0F) in part_map:
+                edits = plan_hold_erasure(block, initial.lane, initial.row_index)
+            else:
+                edits = plan_hold_creation(
+                    block, initial.lane, initial.row_index, final.row_index,
+                    lambda kind: self._hold_raw(part_map[kind]),
+                )
+            self.controller.apply_note_batch(scope, edits)
+        except (HoldGestureError, EditorContextError, ValueError, IndexError) as exc:
+            self.statusMessage.emit(str(exc))
+            return False
+        self._rebuild_layout(scroll_y=self._scroll_y())
+        self.documentChanged.emit(self.controller.document)
+        return True
+
     def _start_selection(self, hit) -> None:
         self._select_anchor = hit
         self._select_current = hit
@@ -327,16 +357,16 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                 self.selectionChanged.emit(self.controller.session.selection)
                 self.viewport().update()
                 return
-            if self._reject_hold(hit):
-                return
             tool = self.controller.session.tool
+            if tool in (InteractionTool.ADD, InteractionTool.ERASE) and self._reject_hold(hit):
+                return
             self._pressed = (scope, hit)
             if tool in (InteractionTool.ADD, InteractionTool.ERASE):
                 raw = self._tap_raw() if tool is InteractionTool.ADD else _EMPTY
                 self._lease = self.controller.start_stroke(scope, target, raw)
                 self._last_paint_hit = hit
-            elif tool is InteractionTool.TOGGLE:
-                pass  # Commit a tap/erase only after a same-cell release.
+            elif tool in (InteractionTool.TOGGLE, InteractionTool.HOLD):
+                pass  # Only commit after a release in the same lane/Block.
             else:
                 self.statusMessage.emit("This experimental tool is not yet implemented.")
                 self._pressed = None
@@ -355,6 +385,16 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                 self.viewport().update()
             return
         if self._lease is None:
+            scope, start = self._pressed
+            if self.controller.session.tool in (InteractionTool.TOGGLE, InteractionTool.HOLD):
+                if hit.region is StepEditRegion.BODY and (
+                    hit.split_id, hit.block_id, hit.lane
+                ) == (scope.split_id, scope.block_id, start.lane):
+                    self._hold_preview_hit = hit
+                    self.viewport().update()
+                else:
+                    self._hold_preview_hit = None
+                    self.viewport().update()
             return
         if hit.region is not StepEditRegion.BODY:
             return
@@ -385,6 +425,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             return
         scope, initial = self._pressed
         self._pressed = None
+        self._hold_preview_hit = None
         if self._lease is not None:
             lease = self._lease
             if hit.region is not StepEditRegion.BODY or (
@@ -409,8 +450,17 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             return
         if (hit.region is StepEditRegion.BODY and hit.split_id == initial.split_id
             and hit.block_id == initial.block_id
-            and hit.row_index == initial.row_index and hit.lane == initial.lane):
+            and hit.lane == initial.lane):
             existing = self._existing_raw(initial)
+            if hit.row_index != initial.row_index:
+                self._apply_hold_gesture(scope, initial, hit)
+                return
+            if (existing[0] & 0x0F) in _HOLD_TYPES:
+                self._apply_hold_gesture(scope, initial, hit)
+                return
+            if self.controller.session.tool is InteractionTool.HOLD:
+                self.statusMessage.emit("Draw Hold requires a drag between two rows.")
+                return
             if existing != _EMPTY and existing[0] & 0x0F == 0:
                 self.statusMessage.emit("Unknown or opaque note bytes: Toggle will not discard them.")
                 return
@@ -421,7 +471,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                 return
             self._commit(scope, self._target(initial), raw)
         else:
-            self.statusMessage.emit("Hold dragging is reserved for a later M4 slice.")
+            self.statusMessage.emit("Gesture cancelled outside the original lane/Block.")
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
@@ -509,19 +559,71 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         painter.setPen(QPen(LANE_BOUNDARY, 1))
         painter.drawLine(int(right), int(top), int(right), int(bottom))
 
-    def _draw_notes(self, painter: QPainter, segment, first: int, last: int, scroll: float) -> None:
+    def _draw_notes(
+        self, painter: QPainter, segment, first: int, last: int, scroll: float
+    ) -> None:
+        """Layer Hold shaft strips first, terminal tiles and taps second.
+
+        Every 0xB occupies only its *encoded* row interval. The current
+        96x96 image is never forced into that interval, and a head/tail is
+        rendered once rather than repeated at each body row.
+        """
         rows = self.controller.snapshot.active_block(segment.split_id).rows
         pitch = self.layout_model.geometry.lane_pitch
         source_offset = self.controller.snapshot.start_column
+        columns = self.controller.snapshot.columns
+
+        # Pass 1: stretch only the repeatable atlas shaft strip along the
+        # temporal span. The terminal tiles are handled in the next pass.
         for index in range(first, last):
             row_top = segment.y_for_row(index) - scroll
             row = rows[index]
-            for lane in range(self.controller.snapshot.columns):
+            if isinstance(row, LightmapRow):
+                continue
+            for lane in range(columns):
                 raw = _raw_cell(row, lane)
-                if isinstance(row, LightmapRow):
-                    # M4 Lightmap remains read-only. Do not map it to tap atlases.
+                kind = raw[0] & 0x0F
+                if kind not in _HOLD_TYPES:
                     continue
-                if not raw[0] & 0x0F:
+                # Head and tail glyphs contain their own tip decorations.
+                # Keep any shaft visible between the terminals; at small
+                # row spacing they naturally overlap without shrinking.
+                if kind == 0x7:
+                    top = row_top + min(pitch / 2, segment.row_pitch)
+                    bottom = row_top + segment.row_pitch
+                elif kind == 0xF:
+                    top = row_top
+                    bottom = row_top + min(pitch / 2, segment.row_pitch)
+                else:
+                    top = row_top
+                    bottom = row_top + segment.row_pitch
+                if bottom <= top:
+                    continue
+                rect = QRectF(
+                    self.layout_model.x_for_lane(lane, center=False),
+                    top, pitch, bottom - top,
+                )
+                if not self._artist.draw_hold_shaft(
+                    painter, rect, source_offset + lane, raw,
+                ):
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor("#76DDF2"))
+                    painter.drawRect(QRectF(
+                        rect.x() + pitch * 0.37, rect.y(),
+                        pitch * 0.26, rect.height(),
+                    ))
+
+        # Pass 2: source-backed Tap/Item/Division glyphs, and exactly one
+        # terminal tile for each encoded 0x7/0xF cell. 0xB draws no glyph.
+        for index in range(first, last):
+            row_top = segment.y_for_row(index) - scroll
+            row = rows[index]
+            if isinstance(row, LightmapRow):
+                continue
+            for lane in range(columns):
+                raw = _raw_cell(row, lane)
+                kind = raw[0] & 0x0F
+                if not kind or kind == 0xB:
                     continue
                 destination = QRectF(
                     self.layout_model.x_for_lane(lane, center=False),
@@ -564,6 +666,27 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                         int(self.layout_model.grid_right + 5), caption_y,
                         f"Block {seg.block_index + 1}  BS {seg.beat_split}"
                     )
+            if (
+                self._hold_preview_hit is not None
+                and self._pressed is not None
+                and self.controller.session.tool in (InteractionTool.TOGGLE, InteractionTool.HOLD)
+            ):
+                _scope, anchor = self._pressed
+                final = self._hold_preview_hit
+                if (anchor.split_id, anchor.block_id, anchor.lane) == (
+                    final.split_id, final.block_id, final.lane
+                ) and anchor.row_index != final.row_index:
+                    seg = self.layout_model.segment(anchor.split_id)
+                    left = self.layout_model.x_for_lane(anchor.lane, center=False)
+                    width = self.layout_model.geometry.lane_pitch
+                    top = seg.y_for_row(min(anchor.row_index, final.row_index)) - scroll
+                    bottom = seg.y_for_row(max(anchor.row_index, final.row_index)) - scroll
+                    painter.setPen(QPen(QColor("#14578a"), 1))
+                    painter.setBrush(QColor(89, 213, 254, 105))
+                    painter.drawRect(QRectF(
+                        left + width * 0.37, top + width * 0.5,
+                        width * 0.26, max(1.0, bottom - top),
+                    ))
             if self._select_anchor is not None and self._select_current is not None:
                 start, end = self._select_anchor, self._select_current
                 if (
