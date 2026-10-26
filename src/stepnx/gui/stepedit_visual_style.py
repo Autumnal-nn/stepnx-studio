@@ -45,7 +45,7 @@ def scaled_editor_geometry(percent: int):
     factor = percent / 100.0
     return StepEditGeometry(
         vertical_zoom=factor,
-        beat_height=192 * factor,
+        beat_height=192,
         lane_pitch=ATLAS_TILE_PIXELS * factor,
         indicator_width=31 * factor,
         property_width=300 * factor,
