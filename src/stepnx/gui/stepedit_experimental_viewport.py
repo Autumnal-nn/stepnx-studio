@@ -365,8 +365,8 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                 raw = self._tap_raw() if tool is InteractionTool.ADD else _EMPTY
                 self._lease = self.controller.start_stroke(scope, target, raw)
                 self._last_paint_hit = hit
-            elif tool is InteractionTool.TOGGLE:
-                pass  # Commit a tap/erase only after a same-cell release.
+            elif tool in (InteractionTool.TOGGLE, InteractionTool.HOLD):
+                pass  # Only commit after a release in the same lane/Block.
             else:
                 self.statusMessage.emit("This experimental tool is not yet implemented.")
                 self._pressed = None
@@ -386,7 +386,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             return
         if self._lease is None:
             scope, start = self._pressed
-            if self.controller.session.tool is InteractionTool.TOGGLE:
+            if self.controller.session.tool in (InteractionTool.TOGGLE, InteractionTool.HOLD):
                 if hit.region is StepEditRegion.BODY and (
                     hit.split_id, hit.block_id, hit.lane
                 ) == (scope.split_id, scope.block_id, start.lane):
@@ -457,6 +457,9 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                 return
             if (existing[0] & 0x0F) in _HOLD_TYPES:
                 self._apply_hold_gesture(scope, initial, hit)
+                return
+            if self.controller.session.tool is InteractionTool.HOLD:
+                self.statusMessage.emit("Draw Hold requires a drag between two rows.")
                 return
             if existing != _EMPTY and existing[0] & 0x0F == 0:
                 self.statusMessage.emit("Unknown or opaque note bytes: Toggle will not discard them.")
@@ -666,7 +669,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
             if (
                 self._hold_preview_hit is not None
                 and self._pressed is not None
-                and self.controller.session.tool is InteractionTool.TOGGLE
+                and self.controller.session.tool in (InteractionTool.TOGGLE, InteractionTool.HOLD)
             ):
                 _scope, anchor = self._pressed
                 final = self._hold_preview_hit
