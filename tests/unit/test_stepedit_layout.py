@@ -131,6 +131,7 @@ class StepEditGeometryTests(unittest.TestCase):
         doc = parse_bytes(make_normal_nx20(), row_storage="compact")
         split = doc.splits[0]
         doc = InsertBlock(split.stable_id, split.blocks[0]).apply(doc)
+        original_bytes = serialize(doc)
         snapshot = create_authoring_snapshot(doc)
         first = snapshot.splits[0].blocks[0]
         second = replace(snapshot.splits[0].blocks[1], beat_split=8)
@@ -140,7 +141,7 @@ class StepEditGeometryTests(unittest.TestCase):
         after = StepEditGridLayout(snapshot.with_active_block(split.stable_id, second.stable_id))
         self.assertEqual(before.segments[0].row_pitch, 48 / first.beat_split)
         self.assertEqual(after.segments[0].row_pitch, 6.0)
-        self.assertEqual(serialize(doc), serialize(doc))
+        self.assertEqual(serialize(doc), original_bytes)
 
     def test_multiple_splits_stack_in_chart_order(self) -> None:
         doc = parse_bytes(make_normal_nx20(), row_storage="compact")
