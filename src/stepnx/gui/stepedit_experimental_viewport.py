@@ -179,6 +179,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._lease = None
         self._pressed = None
         self._last_paint_hit = None
+        self._hold_preview_hit = None
         self._select_anchor = None
         self._select_current = None
         self.viewport().update()
