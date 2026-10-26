@@ -9,6 +9,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
+    QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -172,3 +173,49 @@ class ResizeSplitDialog(QDialog):
         if count <= 0:
             raise ValueError("Split size must be greater than zero")
         return count
+
+
+class PackedMetadataDialog(QDialog):
+    """Edit a packed metadata field without string parsing or silent coercion."""
+
+    def __init__(self, title: str, *, kind: str, first: int, second: int, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.kind = kind
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        if kind == "u16_range":
+            self.range_row = LabeledRangeRow(minimum=0, maximum=0xFFFF, parent=self)
+            self.range_row.set_values(first, second)
+            form.addRow("Minimum / Maximum:", self.range_row)
+        elif kind == "dm120":
+            if first not in (0, 1) or second < (-1 if first == 0 else -2) or second > 255:
+                raise ValueError("DM120 value cannot be represented by the typed editor")
+            self.mode = QComboBox(self)
+            self.mode.addItem("0", 0)
+            self.mode.addItem("1", 1)
+            self.mode.setCurrentIndex(first)
+            self.weight = QSpinBox(self)
+            self.weight.setRange(-1 if first == 0 else -2, 255)
+            self.weight.setValue(second)
+            form.addRow("Mode:", self.mode)
+            form.addRow("Weight:", self.weight)
+            self.mode.currentIndexChanged.connect(self._refresh_dm120)
+        else:
+            raise ValueError(f"unsupported packed metadata kind: {kind}")
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _refresh_dm120(self, *_args):
+        self.weight.setMinimum(-1 if self.mode.currentData() == 0 else -2)
+
+    def values(self) -> tuple[int, int]:
+        if self.kind == "u16_range":
+            return self.range_row.values()
+        return int(self.mode.currentData()), self.weight.value()
