@@ -8,7 +8,11 @@ original tile/mask atlas, which is not part of this repository.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF, QPixmap
+
+from stepnx.authoring.noteskin import LocalNoteskinPack, PngAtlas, hold_atlas_plan
+from stepnx.resources import bundled_noteskin_root
+from stepnx.authoring.noteskin import load_noteskin_pack
 
 
 TILE_PIXELS = 24
@@ -20,6 +24,33 @@ VERTICAL_GRID = QColor("#005494")
 MINOR_GRID = QColor("#B2D7EB")
 MAJOR_GRID = QColor("#005494")
 LANE_BOUNDARY = QColor("#FF0000")
+SELECTION_BACKGROUND = QColor("#C8C8C8")
+SPLIT_BACKGROUNDS = tuple(
+    QColor(value) for value in ("#FFFFEB", "#EBFFFF", "#EBFFEB", "#FFEBFF")
+)
+EDITOR_ZOOM_PRESETS = (25, 50, 75, 100, 125, 150, 175, 200)
+ATLAS_TILE_PIXELS = 96
+
+
+def split_background(split_index: int) -> QColor:
+    """Four-color cycle by 0-based Split order, not active Block identity."""
+    return SPLIT_BACKGROUNDS[split_index % len(SPLIT_BACKGROUNDS)]
+
+
+def scaled_editor_geometry(percent: int):
+    """Render dimensions scaled together, never encoded NX20 timing/BeatSplit."""
+    from stepnx.authoring.stepedit_layout import StepEditGeometry
+    if percent not in EDITOR_ZOOM_PRESETS:
+        raise ValueError(f"unsupported STEPEdit editor zoom: {percent}%")
+    factor = percent / 100.0
+    return StepEditGeometry(
+        vertical_zoom=factor,
+        beat_height=192 * factor,
+        lane_pitch=ATLAS_TILE_PIXELS * factor,
+        indicator_width=31 * factor,
+        property_width=300 * factor,
+        resize_band=5 * factor,
+    )
 
 
 def note_rect(lane_left: float, row_top: float) -> QRectF:
@@ -110,3 +141,81 @@ class StepEditTileArtist:
         finally:
             painter.restore()
         return destination
+
+
+class StepEditAtlasArtist:
+    """The existing built-in/user-provided 96px noteskin atlas at editor zoom.
+
+    All images are looked up by the NX note's embedded bank and its source
+    column. Missing atlas cells use the current provisional vector painter.
+    Original atlas pixels remain local; no image bytes are copied to charts.
+    """
+
+    def __init__(self, pack: LocalNoteskinPack | None = None) -> None:
+        self.pack = pack if pack is not None else load_noteskin_pack(bundled_noteskin_root())
+        self._pixmaps: dict[str, QPixmap] = {}
+
+    def _pixmap(self, atlas: PngAtlas) -> QPixmap | None:
+        key = str(atlas.path)
+        if key not in self._pixmaps:
+            self._pixmaps[key] = QPixmap(key)
+        item = self._pixmaps[key]
+        return item if not item.isNull() else None
+
+    def _tile(self, painter: QPainter, atlas: PngAtlas, column: int,
+              row: int, destination: QRectF) -> bool:
+        pixmap = self._pixmap(atlas)
+        if pixmap is None:
+            return False
+        painter.drawPixmap(destination, pixmap, QRectF(*atlas.tile(column, row)))
+        return True
+
+    def draw(self, painter: QPainter, destination: QRectF, source_lane: int,
+             raw: bytes, row_pitch: float) -> bool:
+        """Return True if an existing noteskin atlas drew the note."""
+        kind = raw[0] & 0x0F
+        subtype = raw[2]
+        lane = source_lane % 5
+        pack = self.pack
+        if kind == 3:
+            bank = pack.bank(subtype)
+            if bank is not None:
+                atlas_row = 2 if (raw[0] & 0x60) == 0x20 else 1
+                if self._tile(painter, bank.animation[0], lane, atlas_row, destination):
+                    return True
+        elif kind in (7, 0xB, 0xF):
+            bank = pack.bank(subtype)
+            if bank is not None:
+                atlas = bank.animation[0]
+                plan = hold_atlas_plan(kind)
+                if plan.terminal_row is not None:
+                    if self._tile(painter, atlas, lane, plan.terminal_row, destination):
+                        return True
+                else:
+                    pixmap = self._pixmap(atlas)
+                    if pixmap is not None:
+                        x, y, w, _ = atlas.tile(lane, 0)
+                        painter.drawPixmap(
+                            QRectF(destination.x(), destination.y(),
+                                   destination.width(), max(1.0, row_pitch)),
+                            pixmap, QRectF(x, y, w, 8),
+                        )
+                        return True
+        elif kind == 1 and pack.item_animation and subtype < 32:
+            if self._tile(painter, pack.item_animation[0], subtype, 0, destination):
+                return True
+        elif kind == 2 and pack.division is not None and subtype < 5:
+            if self._tile(painter, pack.division, subtype, 0, destination):
+                return True
+
+        # Preserve readable unknown data and missing-bank cases, but do not
+        # scale glyphs to encoded row spacing. Only user-selected field zoom.
+        painter.save()
+        try:
+            factor = destination.width() / TILE_PIXELS
+            painter.translate(destination.x(), destination.y())
+            painter.scale(factor, factor)
+            StepEditTileArtist.draw(painter, 0, 0, source_lane, raw)
+        finally:
+            painter.restore()
+        return False
