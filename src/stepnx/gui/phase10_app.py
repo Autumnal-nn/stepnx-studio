@@ -62,6 +62,7 @@ def main(argv=None) -> int:
     from stepnx.gui.phase12_split_header import install_phase12_split_header
     from stepnx.gui.phase12_ssc_export import install_phase12_ssc_export
     from stepnx.gui.split_follower_ui import install_split_follower_ui
+    from stepnx.gui.stepedit_experimental_dialog import install_stepedit_experimental
 
     timeline_module.TimelineWidget = Phase10TimelineWidget
     timing_module.BlockTimingDialog = Phase10BlockTimingDialog
@@ -112,6 +113,8 @@ def main(argv=None) -> int:
             # UX cleanup is intentionally last: it consumes the final QAction,
             # Lightmap and route surfaces rather than creating parallel state.
             install_editor_ux_cleanup(self)
+            # Opt-in modal editor; the default viewport and its wrappers stay intact.
+            install_stepedit_experimental(self)
         return original_show(self, *args, **kwargs)
 
     QMainWindow.show = show_with_phase10
