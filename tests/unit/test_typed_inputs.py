@@ -75,8 +75,13 @@ class TypedInputsTests(unittest.TestCase):
         dialog = PackedMetadataDialog("DM120", kind="dm120", first=1, second=-2)
         self.assertEqual(dialog.values(), (1, -2))
         dialog.mode.setCurrentIndex(0)
-        self.assertEqual(dialog.weight.minimum(), -1)
-        self.assertEqual(dialog.values(), (0, -1))
+        self.assertEqual(dialog.values(), (0, -2))
+        button = dialog.findChild(QDialogButtonBox).button(
+            QDialogButtonBox.StandardButton.Ok
+        )
+        self.assertFalse(button.isEnabled())
+        dialog.weight.setValue(-1)
+        self.assertTrue(button.isEnabled())
         with self.assertRaises(ValueError):
             PackedMetadataDialog("DM120", kind="dm120", first=2, second=0)
 
