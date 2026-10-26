@@ -68,7 +68,7 @@ class StepEditExperimentalDialog(QDialog):
         lower = QHBoxLayout()
         root.addLayout(lower)
         self.status = QLabel(
-            "Experimental. Tap/paint/select only; Hold and Lightmap edits remain in Studio.",
+            "Experimental. Toggle drag creates Holds; click a Hold to erase it. Lightmap remains in Studio.",
             self,
         )
         lower.addWidget(self.status, 1)
