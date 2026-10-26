@@ -236,7 +236,8 @@ class ExperimentalQtViewportTests(unittest.TestCase):
                              wraps=self.widget._artist.draw) as terminal,
             ):
                 self.widget._draw_notes(painter, seg, 2, 9, 0)
-            self.assertEqual(shaft.call_count, 7)
+            # With row_pitch <= half the tile, head art already covers its row.
+            self.assertEqual(shaft.call_count, 6)
             self.assertEqual(terminal.call_count, 2)
             self.assertEqual(
                 [c.args[3][0] & 0x0F for c in terminal.call_args_list],
