@@ -280,7 +280,7 @@ class ExperimentalQtViewportTests(unittest.TestCase):
                     painter, QRectF(0, 0, 96, 96), 1, _RAW, 48,
                 )
             self.assertTrue(drawn)
-            self.assertEqual(spy.call_args.args[1:3], (1, 1))
+            self.assertEqual(spy.call_args.args[2:4], (1, 1))
         finally:
             painter.end()
 
