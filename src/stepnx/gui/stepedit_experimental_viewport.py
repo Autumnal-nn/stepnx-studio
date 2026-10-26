@@ -556,19 +556,71 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         painter.setPen(QPen(LANE_BOUNDARY, 1))
         painter.drawLine(int(right), int(top), int(right), int(bottom))
 
-    def _draw_notes(self, painter: QPainter, segment, first: int, last: int, scroll: float) -> None:
+    def _draw_notes(
+        self, painter: QPainter, segment, first: int, last: int, scroll: float
+    ) -> None:
+        """Layer Hold shaft strips first, terminal tiles and taps second.
+
+        Every 0xB occupies only its *encoded* row interval. The current
+        96x96 image is never forced into that interval, and a head/tail is
+        rendered once rather than repeated at each body row.
+        """
         rows = self.controller.snapshot.active_block(segment.split_id).rows
         pitch = self.layout_model.geometry.lane_pitch
         source_offset = self.controller.snapshot.start_column
+        columns = self.controller.snapshot.columns
+
+        # Pass 1: stretch only the repeatable atlas shaft strip along the
+        # temporal span. The terminal tiles are handled in the next pass.
         for index in range(first, last):
             row_top = segment.y_for_row(index) - scroll
             row = rows[index]
-            for lane in range(self.controller.snapshot.columns):
+            if isinstance(row, LightmapRow):
+                continue
+            for lane in range(columns):
                 raw = _raw_cell(row, lane)
-                if isinstance(row, LightmapRow):
-                    # M4 Lightmap remains read-only. Do not map it to tap atlases.
+                kind = raw[0] & 0x0F
+                if kind not in _HOLD_TYPES:
                     continue
-                if not raw[0] & 0x0F:
+                # Head and tail glyphs contain their own tip decorations.
+                # Keep any shaft visible between the terminals; at small
+                # row spacing they naturally overlap without shrinking.
+                if kind == 0x7:
+                    top = row_top + min(pitch / 2, segment.row_pitch)
+                    bottom = row_top + segment.row_pitch
+                elif kind == 0xF:
+                    top = row_top
+                    bottom = row_top + min(pitch / 2, segment.row_pitch)
+                else:
+                    top = row_top
+                    bottom = row_top + segment.row_pitch
+                if bottom <= top:
+                    continue
+                rect = QRectF(
+                    self.layout_model.x_for_lane(lane, center=False),
+                    top, pitch, bottom - top,
+                )
+                if not self._artist.draw_hold_shaft(
+                    painter, rect, source_offset + lane, raw,
+                ):
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor("#76DDF2"))
+                    painter.drawRect(QRectF(
+                        rect.x() + pitch * 0.37, rect.y(),
+                        pitch * 0.26, rect.height(),
+                    ))
+
+        # Pass 2: source-backed Tap/Item/Division glyphs, and exactly one
+        # terminal tile for each encoded 0x7/0xF cell. 0xB draws no glyph.
+        for index in range(first, last):
+            row_top = segment.y_for_row(index) - scroll
+            row = rows[index]
+            if isinstance(row, LightmapRow):
+                continue
+            for lane in range(columns):
+                raw = _raw_cell(row, lane)
+                kind = raw[0] & 0x0F
+                if not kind or kind == 0xB:
                     continue
                 destination = QRectF(
                     self.layout_model.x_for_lane(lane, center=False),
