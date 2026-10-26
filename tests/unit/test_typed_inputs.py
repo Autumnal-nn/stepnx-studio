@@ -9,6 +9,7 @@ try:
     from PySide6.QtWidgets import QApplication, QDialogButtonBox
     from stepnx.gui.typed_inputs import (
         LabeledRangeRow,
+        PackedMetadataDialog,
         MbrSpinRow,
         ResizeSplitDialog,
         mbr_to_rows,
@@ -61,6 +62,23 @@ class TypedInputsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             row.set_values(5, 32768)
         self.assertEqual(row.values(), (5, -2))
+
+    def test_packed_range_dialog_preserves_unsigned_endpoints(self):
+        dialog = PackedMetadataDialog(
+            "Judgments", kind="u16_range", first=65535, second=0
+        )
+        self.assertEqual(dialog.values(), (65535, 0))
+        dialog.range_row.set_values(5, 10)
+        self.assertEqual(dialog.values(), (5, 10))
+
+    def test_dm120_dialog_accepts_signed_weights_and_dynamic_mode_limits(self):
+        dialog = PackedMetadataDialog("DM120", kind="dm120", first=1, second=-2)
+        self.assertEqual(dialog.values(), (1, -2))
+        dialog.mode.setCurrentIndex(0)
+        self.assertEqual(dialog.weight.minimum(), -1)
+        self.assertEqual(dialog.values(), (0, -1))
+        with self.assertRaises(ValueError):
+            PackedMetadataDialog("DM120", kind="dm120", first=2, second=0)
 
     def test_resize_dialog_disables_zero_length_and_preserves_from(self):
         dialog = ResizeSplitDialog(32, beat_split=8, beat_measure=4)
