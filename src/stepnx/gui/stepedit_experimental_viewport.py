@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QAbstractScrollArea, QApplication
+from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QMenu
 
 from stepnx.authoring.editor_controller import (
     EditorContextError,
@@ -59,6 +59,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
     routeChanged = Signal()
     selectionChanged = Signal(object)
     statusMessage = Signal(str)
+    structureRequested = Signal(object)
 
     def __init__(
         self,
@@ -331,6 +332,65 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         )
         self.selectionChanged.emit(self.controller.session.selection)
         self.viewport().update()
+
+    def contextMenuEvent(self, event) -> None:
+        """Right click offers the existing StepNX Split/Block command paths.
+
+        Capturing an EditorEventScope before QMenu.exec prevents a stale menu
+        choice from editing another chart after route/document changes.
+        """
+        hit = self.layout_model.hit_test(
+            event.pos().x() + self.horizontalScrollBar().value(),
+            event.pos().y(),
+            scroll_y=self._scroll_y(),
+        )
+        if hit.split_id is None or hit.block_id is None:
+            return
+        self._cancel_interaction()
+        try:
+            scope = self.controller.capture_scope(hit.split_id, hit.block_id)
+        except (EditorContextError, ValueError) as exc:
+            self.statusMessage.emit(str(exc))
+            return
+        menu = QMenu(self)
+        mapping = {}
+        def add(label, key, *, enabled=True):
+            item = menu.addAction(label)
+            item.setEnabled(enabled)
+            mapping[item] = key
+
+        if hit.region is StepEditRegion.BODY and hit.row_index is not None:
+            add("Split here", "split-here", enabled=hit.row_index > 0)
+        add("Insert empty Split after", "insert-split")
+        add("Resize Split (Measure | Beat | Row)...", "resize-split")
+        add(
+            "Merge with next Split...", "merge-splits",
+            enabled=hit.split_id != self.layout_model.segments[-1].split_id,
+        )
+        add("Delete Split...", "delete-split", enabled=len(self.controller.document.splits) > 1)
+        menu.addSeparator()
+        add("Insert empty Block", "insert-block")
+        add("Duplicate Block", "duplicate-block")
+        add(
+            "Delete Block...", "delete-block",
+            enabled=len(self.controller.snapshot.split(hit.split_id).blocks) > 1,
+        )
+        menu.addSeparator()
+        add("Previous Block", "previous-block")
+        add("Next Block", "next-block")
+        selected = menu.exec(event.globalPos())
+        action = mapping.get(selected)
+        if action is None:
+            return
+        try:
+            self.controller._validate_scope(scope)
+            if action in ("previous-block", "next-block"):
+                self.cycle_block(hit.split_id, -1 if action == "previous-block" else 1)
+            else:
+                self.structureRequested.emit((action, scope, hit.row_index))
+        except (EditorContextError, KeyError, ValueError) as exc:
+            self.statusMessage.emit(str(exc))
+        event.accept()
 
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
