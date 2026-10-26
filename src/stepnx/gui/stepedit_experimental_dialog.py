@@ -13,11 +13,14 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QInputDialog,
     QPushButton,
     QVBoxLayout,
 )
 
-from stepnx.authoring.editor_controller import EditorController, InteractionTool
+from stepnx.authoring.editor_controller import EditorContextError, EditorController, InteractionTool
+from stepnx.gui.stepedit_structure_actions import plan_structure_action
+from stepnx.authoring.selection import CellSelection
 from stepnx.gui.stepedit_visual_style import EDITOR_ZOOM_PRESETS
 from stepnx.authoring.tools import NoteTool
 from stepnx.gui.stepedit_experimental_viewport import StepEditExperimentalViewport
@@ -86,6 +89,7 @@ class StepEditExperimentalDialog(QDialog):
         self.split_combo.currentIndexChanged.connect(self._on_split_changed)
         self.block_combo.currentIndexChanged.connect(self._on_block_changed)
         self.viewport_widget.routeChanged.connect(self._populate_splits)
+        self.viewport_widget.structureRequested.connect(self._on_structure_requested)
         self.viewport_widget.statusMessage.connect(self.status.setText)
         self.viewport_widget.selectionChanged.connect(
             lambda selection: self.status.setText(f"{len(selection.targets)} cells selected")
@@ -139,6 +143,57 @@ class StepEditExperimentalDialog(QDialog):
         split_id, block_id = self.split_combo.currentData(), self.block_combo.currentData()
         if split_id is not None and block_id is not None:
             self.viewport_widget.select_block(split_id, block_id)
+
+    def _on_structure_requested(self, request) -> None:
+        action, scope, row_index = request
+        controller = self.viewport_widget.controller
+        try:
+            controller._validate_scope(scope)
+            doc = controller.document
+            requested_rows = None
+            if action == "resize-split":
+                from stepnx.gui.phase10_install import _format_mbr, _parse_mbr
+                block = controller.snapshot.split(scope.split_id).block(scope.block_id)
+                beat_split = int(block.beat_split)
+                beat_measure = int(block.beat_measure)
+                current = _format_mbr(
+                    block.row_count, beat_split, beat_measure,
+                )
+                value, accepted = QInputDialog.getText(
+                    self, "Resize Split",
+                    f"Measure | Beat | Row (Beat Split {beat_split}, Measure {beat_measure}):",
+                    text=current,
+                )
+                if not accepted:
+                    return
+                requested_rows = _parse_mbr(value, beat_split, beat_measure)
+            plan = plan_structure_action(
+                doc, action, scope.split_id, scope.block_id,
+                row_index=row_index, requested_rows=requested_rows,
+            )
+            # A structural dialog runs its own Qt event loop. Validate
+            # original document/Block again immediately before executing.
+            if plan.confirmation:
+                decision = QMessageBox.question(
+                    self, plan.description, plan.confirmation,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if decision != QMessageBox.StandardButton.Yes:
+                    return
+            controller._validate_scope(scope)
+            self.viewport_widget._cancel_interaction()
+            scroll = self.viewport_widget._scroll_y()
+            updated = controller.execute(plan.command)
+            if updated is doc:
+                return
+            controller.session.selection = CellSelection()
+            self.viewport_widget._rebuild_layout(scroll_y=scroll)
+            self.viewport_widget.documentChanged.emit(updated)
+            self.viewport_widget.routeChanged.emit()
+            self.status.setText(f"{plan.description}: modified in memory; Save All in Studio.")
+        except (EditorContextError, ValueError, KeyError, IndexError) as exc:
+            QMessageBox.warning(self, "Cannot edit structure", str(exc))
 
     def reject(self) -> None:
         self.viewport_widget._cancel_interaction()
