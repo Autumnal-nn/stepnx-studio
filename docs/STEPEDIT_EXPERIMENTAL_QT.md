@@ -27,37 +27,46 @@ The current Timeline and gameplay preview remain unchanged.
 - An `EditorEventScope` is captured for each pointer-down and a `StrokeLease` is required on pointer-up. Changing Split/Block, cancelling a stroke, or returning to the main editor prevents an earlier pointer event from committing.
 - Visual painting uses `StepEditGridLayout`; it does not serialize NX20 or build a second persistence path.
 - The existing main-window `_apply_document` is invoked on return **only if** the command stack's current document has changed. That method continues to own tab state, diagnostics, routes and workspace save visibility.
-- The experimental renderer now uses a fixed-size provisional vector tile artist and is **not yet** sprite- or noteskin-identical to STEPEdit.
+- The experimental renderer now uses the available 96px noteskin atlas with a vector fallback; its sprite content is **not** identical to STEPEdit's proprietary textures.
 - Dense rows may require higher zoom to distinguish physically adjacent input targets.
 
-## Visual matching against STEPEdit
+## Visual matching and field zoom
 
-The original 5.63 static analysis confirms a 24-pixel lane/tile pitch and
-`SetScrollSizes(..., sizeLine.cy = 24 * zoom)`; the legacy wheel handler
-delegates to `CScrollView::OnMouseWheel`. The experimental Qt surface now uses
-the OS-provided wheel-lines-per-notch setting (normally three), rather than
-Qt's unrelated default scrollbar step; one normal notch therefore travels
-`24 * zoom * system_lines` logical pixels. High-resolution wheel deltas
-accumulate without losing fractional movement.
+The static STEPEdit 5.63 analysis confirms a 24-pixel lane pitch in the
+original implementation and `SetScrollSizes(..., sizeLine.cy = 24 * zoom)`;
+its wheel handler delegates to `CScrollView::OnMouseWheel`. The experimental
+Qt implementation retains OS wheel-lines-per-notch behavior, adapted to its
+new base grid scale.
 
-Reference screenshot measurements (280x844, provided during the M4 review):
+For the StepNX viewport we deliberately use the project's **existing 96×96
+noteskin atlas tiles**, rather than copying STEPEdit's copyrighted sprites or
+drawing reduced provisional icons. The bundled royalty-free pack and the
+locally selected noteskin are both supported, including bank-aware taps, Hold
+terminals/bodies, normal items and Division artwork. Unsupported/raw variants
+retain a vector fallback without modifying the chart. Frame zero is used for
+deterministic authoring display.
 
-- Grid background: `#FFFFEB`; indicator: `#D4D0C8`.
-- Vertical and main beat-grid lines: `#005494`; intermediate grid lines:
-  `#B2D7EB`; border/seam: `#FF0000`.
-- Grid lane pitch: 24 px. **All note tiles are 24x24 px at every zoom.**
-- Sprite origins are the **top-left of their encoded logical row**, not
-  centered in a row; sprites may overlap at dense zoom/BeatSplit.
-- Draw the grid in its own pass before drawing sprites, so a later grid line
-  cannot obscure a note.
+- **Field zoom: 25%, 50%, 75%, 100%, 125%, 150%, 175%, 200%.**
+- At 100%, the lane and noteskin tile are 96px; at 25%, 24px; at 200%, 192px.
+  Horizontal lane width, sprite dimensions, indicator, and horizontal grid
+  pitch change together. The underlying BeatSplit/timing never changes.
+- Vertical beat-space uses 192px at 100%, scaled with the same factor. The
+  tile does **not** shrink merely because adjacent note rows are closer than
+  its displayed height. Sprites may overlap at dense subdivisions.
+- Notes are top-aligned at each encoded row origin, not centered.
+- Grid palette **cycles by physical Split order**, independently of its
+  selected alternative: `#FFFFEB`, `#EBFFFF`, `#EBFFEB`, `#FFEBFF`;
+  Split 5 restarts with Split 1's color.
+- The selected cells use opaque `#C8C8C8` behind grid lines and sprites.
+- Vertical/main grid `#005494`; minor grid `#B2D7EB`; border `#FF0000`;
+  indicator `#D4D0C8`.
+- Original source lanes are honored when looking up atlas tiles. Half Double
+  chart local lanes 0..5 are not confused with source lanes 2..7.
 
-**Fidelity limitation:** the M4 application uses a provisional 24x24 vector
-tile artist. It does not contain the copyrighted STEPEdit bitmap/mask atlas,
-whose exact color, transparency, animation frames and item glyph mappings
-cannot be reconstructed reliably from one screenshot. Pixel-identical note
-rendering is therefore **not yet achieved**, despite pixel-accurate geometry
-and palette sampled from the image. An original sprite atlas or suitably
-licensed equivalent is needed for that part of the comparison.
+This is **not a pixel-perfect STEPEdit clone**. The existing StepNX noteskin
+assets match the native 96×96 rendering contract but not necessarily the
+original STEPEdit 5.63 textures, masks or menu chrome. The visual coordinate
+contract and asset provenance remain separate.
 
 ## Release gates before promotion to default
 
