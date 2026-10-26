@@ -170,6 +170,59 @@ class StepEditAtlasArtist:
         painter.drawPixmap(destination, pixmap, QRectF(*atlas.tile(column, row)))
         return True
 
+    def draw_hold_shaft(
+        self, painter: QPainter, destination: QRectF, source_lane: int,
+        raw: bytes,
+    ) -> bool:
+        """Stretch the atlas's repeatable 8px shaft strip across a real span.
+
+        Terminal artwork is deliberately NOT drawn by this path. The caller
+        draws every shaft first, then only the head/tail overlays. This avoids
+        rasterizing a 96px terminal on every encoded Hold-body row.
+        """
+        if destination.height() <= 0:
+            return False
+        pack = self.pack
+        bank = pack.bank(raw[2])
+        if bank is None:
+            return False
+        atlas = bank.animation[0]
+        pixmap = self._pixmap(atlas)
+        if pixmap is None:
+            return False
+        x, y, width, _ = atlas.tile(source_lane % 5, 0)
+        painter.drawPixmap(destination, pixmap, QRectF(x, y, width, 8))
+        return True
+
+    def draw_hold_terminal(
+        self, painter: QPainter, destination: QRectF, source_lane: int,
+        raw: bytes,
+    ) -> bool:
+        """Draw only a complete Hold head/tail atlas tile, never a body."""
+        kind = raw[0] & 0x0F
+        if kind == 0xB:
+            return True
+        if kind not in (0x7, 0xF):
+            return False
+        bank = self.pack.bank(raw[2])
+        if bank is not None:
+            plan = hold_atlas_plan(kind)
+            if plan.terminal_row is not None and self._tile(
+                painter, bank.animation[0], source_lane % 5,
+                plan.terminal_row, destination,
+            ):
+                return True
+        # Unsupported bank still gets an informative fallback at fixed scale.
+        painter.save()
+        try:
+            factor = destination.width() / TILE_PIXELS
+            painter.translate(destination.x(), destination.y())
+            painter.scale(factor, factor)
+            StepEditTileArtist.draw(painter, 0, 0, source_lane, raw)
+        finally:
+            painter.restore()
+        return False
+
     def draw(self, painter: QPainter, destination: QRectF, source_lane: int,
              raw: bytes, row_pitch: float) -> bool:
         """Return True if an existing noteskin atlas drew the note."""
@@ -184,23 +237,7 @@ class StepEditAtlasArtist:
                 if self._tile(painter, bank.animation[0], lane, atlas_row, destination):
                     return True
         elif kind in (7, 0xB, 0xF):
-            bank = pack.bank(subtype)
-            if bank is not None:
-                atlas = bank.animation[0]
-                plan = hold_atlas_plan(kind)
-                if plan.terminal_row is not None:
-                    if self._tile(painter, atlas, lane, plan.terminal_row, destination):
-                        return True
-                else:
-                    pixmap = self._pixmap(atlas)
-                    if pixmap is not None:
-                        x, y, w, _ = atlas.tile(lane, 0)
-                        painter.drawPixmap(
-                            QRectF(destination.x(), destination.y(),
-                                   destination.width(), max(1.0, row_pitch)),
-                            pixmap, QRectF(x, y, w, 8),
-                        )
-                        return True
+            return self.draw_hold_terminal(painter, destination, source_lane, raw)
         elif kind == 1 and pack.item_animation and subtype < 32:
             if self._tile(painter, pack.item_animation[0], subtype, 0, destination):
                 return True
