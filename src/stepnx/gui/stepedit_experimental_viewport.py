@@ -339,26 +339,22 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._pressed = None
         if self._lease is not None:
             lease = self._lease
-            self._lease = None
-            if hit.region is StepEditRegion.BODY and (
+            if hit.region is not StepEditRegion.BODY or (
                 hit.split_id, hit.block_id
-            ) == (scope.split_id, scope.block_id):
-                if not self._reject_hold(hit):
-                    try:
-                        self._extend_paint_to(hit)
-                    except (EditorContextError, ValueError) as exc:
-                        self._cancel_interaction()
-                        self.statusMessage.emit(str(exc))
-                        return
-            else:
+            ) != (scope.split_id, scope.block_id):
+                self._cancel_interaction()
+                return
+            if self._reject_hold(hit):
                 self._cancel_interaction()
                 return
             try:
+                self._extend_paint_to(hit)
                 self.controller.finish_stroke(lease)
             except (EditorContextError, ValueError) as exc:
                 self._cancel_interaction()
                 self.statusMessage.emit(str(exc))
                 return
+            self._lease = None
             self._last_paint_hit = None
             self._rebuild_layout(scroll_y=self._scroll_y())
             self.documentChanged.emit(self.controller.document)
