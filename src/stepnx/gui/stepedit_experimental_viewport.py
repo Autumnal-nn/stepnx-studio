@@ -362,7 +362,10 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         if hit.region is StepEditRegion.BODY and hit.row_index is not None:
             add("Split here", "split-here", enabled=hit.row_index > 0)
         add("Insert empty Split after", "insert-split")
-        add("Resize Split (Measure | Beat | Row)...", "resize-split")
+        add(
+            "Resize Split (Measure | Beat | Row)...", "resize-split",
+            enabled=hit.split_id != self.layout_model.segments[-1].split_id,
+        )
         add(
             "Merge with next Split...", "merge-splits",
             enabled=hit.split_id != self.layout_model.segments[-1].split_id,
