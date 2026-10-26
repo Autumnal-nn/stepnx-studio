@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QAbstractScrollArea
+from PySide6.QtWidgets import QAbstractScrollArea, QApplication
 
 from stepnx.authoring.editor_controller import (
     EditorContextError,
@@ -21,6 +21,11 @@ from stepnx.authoring.selection import CellSelection, CellTarget
 from stepnx.authoring.stepedit_layout import StepEditGeometry, StepEditGridLayout, StepEditRegion
 from stepnx.authoring.tools import NoteTool, note_tool_raw
 from stepnx.core.model import EmptyRow, LightmapRow, NoteRow, PackedNoteRow
+from stepnx.gui.stepedit_visual_style import (
+    INDICATOR_BACKGROUND, LANE_BOUNDARY, MAJOR_GRID, MINOR_GRID,
+    NOTE_BACKGROUND, PROPERTIES_BACKGROUND, TILE_PIXELS, VERTICAL_GRID,
+    StepEditTileArtist, wheel_line_pixels, wheel_notch_pixels,
+)
 
 
 _EMPTY = b"\x00\x00\x00\x00"
@@ -66,6 +71,7 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._geometry = StepEditGeometry(vertical_zoom=4)
         self.layout_model = StepEditGridLayout(controller.snapshot, self._geometry)
         self._scroll_scale = 1.0
+        self._wheel_residual = 0.0
         self._lease = None
         self._pressed = None
         self._last_paint_hit = None
@@ -84,6 +90,9 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._scroll_scale = max(1.0, limit / _SCROLL_MAX)
         self.verticalScrollBar().setRange(0, int(math.ceil(limit / self._scroll_scale)))
         self.verticalScrollBar().setPageStep(max(1, int(viewport_height / self._scroll_scale)))
+        self.verticalScrollBar().setSingleStep(
+            max(1, int(round(wheel_line_pixels(self._geometry.vertical_zoom) / self._scroll_scale)))
+        )
         self.horizontalScrollBar().setRange(
             0, max(0, int(math.ceil(self.layout_model.content_width - self.viewport().width())))
         )
@@ -167,6 +176,36 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         self.viewport().update()
+
+    def wheelEvent(self, event) -> None:
+        """Match CScrollView's 24*zoom line step and Windows wheel-line setting.
+
+        Qt default scrollbars use a small, unrelated singleStep; forwarding the
+        event to QAbstractScrollArea makes one notch far slower than STEPEdit.
+        """
+        pixels = event.pixelDelta()
+        if not pixels.isNull():
+            movement = float(pixels.y())
+        else:
+            lines = int(QApplication.wheelScrollLines())
+            movement = (
+                event.angleDelta().y() / 120.0
+            ) * wheel_notch_pixels(
+                self._geometry.vertical_zoom, lines, self.viewport().height()
+            )
+        if not movement:
+            event.accept()
+            return
+        limit = max(0.0, self.layout_model.content_height - self.viewport().height())
+        requested = self._scroll_y() - movement + self._wheel_residual
+        requested = min(limit, max(0.0, requested))
+        position = int(round(requested / self._scroll_scale))
+        self.verticalScrollBar().setValue(position)
+        actual = self._scroll_y()
+        self._wheel_residual = requested - actual
+        if requested == 0.0 or requested == limit:
+            self._wheel_residual = 0.0
+        event.accept()
 
     def _hit(self, event):
         return self.layout_model.hit_test(
@@ -399,68 +438,118 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
         self._cancel_interaction()
         super().hideEvent(event)
 
+    def _draw_grid(self, painter: QPainter, view, scroll: float) -> None:
+        """Draw the STEPEdit lane and beat raster before any note sprites."""
+        seg = view.segment
+        g = self.layout_model.geometry
+        left = self.layout_model.grid_left
+        right = self.layout_model.grid_right
+        top = seg.top - scroll
+        bottom = seg.bottom - scroll
+        painter.fillRect(QRectF(0, top, left, bottom - top), INDICATOR_BACKGROUND)
+        painter.fillRect(QRectF(left, top, right - left, bottom - top), NOTE_BACKGROUND)
+        painter.fillRect(
+            QRectF(right, top, g.property_width, bottom - top),
+            PROPERTIES_BACKGROUND,
+        )
+        painter.setPen(QPen(VERTICAL_GRID, 1))
+        for lane in range(self.controller.snapshot.columns + 1):
+            x = int(round(left + lane * g.lane_pitch))
+            painter.drawLine(x, int(top), x, int(bottom))
+        painter.setPen(QPen(LANE_BOUNDARY, 1))
+        for lane in (0, self.controller.snapshot.columns):
+            x = int(round(left + lane * g.lane_pitch))
+            painter.drawLine(x, int(top), x, int(bottom))
+        if self.controller.snapshot.columns == 10:
+            center_x = int(round(left + 5 * g.lane_pitch))
+            painter.drawLine(center_x, int(top), center_x, int(bottom))
+
+        # One row may represent a fraction of a beat. Use the actual encoded
+        # BeatSplit and BeatMeasure, never the visual tile height.
+        block = self.controller.snapshot.active_block(seg.split_id)
+        measure_rows = max(1, seg.beat_split * max(1, block.beat_measure))
+        for index in range(view.first_row, view.last_row):
+            y = int(round(seg.y_for_row(index) - scroll))
+            major = index % measure_rows == 0
+            painter.setPen(QPen(MAJOR_GRID if major else MINOR_GRID, 1))
+            painter.drawLine(int(left), y, int(right), y)
+
+        # Screenshot: outer right boundary remains red over row highlights.
+        painter.setPen(QPen(LANE_BOUNDARY, 1))
+        painter.drawLine(int(right), int(top), int(right), int(bottom))
+
     def _draw_notes(self, painter: QPainter, segment, first: int, last: int, scroll: float) -> None:
         rows = self.controller.snapshot.active_block(segment.split_id).rows
         spacing = self.layout_model.geometry.lane_pitch
         for index in range(first, last):
-            y = segment.y_for_row(index) - scroll
+            row_top = segment.y_for_row(index) - scroll
             row = rows[index]
-            if segment.row_pitch >= 4.0:
-                painter.setPen(QPen(QColor("#353b48")))
-                painter.drawLine(
-                    int(self.layout_model.grid_left), int(round(y)),
-                    int(self.layout_model.grid_right), int(round(y)),
-                )
             for lane in range(self.controller.snapshot.columns):
                 raw = _raw_cell(row, lane)
                 if isinstance(row, LightmapRow):
-                    kind = 0x1 if lane < 3 and raw[lane] != 0 else 0
+                    kind = 1 if lane < 3 and raw[lane] else 0
                 else:
                     kind = raw[0] & 0x0F
-                x = self.layout_model.x_for_lane(lane)
+                left = self.layout_model.x_for_lane(lane, center=False)
                 if CellTarget(row.stable_id, lane) in self.controller.session.selection.targets:
-                    painter.setPen(QPen(QColor("#ffe089"), 2))
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.setPen(QPen(QColor("#F1AC4B"), 1))
+                    painter.setBrush(QColor(255, 182, 203, 80))
                     painter.drawRect(
-                        int(x - spacing / 2 + 1), int(y),
-                        int(spacing - 2), max(1, int(segment.row_pitch)),
+                        QRectF(left, row_top, spacing, max(24.0, segment.row_pitch))
                     )
                 if not kind:
                     continue
-                radius = min(9.0, max(2.0, segment.row_pitch * 0.36), spacing * 0.37)
-                palette = {
-                    1: "#df9c45", 2: "#c88aff", 3: "#64bfff",
-                    7: "#75d5ff", 0xB: "#5c8cda", 0xF: "#75d5ff",
-                }
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(palette.get(kind, "#dbdce0")))
-                painter.drawRoundedRect(
-                    QRectF(
-                        x - radius, y + segment.row_pitch / 2 - radius,
-                        radius * 2, radius * 2,
-                    ), 3.0, 3.0,
-                )
+
+                # Hold shafts extend between logical rows. The sprite itself
+                # remains exactly 24x24 irrespective of zoom/BeatSplit.
+                if kind in (7, 0xB, 0xF):
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor("#76E6FE"))
+                    if kind == 7:
+                        shaft_top = row_top + 12
+                        shaft_bottom = row_top + segment.row_pitch
+                    elif kind == 0xB:
+                        shaft_top = row_top
+                        shaft_bottom = row_top + segment.row_pitch
+                    else:
+                        shaft_top = row_top
+                        shaft_bottom = row_top + 12
+                    if shaft_bottom > shaft_top:
+                        painter.drawRect(
+                            QRectF(left + 6, shaft_top, 12, shaft_bottom - shaft_top)
+                        )
+
+                # Fixed tile origin is (lane_left, row_top). Do not use
+                # row_pitch/2 or scale to fit dense grids.
+                StepEditTileArtist.draw(painter, left, row_top, lane, raw)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self.viewport())
         try:
-            painter.fillRect(self.viewport().rect(), QColor("#1b1e24"))
+            painter.fillRect(self.viewport().rect(), NOTE_BACKGROUND)
             if not self.layout_model.segments:
                 return
             scroll = self._scroll_y()
-            painter.setPen(QPen(QColor("#425267")))
-            for lane in range(self.controller.snapshot.columns + 1):
-                x = self.layout_model.grid_left + lane * self.layout_model.geometry.lane_pitch
-                painter.drawLine(int(x), 0, int(x), self.viewport().height())
-            for view in self.layout_model.visible_segments(scroll, self.viewport().height()):
+            painter.save()
+            painter.translate(-self.horizontalScrollBar().value(), 0)
+            # A sprite extends up to 24 px past its logical row, including
+            # when multiple row starts occupy a single physical pixel.
+            min_pitch = min(seg.row_pitch for seg in self.layout_model.segments)
+            overscan = min(10_000, max(2, int(math.ceil(TILE_PIXELS / min_pitch)) + 1))
+            visible = self.layout_model.visible_segments(
+                scroll, self.viewport().height(), overscan_rows=overscan
+            )
+            # Two independent passes reproduce STEPEdit's grid-then-sprite
+            # layering, so a dense note is not hidden by a later gridline.
+            for view in visible:
+                self._draw_grid(painter, view, scroll)
+            for view in visible:
                 seg = view.segment
                 self._draw_notes(painter, seg, view.first_row, view.last_row, scroll)
                 caption_y = max(12, int(seg.top - scroll + 14))
                 if caption_y <= self.viewport().height():
-                    painter.setPen(QColor("#b6bfcb"))
-                    painter.drawText(
-                        2, caption_y, f"S{seg.split_index + 1}"
-                    )
+                    painter.setPen(QColor("#050505"))
+                    painter.drawText(2, caption_y, f"{seg.split_index + 1:03d}")
                     painter.drawText(
                         int(self.layout_model.grid_right + 5), caption_y,
                         f"Block {seg.block_index + 1}  BS {seg.beat_split}"
@@ -498,5 +587,6 @@ class StepEditExperimentalViewport(QAbstractScrollArea):
                         x = self.layout_model.x_for_lane(target.lane)
                         painter.drawRect(int(x - 9), int(y + seg.row_pitch / 2 - 9), 18, 18)
                         break
+            painter.restore()
         finally:
             painter.end()
