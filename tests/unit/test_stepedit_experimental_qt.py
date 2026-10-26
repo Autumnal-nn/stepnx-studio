@@ -9,8 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offs
 try:
     from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
     from PySide6.QtTest import QTest
-    from PySide6.QtGui import QImage, QPainter, QWheelEvent
-    from PySide6.QtWidgets import QApplication, QMainWindow, QSpinBox, QTabWidget, QWidget
+    from PySide6.QtGui import QImage, QPainter, QWheelEvent, QContextMenuEvent
+    from PySide6.QtWidgets import QApplication, QMainWindow, QSpinBox, QTabWidget, QWidget, QMenu, QMessageBox
 
     from stepnx.authoring.editor_controller import EditorController, InteractionTool
     from stepnx.authoring.tools import NoteFunction, NoteVisibility
@@ -445,6 +445,50 @@ class ExperimentalQtViewportTests(unittest.TestCase):
             self.assertEqual(dialog.viewport_widget.layout_model.geometry.lane_pitch, 192)
             self.assertEqual(dialog.split_combo.count(), 1)
             self.assertEqual(dialog.block_combo.count(), 1)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+
+    def test_context_menu_produces_structural_action_without_writing_files(self) -> None:
+        dialog = StepEditExperimentalDialog(self.controller, tap_raw=lambda: _RAW)
+        try:
+            view = dialog.viewport_widget
+            x = int(view.layout_model.x_for_lane(1))
+            y = int(view.layout_model.y_for_row(self.split.stable_id, 3, center=True))
+            event = QContextMenuEvent(
+                QContextMenuEvent.Reason.Mouse, QPoint(x, y), QPoint(x, y),
+            )
+            def choose_duplicate(menu, _global_pos):
+                return next(action for action in menu.actions()
+                            if action.text() == "Duplicate Block")
+            with patch.object(QMenu, "exec", choose_duplicate):
+                view.contextMenuEvent(event)
+            self.assertEqual(len(self.controller.document.splits[0].blocks), 2)
+            self.assertEqual(dialog.block_combo.count(), 2)
+            view.undo()
+            self.assertEqual(len(self.controller.document.splits[0].blocks), 1)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+
+    def test_context_menu_confirmation_no_rejects_destructive_action(self) -> None:
+        from stepnx.authoring.structure import StructureTarget, insert_empty_split_after
+        doc = insert_empty_split_after(
+            self.doc, StructureTarget(self.split.stable_id, self.block.stable_id),
+        ).apply(self.doc)
+        controller = EditorController(CommandStack(doc))
+        dialog = StepEditExperimentalDialog(controller)
+        try:
+            scope = controller.capture_scope(
+                self.split.stable_id, self.block.stable_id,
+            )
+            before = serialize(controller.document)
+            with patch.object(
+                QMessageBox, "question",
+                return_value=QMessageBox.StandardButton.No,
+            ):
+                dialog._on_structure_requested(("merge-splits", scope, 2))
+            self.assertEqual(serialize(controller.document), before)
         finally:
             dialog.close()
             dialog.deleteLater()
