@@ -296,6 +296,25 @@ class EditorController:
         self._refresh_note_block(scope.block_id)
         return result
 
+    def apply_note_batch(
+        self, scope: EditorEventScope, edits: tuple[NoteEdit, ...]
+    ):
+        """Atomically apply a validated same-Block gesture, e.g. a Hold span."""
+        self._validate_scope(scope)
+        if self.session.gesture is not None:
+            raise EditorContextError("finish or cancel painting before a Hold edit")
+        if not edits:
+            raise ValueError("note batch cannot be empty")
+        if len({(e.row_id, e.lane) for e in edits}) != len(edits):
+            raise ValueError("duplicate note targets in atomic gesture")
+        for edit in edits:
+            if len(edit.raw) != 4:
+                raise ValueError("NX20 notes must be four bytes")
+            self._validate_target(scope, CellTarget(edit.row_id, edit.lane))
+        result = self._stack.execute(SetNotesAt(tuple(edits)))
+        self._refresh_note_block(scope.block_id)
+        return result
+
     def start_stroke(
         self, scope: EditorEventScope, first_target: CellTarget, raw: bytes
     ) -> StrokeLease:
