@@ -196,11 +196,12 @@ class PackedMetadataDialog(QDialog):
             self.mode.addItem("1", 1)
             self.mode.setCurrentIndex(first)
             self.weight = QSpinBox(self)
-            self.weight.setRange(-1 if first == 0 else -2, 255)
+            self.weight.setRange(-2, 255)
             self.weight.setValue(second)
             form.addRow("Mode:", self.mode)
             form.addRow("Weight:", self.weight)
             self.mode.currentIndexChanged.connect(self._refresh_dm120)
+            self.weight.valueChanged.connect(self._refresh_dm120)
         else:
             raise ValueError(f"unsupported packed metadata kind: {kind}")
         layout.addLayout(form)
@@ -211,9 +212,16 @@ class PackedMetadataDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if kind == "dm120":
+            self._refresh_dm120()
 
     def _refresh_dm120(self, *_args):
-        self.weight.setMinimum(-1 if self.mode.currentData() == 0 else -2)
+        minimum = -1 if self.mode.currentData() == 0 else -2
+        self._ok_button.setEnabled(self.weight.value() >= minimum)
+        self.weight.setToolTip(
+            f"Mode {self.mode.currentData()} supports weights {minimum}..255"
+        )
 
     def values(self) -> tuple[int, int]:
         if self.kind == "u16_range":
