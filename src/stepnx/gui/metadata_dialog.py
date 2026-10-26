@@ -226,38 +226,35 @@ class MetadataCollectionDialog(QDialog):
                 self, definition.label, "Value:", labels, current_index, False
             )
             return definition.choices[labels.index(label)].value if accepted else None
-        if definition.kind is ValueKind.PACKED_U16_RANGE:
-            minimum, maximum = unpack_u16_range(current)
-            text, accepted = QInputDialog.getText(
-                self,
-                definition.label,
-                "Minimum..maximum (unsigned 16-bit):",
-                text=f"{minimum}..{maximum}",
-            )
-            if not accepted:
-                return None
+        if definition.kind in (ValueKind.PACKED_U16_RANGE, ValueKind.PACKED_DM120):
+            from stepnx.gui.typed_inputs import PackedMetadataDialog
+
+            if definition.kind is ValueKind.PACKED_U16_RANGE:
+                first, second = unpack_u16_range(current)
+                kind = "u16_range"
+            else:
+                first, second = unpack_dm120(current)
+                kind = "dm120"
             try:
-                left, right = text.split("..", 1)
-                return pack_u16_range(int(left, 0), int(right, 0))
-            except (ValueError, TypeError) as exc:
-                QMessageBox.critical(self, "Invalid range", str(exc))
+                dialog = PackedMetadataDialog(
+                    definition.label, kind=kind, first=first, second=second, parent=self
+                )
+            except ValueError:
+                QMessageBox.warning(
+                    self,
+                    "Unsupported raw value",
+                    "The stored value is outside the supported typed range. "
+                    "It will be preserved unchanged.",
+                )
                 return None
-        if definition.kind is ValueKind.PACKED_DM120:
-            mode, weight = unpack_dm120(current)
-            text, accepted = QInputDialog.getText(
-                self,
-                definition.label,
-                "Mode/weight (mode 0 or 1; signed weight):",
-                text=f"{mode}/{weight}",
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            first, second = dialog.values()
+            return (
+                pack_u16_range(first, second)
+                if kind == "u16_range"
+                else pack_dm120(first, second)
             )
-            if not accepted:
-                return None
-            try:
-                left, right = text.split("/", 1)
-                return pack_dm120(int(left, 0), int(right, 0))
-            except (ValueError, TypeError) as exc:
-                QMessageBox.critical(self, "Invalid DM120 value", str(exc))
-                return None
         if definition.kind is ValueKind.INT32:
             value = struct.unpack("<i", struct.pack("<I", current))[0]
             result, accepted = QInputDialog.getInt(
