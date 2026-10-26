@@ -7,8 +7,9 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offscreen")
 
 try:
-    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtCore import QPoint, QPointF, Qt
     from PySide6.QtTest import QTest
+    from PySide6.QtGui import QImage, QPainter, QWheelEvent
     from PySide6.QtWidgets import QApplication, QMainWindow, QSpinBox, QTabWidget, QWidget
 
     from stepnx.authoring.editor_controller import EditorController, InteractionTool
@@ -20,6 +21,11 @@ try:
         install_stepedit_experimental,
     )
     from stepnx.gui.stepedit_experimental_viewport import StepEditExperimentalViewport
+    from stepnx.gui.stepedit_visual_style import (
+        TILE_PIXELS, NOTE_BACKGROUND, INDICATOR_BACKGROUND,
+        VERTICAL_GRID, MINOR_GRID, MAJOR_GRID, LANE_BOUNDARY,
+        StepEditTileArtist, note_rect, wheel_notch_pixels,
+    )
 except ImportError as exc:
     QApplication = None
     QT_UNAVAILABLE = str(exc)
@@ -194,6 +200,78 @@ class ExperimentalQtViewportTests(unittest.TestCase):
         self.assertEqual(len(views), 1)
         self.assertLess(views[0].row_count, 100)
         self.widget.viewport().repaint()
+
+    def test_wheel_uses_native_24_zoom_line_step_and_system_line_count(self) -> None:
+        bar = self.widget.verticalScrollBar()
+        bar.setValue(700)
+        start = bar.value()
+        lines = int(QApplication.wheelScrollLines())
+        expected = round(wheel_notch_pixels(
+            4, lines, self.widget.viewport().height()
+        ))
+        event = QWheelEvent(
+            QPointF(150, 100), QPointF(150, 100),
+            QPoint(), QPoint(0, 120), Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False,
+        )
+        self.widget.wheelEvent(event)
+        self.assertTrue(event.isAccepted())
+        self.assertEqual(bar.value(), max(0, start - expected))
+
+    def test_wheel_precision_accumulates_partial_detents(self) -> None:
+        bar = self.widget.verticalScrollBar()
+        bar.setValue(700)
+        start = bar.value()
+        lines = int(QApplication.wheelScrollLines())
+        for _ in range(4):
+            event = QWheelEvent(
+                QPointF(150, 100), QPointF(150, 100),
+                QPoint(), QPoint(0, 30), Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False,
+            )
+            self.widget.wheelEvent(event)
+        self.assertEqual(
+            bar.value(),
+            max(0, start - round(wheel_notch_pixels(
+                4, lines, self.widget.viewport().height()
+            ))),
+        )
+
+    def test_tap_sprite_is_top_aligned_and_fixed_at_every_zoom(self) -> None:
+        doc = self.stack.execute(
+            SetNoteAt(self.block.rows[2].stable_id, 1, _RAW)
+        )
+        self.controller.sync_external_change()
+        self.widget._rebuild_layout()
+        for zoom in (1, 4, 16):
+            with self.subTest(zoom=zoom):
+                self.widget.set_zoom(zoom)
+                seg = self.widget.layout_model.segment(self.split.stable_id)
+                canvas = QImage(300, 300, QImage.Format.Format_ARGB32)
+                canvas.fill(0)
+                painter = QPainter(canvas)
+                try:
+                    with patch.object(StepEditTileArtist, "draw", wraps=StepEditTileArtist.draw) as spy:
+                        self.widget._draw_notes(painter, seg, 2, 3, scroll=0)
+                    self.assertEqual(spy.call_count, 1)
+                    args = spy.call_args.args
+                    left, top = args[1], args[2]
+                    rect = note_rect(left, top)
+                    self.assertEqual(rect.width(), TILE_PIXELS)
+                    self.assertEqual(rect.height(), TILE_PIXELS)
+                    self.assertAlmostEqual(top, seg.y_for_row(2))
+                    self.assertAlmostEqual(left, self.widget.layout_model.x_for_lane(1, center=False))
+                    self.assertNotAlmostEqual(top, seg.y_for_row(2, center=True))
+                finally:
+                    painter.end()
+
+    def test_palette_matches_stepedit_reference_screenshot(self) -> None:
+        self.assertEqual(NOTE_BACKGROUND.name().lower(), "#ffffeb")
+        self.assertEqual(INDICATOR_BACKGROUND.name().lower(), "#d4d0c8")
+        self.assertEqual(VERTICAL_GRID.name().lower(), "#005494")
+        self.assertEqual(MINOR_GRID.name().lower(), "#b2d7eb")
+        self.assertEqual(MAJOR_GRID.name().lower(), "#005494")
+        self.assertEqual(LANE_BOUNDARY.name().lower(), "#ff0000")
 
     def test_modal_window_exposes_controllers_and_zoom(self) -> None:
         dialog = StepEditExperimentalDialog(self.controller, tap_raw=lambda: _RAW)
