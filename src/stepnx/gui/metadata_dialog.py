@@ -90,10 +90,29 @@ class MetadataCollectionDialog(QDialog):
     def drafts(self) -> tuple[MetadataDraft, ...]:
         return tuple(self._drafts)
 
+    def _patched_raw_scope(self) -> bool:
+        return self.profile == "nxa-step5-patched" and self.scope in (
+            MetadataScope.HEADER, MetadataScope.DIVISION
+        )
+
+    def _ask_raw_u32(self, title: str, current: int) -> int | None:
+        from stepnx.gui.typed_inputs import RawU32Dialog
+        dialog = RawU32Dialog(title, current, self)
+        return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+    def _ask_unknown_patched_value(self, current: int) -> int | None:
+        if self.scope is MetadataScope.HEADER:
+            return self._ask_raw_u32("Raw Header value", current)
+        from stepnx.gui.typed_inputs import PatchedUnknownDivisionDialog
+        dialog = PatchedUnknownDivisionDialog(current, self)
+        return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
     def _definition(self, draft: MetadataDraft):
         return metadata_definition(self.profile, self.scope, draft.meta_id)
 
     def _is_editable(self, draft: MetadataDraft) -> bool:
+        if self._patched_raw_scope():
+            return True
         definition = self._definition(draft)
         return bool(
             definition
@@ -153,21 +172,34 @@ class MetadataCollectionDialog(QDialog):
     def _add(self) -> None:
         definitions = self._candidate_definitions()
         labels = [f"{item.meta_id}: {item.label}" for item in definitions]
-        if not labels:
+        if not labels and not self._patched_raw_scope():
             QMessageBox.information(
                 self, "No fields", "This profile exposes no authorable fields here."
             )
             return
+        if self._patched_raw_scope():
+            labels.append("Custom raw ID...")
         label, accepted = QInputDialog.getItem(
             self, "Add metadata", "Field:", labels, 0, False
         )
         if not accepted:
             return
-        definition = definitions[labels.index(label)]
-        value = self._ask_value(definition, 0)
+        if self._patched_raw_scope() and label == "Custom raw ID...":
+            meta_id = self._ask_raw_u32("Raw metadata ID", 0)
+            if meta_id is None:
+                return
+            definition = metadata_definition(self.profile, self.scope, meta_id)
+            value = (
+                self._ask_value(definition, 0)
+                if definition else self._ask_unknown_patched_value(0)
+            )
+        else:
+            definition = definitions[labels.index(label)]
+            meta_id = definition.meta_id
+            value = self._ask_value(definition, 0)
         if value is None:
             return
-        self._drafts.append(MetadataDraft(definition.meta_id, value))
+        self._drafts.append(MetadataDraft(meta_id, value))
         self._refresh(len(self._drafts) - 1)
 
     def _edit(self, *args) -> None:
@@ -183,7 +215,11 @@ class MetadataCollectionDialog(QDialog):
                 "This entry is preserved but has no safe typed editor in the active profile.",
             )
             return
-        value = self._ask_value(definition, draft.value)
+        value = (
+            self._ask_unknown_patched_value(draft.value)
+            if definition is None and self._patched_raw_scope()
+            else self._ask_value(definition, draft.value)
+        )
         if value is None:
             return
         self._drafts[row] = MetadataDraft(draft.meta_id, value, draft.stable_id)
@@ -212,6 +248,15 @@ class MetadataCollectionDialog(QDialog):
         self._refresh(target)
 
     def _ask_value(self, definition, current: int) -> int | None:
+        if self._patched_raw_scope():
+            option, accepted = QInputDialog.getItem(
+                self, definition.label, "Input representation:",
+                ["Typed", "Raw uint32"], 0, False,
+            )
+            if not accepted:
+                return None
+            if option == "Raw uint32":
+                return self._ask_raw_u32(definition.label, current)
         if definition.kind is ValueKind.ENUM:
             labels = [f"{item.value}: {item.label}" for item in definition.choices]
             current_index = next(
