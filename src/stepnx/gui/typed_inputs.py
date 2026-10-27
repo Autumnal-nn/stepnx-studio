@@ -234,10 +234,17 @@ class PackedMetadataDialog(QDialog):
 class RawU32Dialog(QDialog):
     """Exact uint32 entry, including hexadecimal and undocumented bit patterns."""
 
-    def __init__(self, title: str, value: int, parent=None):
+    def __init__(
+        self, title: str, value: int, parent=None, *,
+        minimum: int = 0, maximum: int = 0xFFFFFFFF,
+    ):
         super().__init__(parent)
-        if not 0 <= value <= 0xFFFFFFFF:
-            raise ValueError("value must be uint32")
+        if not 0 <= minimum <= maximum <= 0xFFFFFFFF:
+            raise ValueError("invalid uint32 bounds")
+        if not minimum <= value <= maximum:
+            raise ValueError("initial value outside supported range")
+        self.minimum = minimum
+        self.maximum = maximum
         self.setWindowTitle(title)
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -262,7 +269,9 @@ class RawU32Dialog(QDialog):
         try:
             self.value()
         except ValueError:
-            self.error_label.setText("Enter an unsigned 32-bit integer.")
+            self.error_label.setText(
+                f"Enter a value between {self.minimum} and {self.maximum}."
+            )
             self._ok.setEnabled(False)
         else:
             self.error_label.setText("")
@@ -273,8 +282,8 @@ class RawU32Dialog(QDialog):
         if not text:
             raise ValueError("empty value")
         value = int(text, 0) if text.lower().startswith(("0x", "0b", "0o")) else int(text, 10)
-        if not 0 <= value <= 0xFFFFFFFF:
-            raise ValueError("value must fit unsigned 32-bit storage")
+        if not self.minimum <= value <= self.maximum:
+            raise ValueError("value outside supported bounds")
         return value
 
 
