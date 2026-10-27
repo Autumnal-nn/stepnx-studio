@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QComboBox,
+    QLineEdit,
+    QCheckBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -227,3 +229,50 @@ class PackedMetadataDialog(QDialog):
         if self.kind == "u16_range":
             return self.range_row.values()
         return int(self.mode.currentData()), self.weight.value()
+
+
+class RawU32Dialog(QDialog):
+    """Exact uint32 entry, including hexadecimal and undocumented bit patterns."""
+
+    def __init__(self, title: str, value: int, parent=None):
+        super().__init__(parent)
+        if not 0 <= value <= 0xFFFFFFFF:
+            raise ValueError("value must be uint32")
+        self.setWindowTitle(title)
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.raw_edit = QLineEdit(f"0x{value:08X}", self)
+        self.raw_edit.setAccessibleName("Raw unsigned 32-bit value")
+        form.addRow("Value (hex or decimal):", self.raw_edit)
+        layout.addLayout(form)
+        self.error_label = QLabel(self)
+        layout.addWidget(self.error_label)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        self._ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.raw_edit.textChanged.connect(self._refresh)
+        self._refresh()
+
+    def _refresh(self, *_args):
+        try:
+            self.value()
+        except ValueError:
+            self.error_label.setText("Enter an unsigned 32-bit integer.")
+            self._ok.setEnabled(False)
+        else:
+            self.error_label.setText("")
+            self._ok.setEnabled(True)
+
+    def value(self) -> int:
+        text = self.raw_edit.text().strip()
+        if not text:
+            raise ValueError("empty value")
+        value = int(text, 0) if text.lower().startswith(("0x", "0b", "0o")) else int(text, 10)
+        if not 0 <= value <= 0xFFFFFFFF:
+            raise ValueError("value must fit unsigned 32-bit storage")
+        return value
