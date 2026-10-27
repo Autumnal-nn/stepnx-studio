@@ -304,6 +304,11 @@ class MetadataCollectionDialog(QDialog):
                 if kind == "u16_range"
                 else pack_dm120(first, second)
             )
+        if definition.kind is ValueKind.BITMASK and definition.bits:
+            from stepnx.gui.typed_inputs import BitmaskDialog
+
+            dialog = BitmaskDialog(definition.label, current, definition.bits, self)
+            return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
         if definition.kind is ValueKind.INT32:
             value = struct.unpack("<i", struct.pack("<I", current))[0]
             result, accepted = QInputDialog.getInt(
