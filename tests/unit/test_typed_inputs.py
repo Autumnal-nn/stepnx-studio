@@ -11,6 +11,7 @@ try:
         LabeledRangeRow,
         PackedMetadataDialog,
         RawU32Dialog,
+        BitmaskDialog,
         PatchedUnknownDivisionDialog,
         MbrSpinRow,
         ResizeSplitDialog,
@@ -64,6 +65,23 @@ class TypedInputsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             row.set_values(5, 32768)
         self.assertEqual(row.values(), (5, -2))
+
+    def test_bitmask_preserves_undocumented_bits_on_known_flag_change(self):
+        from stepnx.core.profiles import BitChoice
+
+        bits = (BitChoice(1, "First"), BitChoice(4, "Third"))
+        initial = 0x80000003
+        dialog = BitmaskDialog("Flags", initial, bits)
+        self.assertEqual(dialog.value(), initial)
+        dialog._boxes[0][1].setChecked(False)
+        self.assertEqual(dialog.value(), 0x80000002)
+        dialog._boxes[1][1].setChecked(True)
+        self.assertEqual(dialog.value(), 0x80000006)
+        dialog.raw_mode.setChecked(True)
+        dialog.raw_edit.setText("0xFFFFFFFF")
+        self.assertEqual(dialog.value(), 0xFFFFFFFF)
+        dialog.raw_edit.setText("-1")
+        self.assertFalse(dialog._ok.isEnabled())
 
     def test_bounded_raw_u32_does_not_clamp_or_accept_out_of_range(self):
         dialog = RawU32Dialog("Bounded", 12, minimum=0, maximum=31)
