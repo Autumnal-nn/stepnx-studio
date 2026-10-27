@@ -265,8 +265,12 @@ class MetadataCollectionDialog(QDialog):
                     for index, item in enumerate(definition.choices)
                     if item.value == current
                 ),
-                0,
+                None,
             )
+            if current_index is None:
+                # Unknown enum values are legitimate data. Never replace one
+                # implicitly with the first known choice.
+                return self._ask_raw_u32(definition.label, current)
             label, accepted = QInputDialog.getItem(
                 self, definition.label, "Value:", labels, current_index, False
             )
@@ -325,25 +329,17 @@ class MetadataCollectionDialog(QDialog):
             return (
                 struct.unpack("<I", struct.pack("<f", result))[0] if accepted else None
             )
-        prompt = "Unsigned value (decimal or 0x hexadecimal):"
-        if definition.kind is ValueKind.BITMASK and definition.bits:
-            prompt += "\n" + ", ".join(
-                f"0x{item.mask:X}={item.label}" for item in definition.bits
-            )
-        text, accepted = QInputDialog.getText(
-            self, definition.label, prompt, text=str(current)
+        from stepnx.gui.typed_inputs import RawU32Dialog
+
+        minimum = definition.minimum if definition.minimum is not None else 0
+        maximum = definition.maximum if definition.maximum is not None else 0xFFFFFFFF
+        if self._patched_raw_scope():
+            minimum, maximum = 0, 0xFFFFFFFF
+        # Existing out-of-range values are preserved and can still be edited
+        # without changing the engine profile's advertised input bounds.
+        if not minimum <= current <= maximum:
+            return self._ask_raw_u32(definition.label, current)
+        dialog = RawU32Dialog(
+            definition.label, current, self, minimum=minimum, maximum=maximum
         )
-        if not accepted:
-            return None
-        try:
-            value = int(text, 0)
-            if not 0 <= value <= 0xFFFFFFFF:
-                raise ValueError("value must fit unsigned 32-bit storage")
-            if definition.minimum is not None and value < definition.minimum:
-                raise ValueError(f"value must be at least {definition.minimum}")
-            if definition.maximum is not None and value > definition.maximum:
-                raise ValueError(f"value must be at most {definition.maximum}")
-            return value
-        except ValueError as exc:
-            QMessageBox.critical(self, "Invalid value", str(exc))
-            return None
+        return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
