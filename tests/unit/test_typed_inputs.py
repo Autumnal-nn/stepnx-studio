@@ -10,6 +10,8 @@ try:
     from stepnx.gui.typed_inputs import (
         LabeledRangeRow,
         PackedMetadataDialog,
+        RawU32Dialog,
+        PatchedUnknownDivisionDialog,
         MbrSpinRow,
         ResizeSplitDialog,
         mbr_to_rows,
@@ -62,6 +64,39 @@ class TypedInputsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             row.set_values(5, 32768)
         self.assertEqual(row.values(), (5, -2))
+
+    def test_raw_u32_accepts_unknown_bits_and_full_unsigned_range(self):
+        dialog = RawU32Dialog("Raw", 0xFFFFFFFF)
+        self.assertEqual(dialog.value(), 0xFFFFFFFF)
+        dialog.raw_edit.setText("3735928559")
+        self.assertEqual(dialog.value(), 0xDEADBEEF)
+        dialog.raw_edit.setText("4294967296")
+        self.assertFalse(dialog._ok.isEnabled())
+
+    def test_unknown_patched_division_defaults_to_min_max(self):
+        dialog = PatchedUnknownDivisionDialog(0x0002FFFF)
+        self.assertFalse(dialog.raw_mode.isChecked())
+        self.assertEqual(dialog.range_row.values(), (65535, 2))
+        self.assertEqual(dialog.value(), 0x0002FFFF)
+        dialog.raw_mode.setChecked(True)
+        dialog.raw_edit.setText("0xDEADBEEF")
+        self.assertEqual(dialog.value(), 0xDEADBEEF)
+
+    def test_patched_scope_unlocks_unknown_entries_without_unlocking_native(self):
+        from stepnx.authoring.metadata import MetadataDraft
+        from stepnx.core.profiles import MetadataScope
+        from stepnx.gui.metadata_dialog import MetadataCollectionDialog
+
+        unknown = MetadataDraft(0xF0000001, 0xDEADBEEF)
+        for scope in (MetadataScope.HEADER, MetadataScope.DIVISION):
+            patched = MetadataCollectionDialog(
+                (unknown,), "nxa-step5-patched", scope
+            )
+            native = MetadataCollectionDialog(
+                (unknown,), "nxa-native", scope
+            )
+            self.assertTrue(patched._is_editable(unknown))
+            self.assertFalse(native._is_editable(unknown))
 
     def test_packed_range_dialog_preserves_unsigned_endpoints(self):
         dialog = PackedMetadataDialog(
