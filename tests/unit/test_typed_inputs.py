@@ -65,6 +65,19 @@ class TypedInputsTests(unittest.TestCase):
             row.set_values(5, 32768)
         self.assertEqual(row.values(), (5, -2))
 
+    def test_bounded_raw_u32_does_not_clamp_or_accept_out_of_range(self):
+        dialog = RawU32Dialog("Bounded", 12, minimum=0, maximum=31)
+        self.assertEqual(dialog.value(), 12)
+        dialog.raw_edit.setText("0x20")
+        self.assertFalse(dialog._ok.isEnabled())
+        with self.assertRaises(ValueError):
+            dialog.value()
+        dialog.raw_edit.setText("31")
+        self.assertTrue(dialog._ok.isEnabled())
+        self.assertEqual(dialog.value(), 31)
+        with self.assertRaises(ValueError):
+            RawU32Dialog("Bounded", 32, minimum=0, maximum=31)
+
     def test_raw_u32_accepts_unknown_bits_and_full_unsigned_range(self):
         dialog = RawU32Dialog("Raw", 0xFFFFFFFF)
         self.assertEqual(dialog.value(), 0xFFFFFFFF)
