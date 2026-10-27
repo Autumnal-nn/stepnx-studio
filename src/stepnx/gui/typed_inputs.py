@@ -276,3 +276,66 @@ class RawU32Dialog(QDialog):
         if not 0 <= value <= 0xFFFFFFFF:
             raise ValueError("value must fit unsigned 32-bit storage")
         return value
+
+
+class PatchedUnknownDivisionDialog(QDialog):
+    """Unknown Division metadata defaults to two packed uint16 endpoints."""
+
+    def __init__(self, value: int, parent=None):
+        super().__init__(parent)
+        from stepnx.core.profiles import unpack_u16_range
+
+        self.setWindowTitle("Unknown Division value")
+        layout = QVBoxLayout(self)
+        self.range_row = LabeledRangeRow(minimum=0, maximum=0xFFFF, parent=self)
+        self.range_row.set_values(*unpack_u16_range(value))
+        layout.addWidget(self.range_row)
+        self.raw_mode = QCheckBox("Edit as raw uint32 instead", self)
+        layout.addWidget(self.raw_mode)
+        self.raw_edit = QLineEdit(f"0x{value:08X}", self)
+        self.raw_edit.setEnabled(False)
+        layout.addWidget(self.raw_edit)
+        self.validation = QLabel(self)
+        layout.addWidget(self.validation)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        self._ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.raw_mode.toggled.connect(self._mode_changed)
+        self.raw_edit.textChanged.connect(self._validate)
+        self._validate()
+
+    def _mode_changed(self, raw: bool):
+        self.range_row.setEnabled(not raw)
+        self.raw_edit.setEnabled(raw)
+        self._validate()
+
+    def _validate(self, *_args):
+        if not self.raw_mode.isChecked():
+            self._ok.setEnabled(True)
+            self.validation.setText("")
+            return
+        try:
+            self.value()
+        except ValueError:
+            self.validation.setText("Enter an unsigned 32-bit integer.")
+            self._ok.setEnabled(False)
+        else:
+            self.validation.setText("")
+            self._ok.setEnabled(True)
+
+    def value(self) -> int:
+        from stepnx.core.profiles import pack_u16_range
+        if not self.raw_mode.isChecked():
+            return pack_u16_range(*self.range_row.values())
+        raw = self.raw_edit.text().strip()
+        if not raw:
+            raise ValueError("empty value")
+        value = int(raw, 0) if raw.lower().startswith(("0x", "0b", "0o")) else int(raw, 10)
+        if not 0 <= value <= 0xFFFFFFFF:
+            raise ValueError("value must fit unsigned 32-bit storage")
+        return value
