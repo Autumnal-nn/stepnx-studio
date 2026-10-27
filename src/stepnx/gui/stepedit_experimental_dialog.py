@@ -152,21 +152,18 @@ class StepEditExperimentalDialog(QDialog):
             doc = controller.document
             requested_rows = None
             if action == "resize-split":
-                from stepnx.gui.phase10_install import _format_mbr, _parse_mbr
+                from stepnx.gui.typed_inputs import ResizeSplitDialog
+
                 block = controller.snapshot.split(scope.split_id).block(scope.block_id)
-                beat_split = int(block.beat_split)
-                beat_measure = int(block.beat_measure)
-                current = _format_mbr(
-                    block.row_count, beat_split, beat_measure,
+                dialog = ResizeSplitDialog(
+                    block.row_count,
+                    beat_split=int(block.beat_split),
+                    beat_measure=int(block.beat_measure),
+                    parent=self,
                 )
-                value, accepted = QInputDialog.getText(
-                    self, "Resize Split",
-                    f"Measure | Beat | Row (Beat Split {beat_split}, Measure {beat_measure}):",
-                    text=current,
-                )
-                if not accepted:
+                if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
-                requested_rows = _parse_mbr(value, beat_split, beat_measure)
+                requested_rows = dialog.requested_rows()
             plan = plan_structure_action(
                 doc, action, scope.split_id, scope.block_id,
                 row_index=row_index, requested_rows=requested_rows,

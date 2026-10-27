@@ -90,10 +90,29 @@ class MetadataCollectionDialog(QDialog):
     def drafts(self) -> tuple[MetadataDraft, ...]:
         return tuple(self._drafts)
 
+    def _patched_raw_scope(self) -> bool:
+        return self.profile == "nxa-step5-patched" and self.scope in (
+            MetadataScope.HEADER, MetadataScope.DIVISION
+        )
+
+    def _ask_raw_u32(self, title: str, current: int) -> int | None:
+        from stepnx.gui.typed_inputs import RawU32Dialog
+        dialog = RawU32Dialog(title, current, self)
+        return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+    def _ask_unknown_patched_value(self, current: int) -> int | None:
+        if self.scope is MetadataScope.HEADER:
+            return self._ask_raw_u32("Raw Header value", current)
+        from stepnx.gui.typed_inputs import PatchedUnknownDivisionDialog
+        dialog = PatchedUnknownDivisionDialog(current, self)
+        return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
     def _definition(self, draft: MetadataDraft):
         return metadata_definition(self.profile, self.scope, draft.meta_id)
 
     def _is_editable(self, draft: MetadataDraft) -> bool:
+        if self._patched_raw_scope():
+            return True
         definition = self._definition(draft)
         return bool(
             definition
@@ -153,21 +172,34 @@ class MetadataCollectionDialog(QDialog):
     def _add(self) -> None:
         definitions = self._candidate_definitions()
         labels = [f"{item.meta_id}: {item.label}" for item in definitions]
-        if not labels:
+        if not labels and not self._patched_raw_scope():
             QMessageBox.information(
                 self, "No fields", "This profile exposes no authorable fields here."
             )
             return
+        if self._patched_raw_scope():
+            labels.append("Custom raw ID...")
         label, accepted = QInputDialog.getItem(
             self, "Add metadata", "Field:", labels, 0, False
         )
         if not accepted:
             return
-        definition = definitions[labels.index(label)]
-        value = self._ask_value(definition, 0)
+        if self._patched_raw_scope() and label == "Custom raw ID...":
+            meta_id = self._ask_raw_u32("Raw metadata ID", 0)
+            if meta_id is None:
+                return
+            definition = metadata_definition(self.profile, self.scope, meta_id)
+            value = (
+                self._ask_value(definition, 0)
+                if definition else self._ask_unknown_patched_value(0)
+            )
+        else:
+            definition = definitions[labels.index(label)]
+            meta_id = definition.meta_id
+            value = self._ask_value(definition, 0)
         if value is None:
             return
-        self._drafts.append(MetadataDraft(definition.meta_id, value))
+        self._drafts.append(MetadataDraft(meta_id, value))
         self._refresh(len(self._drafts) - 1)
 
     def _edit(self, *args) -> None:
@@ -183,7 +215,11 @@ class MetadataCollectionDialog(QDialog):
                 "This entry is preserved but has no safe typed editor in the active profile.",
             )
             return
-        value = self._ask_value(definition, draft.value)
+        value = (
+            self._ask_unknown_patched_value(draft.value)
+            if definition is None and self._patched_raw_scope()
+            else self._ask_value(definition, draft.value)
+        )
         if value is None:
             return
         self._drafts[row] = MetadataDraft(draft.meta_id, value, draft.stable_id)
@@ -212,6 +248,15 @@ class MetadataCollectionDialog(QDialog):
         self._refresh(target)
 
     def _ask_value(self, definition, current: int) -> int | None:
+        if self._patched_raw_scope():
+            option, accepted = QInputDialog.getItem(
+                self, definition.label, "Input representation:",
+                ["Typed", "Raw uint32"], 0, False,
+            )
+            if not accepted:
+                return None
+            if option == "Raw uint32":
+                return self._ask_raw_u32(definition.label, current)
         if definition.kind is ValueKind.ENUM:
             labels = [f"{item.value}: {item.label}" for item in definition.choices]
             current_index = next(
@@ -220,44 +265,50 @@ class MetadataCollectionDialog(QDialog):
                     for index, item in enumerate(definition.choices)
                     if item.value == current
                 ),
-                0,
+                None,
             )
+            if current_index is None:
+                # Unknown enum values are legitimate data. Never replace one
+                # implicitly with the first known choice.
+                return self._ask_raw_u32(definition.label, current)
             label, accepted = QInputDialog.getItem(
                 self, definition.label, "Value:", labels, current_index, False
             )
             return definition.choices[labels.index(label)].value if accepted else None
-        if definition.kind is ValueKind.PACKED_U16_RANGE:
-            minimum, maximum = unpack_u16_range(current)
-            text, accepted = QInputDialog.getText(
-                self,
-                definition.label,
-                "Minimum..maximum (unsigned 16-bit):",
-                text=f"{minimum}..{maximum}",
-            )
-            if not accepted:
-                return None
+        if definition.kind in (ValueKind.PACKED_U16_RANGE, ValueKind.PACKED_DM120):
+            from stepnx.gui.typed_inputs import PackedMetadataDialog
+
+            if definition.kind is ValueKind.PACKED_U16_RANGE:
+                first, second = unpack_u16_range(current)
+                kind = "u16_range"
+            else:
+                first, second = unpack_dm120(current)
+                kind = "dm120"
             try:
-                left, right = text.split("..", 1)
-                return pack_u16_range(int(left, 0), int(right, 0))
-            except (ValueError, TypeError) as exc:
-                QMessageBox.critical(self, "Invalid range", str(exc))
+                dialog = PackedMetadataDialog(
+                    definition.label, kind=kind, first=first, second=second, parent=self
+                )
+            except ValueError:
+                QMessageBox.warning(
+                    self,
+                    "Unsupported raw value",
+                    "The stored value is outside the supported typed range. "
+                    "It will be preserved unchanged.",
+                )
                 return None
-        if definition.kind is ValueKind.PACKED_DM120:
-            mode, weight = unpack_dm120(current)
-            text, accepted = QInputDialog.getText(
-                self,
-                definition.label,
-                "Mode/weight (mode 0 or 1; signed weight):",
-                text=f"{mode}/{weight}",
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            first, second = dialog.values()
+            return (
+                pack_u16_range(first, second)
+                if kind == "u16_range"
+                else pack_dm120(first, second)
             )
-            if not accepted:
-                return None
-            try:
-                left, right = text.split("/", 1)
-                return pack_dm120(int(left, 0), int(right, 0))
-            except (ValueError, TypeError) as exc:
-                QMessageBox.critical(self, "Invalid DM120 value", str(exc))
-                return None
+        if definition.kind is ValueKind.BITMASK and definition.bits:
+            from stepnx.gui.typed_inputs import BitmaskDialog
+
+            dialog = BitmaskDialog(definition.label, current, definition.bits, self)
+            return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
         if definition.kind is ValueKind.INT32:
             value = struct.unpack("<i", struct.pack("<I", current))[0]
             result, accepted = QInputDialog.getInt(
@@ -283,25 +334,17 @@ class MetadataCollectionDialog(QDialog):
             return (
                 struct.unpack("<I", struct.pack("<f", result))[0] if accepted else None
             )
-        prompt = "Unsigned value (decimal or 0x hexadecimal):"
-        if definition.kind is ValueKind.BITMASK and definition.bits:
-            prompt += "\n" + ", ".join(
-                f"0x{item.mask:X}={item.label}" for item in definition.bits
-            )
-        text, accepted = QInputDialog.getText(
-            self, definition.label, prompt, text=str(current)
+        from stepnx.gui.typed_inputs import RawU32Dialog
+
+        minimum = definition.minimum if definition.minimum is not None else 0
+        maximum = definition.maximum if definition.maximum is not None else 0xFFFFFFFF
+        if self._patched_raw_scope():
+            minimum, maximum = 0, 0xFFFFFFFF
+        # Existing out-of-range values are preserved and can still be edited
+        # without changing the engine profile's advertised input bounds.
+        if not minimum <= current <= maximum:
+            return self._ask_raw_u32(definition.label, current)
+        dialog = RawU32Dialog(
+            definition.label, current, self, minimum=minimum, maximum=maximum
         )
-        if not accepted:
-            return None
-        try:
-            value = int(text, 0)
-            if not 0 <= value <= 0xFFFFFFFF:
-                raise ValueError("value must fit unsigned 32-bit storage")
-            if definition.minimum is not None and value < definition.minimum:
-                raise ValueError(f"value must be at least {definition.minimum}")
-            if definition.maximum is not None and value > definition.maximum:
-                raise ValueError(f"value must be at most {definition.maximum}")
-            return value
-        except ValueError as exc:
-            QMessageBox.critical(self, "Invalid value", str(exc))
-            return None
+        return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None

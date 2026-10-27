@@ -843,16 +843,17 @@ def _phase10_context_action(
         elif action == "resize-split":
             beat_split = int(block.beat_split.value)
             beat_measure = int(block.beat_measure.value)
-            current_text = _format_mbr(len(block.rows), beat_split, beat_measure)
-            text, accepted = QInputDialog.getText(
-                self,
-                "Resize Split",
-                f"Measure|Beat|Row  (Beat Split {beat_split}, Measure {beat_measure}):",
-                text=current_text,
+            from stepnx.gui.typed_inputs import ResizeSplitDialog
+
+            dialog = ResizeSplitDialog(
+                len(block.rows),
+                beat_split=beat_split,
+                beat_measure=beat_measure,
+                parent=self,
             )
-            if not accepted:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
-            reference_rows = _parse_mbr(text, beat_split, beat_measure)
+            reference_rows = dialog.requested_rows()
             if reference_rows == len(block.rows):
                 return
             if reference_rows < len(block.rows):
