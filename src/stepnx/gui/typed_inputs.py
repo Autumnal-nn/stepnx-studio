@@ -348,3 +348,77 @@ class PatchedUnknownDivisionDialog(QDialog):
         if not 0 <= value <= 0xFFFFFFFF:
             raise ValueError("value must fit unsigned 32-bit storage")
         return value
+
+
+class BitmaskDialog(QDialog):
+    """Checkbox projection of known flags, preserving all unknown bits."""
+
+    def __init__(self, title: str, value: int, bits, parent=None):
+        super().__init__(parent)
+        if not 0 <= value <= 0xFFFFFFFF:
+            raise ValueError("value must fit unsigned 32-bit storage")
+        self.setWindowTitle(title)
+        self._initial = value
+        self._known_mask = 0
+        self._boxes = []
+        layout = QVBoxLayout(self)
+        for bit in bits:
+            mask = int(bit.mask)
+            if mask <= 0 or mask > 0xFFFFFFFF or mask & (mask - 1):
+                raise ValueError("flag masks must be single bits in uint32")
+            if self._known_mask & mask:
+                raise ValueError("duplicate flag mask")
+            self._known_mask |= mask
+            box = QCheckBox(f"0x{mask:08X}  {bit.label}", self)
+            box.setChecked(bool(value & mask))
+            self._boxes.append((mask, box))
+            layout.addWidget(box)
+        unknown = value & ~self._known_mask
+        layout.addWidget(QLabel(f"Unrecognized bits preserved: 0x{unknown:08X}", self))
+        self.raw_mode = QCheckBox("Edit entire raw value instead", self)
+        layout.addWidget(self.raw_mode)
+        self.raw_edit = QLineEdit(f"0x{value:08X}", self)
+        self.raw_edit.setEnabled(False)
+        layout.addWidget(self.raw_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        self._ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.raw_mode.toggled.connect(self._toggle_raw)
+        self.raw_edit.textChanged.connect(self._refresh_validity)
+
+    def _toggle_raw(self, enabled: bool) -> None:
+        for _, box in self._boxes:
+            box.setEnabled(not enabled)
+        self.raw_edit.setEnabled(enabled)
+        self._refresh_validity()
+
+    def _refresh_validity(self, *_args) -> None:
+        if not self.raw_mode.isChecked():
+            self._ok.setEnabled(True)
+            return
+        try:
+            self.value()
+        except ValueError:
+            self._ok.setEnabled(False)
+        else:
+            self._ok.setEnabled(True)
+
+    def value(self) -> int:
+        if self.raw_mode.isChecked():
+            raw = self.raw_edit.text().strip()
+            if not raw:
+                raise ValueError("empty value")
+            result = int(raw, 0) if raw.lower().startswith(("0x", "0b", "0o")) else int(raw, 10)
+            if not 0 <= result <= 0xFFFFFFFF:
+                raise ValueError("raw flag value must fit unsigned 32-bit storage")
+            return result
+        value = self._initial & ~self._known_mask
+        for mask, box in self._boxes:
+            if box.isChecked():
+                value |= mask
+        return value
